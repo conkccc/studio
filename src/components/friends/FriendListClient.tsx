@@ -1,7 +1,8 @@
+
 'use client';
 
 import type { Friend } from '@/lib/types';
-import React, { useState, useTransition, Fragment } from 'react';
+import React, { useState, useTransition, Fragment, useEffect } from 'react'; // Added useEffect
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useToast } from '@/hooks/use-toast';
@@ -30,6 +31,11 @@ export function FriendListClient({ initialFriends }: FriendListClientProps) {
   const [editForm, setEditForm] = useState<{ nickname: string; name?: string }>({ nickname: '', name: '' });
   const { toast } = useToast();
   const [isPending, startTransition] = useTransition();
+
+  // Add useEffect to update friends state when initialFriends prop changes
+  useEffect(() => {
+    setFriends(initialFriends);
+  }, [initialFriends]);
 
   const handleEdit = (friend: Friend) => {
     setEditingFriendId(friend.id);
