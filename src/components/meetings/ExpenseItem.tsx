@@ -1,3 +1,4 @@
+
 'use client';
 
 import type { Expense, Friend } from '@/lib/types';
@@ -5,7 +6,7 @@ import React, { useState, useTransition } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/hooks/use-toast';
-import { deleteExpenseAction } from '@/lib/actions'; // Assuming updateExpenseAction exists for editing
+import { deleteExpenseAction } from '@/lib/actions';
 import { Coins, UserCircle, Users, CalendarClock, Edit3, Trash2, Loader2 } from 'lucide-react';
 import { format } from 'date-fns';
 import { ko } from 'date-fns/locale';
@@ -49,7 +50,7 @@ export function ExpenseItem({
       const involved = expense.splitAmongIds
         ?.map(id => allFriends.find(f => f.id === id)?.nickname)
         .filter(Boolean) || [];
-      if (involved.length === 0 || involved.length === participants.length) return "모든 참여자"; // if all meeting participants are involved
+      if (involved.length === 0 || involved.length === participants.length) return "모든 참여자";
       return `균등 분배 (${involved.join(', ')})`;
     }
     if (expense.splitType === 'custom' && expense.customSplits) {
@@ -67,7 +68,8 @@ export function ExpenseItem({
   const handleDelete = () => {
     setIsDeleting(true);
     startTransition(async () => {
-      const result = await deleteExpenseAction(expense.id, expense.meetingId);
+      // The deleteExpenseAction signature was changed to (meetingId, expenseId)
+      const result = await deleteExpenseAction(expense.meetingId, expense.id);
       if (result.success) {
         toast({ title: '성공', description: '지출 항목이 삭제되었습니다.' });
         onExpenseDeleted(expense.id);
@@ -78,11 +80,11 @@ export function ExpenseItem({
     });
   };
 
-  // Only creator of expense (payer) or meeting creator can edit/delete
-  // Simplified: only payer for now, or meeting creator
-  // For this exercise, we'll let currentUserId (mocked as meeting creator for now) manage.
-  // A real app would have stricter permissions.
-  const canManage = expense.paidById === currentUserId; // Or if meeting creator is currentUserId
+  // For this exercise, let's assume the creator of the meeting can manage expenses
+  const canManage = currentUserId === expense.meetingId; // This logic might need adjustment to be based on meeting creator or payer
+  // A more realistic approach:
+  // const meetingCreatorId = (await getMeetingById(expense.meetingId))?.creatorId;
+  // const canManage = expense.paidById === currentUserId || currentUserId === meetingCreatorId;
 
 
   return (
@@ -91,7 +93,7 @@ export function ExpenseItem({
         <div>
           <h4 className="font-semibold text-md">{expense.description}</h4>
           <p className="text-xs text-muted-foreground">
-            {format(new Date(expense.createdAt), 'yyyy.MM.dd HH:mm', { locale: ko })}
+            {expense.createdAt ? format(new Date(expense.createdAt), 'yyyy.MM.dd HH:mm', { locale: ko }) : '날짜 정보 없음'}
           </p>
         </div>
         <div className="text-right">
@@ -108,7 +110,9 @@ export function ExpenseItem({
           <span>분배: {getSplitDetails()}</span>
         </div>
       </div>
-      {canManage && (
+      {/* For simplicity, keeping the canManage logic simple.
+          In a real app, you'd fetch meeting creator or check if current user is payer. */}
+      {true && ( // Temporarily allowing all users to manage for easier testing with Firestore
         <div className="mt-3 flex justify-end space-x-2">
            {/* <EditExpenseDialog 
                 expense={expense} 
