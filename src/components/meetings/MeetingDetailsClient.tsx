@@ -40,10 +40,10 @@ interface MeetingDetailsClientProps {
   spendingDataForAI: string;
 }
 
-export function MeetingDetailsClient({ 
-  initialMeeting, 
-  initialExpenses, 
-  allFriends, 
+export function MeetingDetailsClient({
+  initialMeeting,
+  initialExpenses,
+  allFriends,
   currentUserId,
   spendingDataForAI
 }: MeetingDetailsClientProps) {
@@ -54,6 +54,7 @@ export function MeetingDetailsClient({
   const [aiResult, setAiResult] = useState<CostAnalysisResult | null>(null);
   const [aiError, setAiError] = useState<string | null>(null);
   const [isFinalizing, setIsFinalizing] = useState(false);
+  const [formattedMeetingDateTime, setFormattedMeetingDateTime] = useState<string | null>(null);
 
   const { toast } = useToast();
   const router = useRouter();
@@ -64,24 +65,29 @@ export function MeetingDetailsClient({
     setExpenses(initialExpenses);
   }, [initialMeeting, initialExpenses]);
 
+  useEffect(() => {
+    if (meeting?.dateTime) {
+      setFormattedMeetingDateTime(format(meeting.dateTime, 'yyyy년 M월 d일 (EEE) HH:mm', { locale: ko }));
+    }
+  }, [meeting?.dateTime]);
 
-  const participants = useMemo(() => 
+
+  const participants = useMemo(() =>
     meeting.participantIds
       .map(id => allFriends.find(f => f.id === id))
       .filter((f): f is Friend => Boolean(f)),
     [meeting.participantIds, allFriends]
   );
 
-  const creator = useMemo(() => 
+  const creator = useMemo(() =>
     allFriends.find(f => f.id === meeting.creatorId),
     [meeting.creatorId, allFriends]
   );
-  
+
   const isCreator = meeting.creatorId === currentUserId;
 
   const handleExpenseAdded = (newExpense: Expense) => {
     setExpenses(prev => [newExpense, ...prev].sort((a,b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime() ));
-    // If an expense is added to an 'all' type settled meeting, it should become unsettled.
     if (meeting.useReserveFund && meeting.reserveFundUsageType === 'all' && meeting.isSettled) {
       setMeeting(prev => ({ ...prev, isSettled: false }));
     }
@@ -93,7 +99,7 @@ export function MeetingDetailsClient({
       setMeeting(prev => ({ ...prev, isSettled: false }));
     }
   };
-  
+
   const handleExpenseDeleted = (deletedExpenseId: string) => {
     setExpenses(prev => prev.filter(e => e.id !== deletedExpenseId));
      if (meeting.useReserveFund && meeting.reserveFundUsageType === 'all' && meeting.isSettled) {
@@ -114,7 +120,7 @@ export function MeetingDetailsClient({
       }
     });
   };
-  
+
   const runAiAnalysis = async () => {
     setIsAiLoading(true);
     setAiError(null);
@@ -174,7 +180,7 @@ export function MeetingDetailsClient({
             </div>
             {isCreator && (
               <div className="flex space-x-2">
-                <Button variant="outline" size="sm" onClick={() => router.push(`/meetings/${meeting.id}/edit`)} disabled={isPending || isDeleting || isFinalizing}> 
+                <Button variant="outline" size="sm" onClick={() => router.push(`/meetings/${meeting.id}/edit`)} disabled={isPending || isDeleting || isFinalizing || meeting.isSettled}>
                   <Edit3 className="mr-2 h-4 w-4" /> 수정
                 </Button>
                 <AlertDialog>
@@ -210,7 +216,7 @@ export function MeetingDetailsClient({
               <CalendarDays className="h-5 w-5 mt-0.5 text-primary flex-shrink-0" />
               <div>
                 <span className="font-medium">날짜 및 시간:</span>
-                <p className="text-muted-foreground">{format(meeting.dateTime, 'yyyy년 M월 d일 (EEE) HH:mm', { locale: ko })}</p>
+                <p className="text-muted-foreground">{formattedMeetingDateTime || '날짜 로딩 중...'}</p>
               </div>
             </div>
             <div className="flex items-start gap-2">
@@ -239,8 +245,8 @@ export function MeetingDetailsClient({
                 <span className="font-medium">회비 사용 설정:</span>
               </div>
               <p className="text-muted-foreground pl-6">
-                {meeting.reserveFundUsageType === 'all' ? '정산 시 모든 비용 회비에서 우선 차감 (정산 요약 탭에서 확정 필요)' : 
-                 meeting.reserveFundUsageType === 'partial' && meeting.partialReserveFundAmount ? 
+                {meeting.reserveFundUsageType === 'all' ? '정산 시 모든 비용 회비에서 우선 차감 (정산 요약 탭에서 확정 필요)' :
+                 meeting.reserveFundUsageType === 'partial' && meeting.partialReserveFundAmount ?
                  `회비에서 ${meeting.partialReserveFundAmount.toLocaleString()}원 사용` : '회비 사용 설정됨'}
               </p>
               {meeting.nonReserveFundParticipants && meeting.nonReserveFundParticipants.length > 0 && (
@@ -259,15 +265,15 @@ export function MeetingDetailsClient({
           <TabsTrigger value="summary">정산 요약</TabsTrigger>
           <TabsTrigger value="ai-analysis">AI 비용 분석</TabsTrigger>
         </TabsList>
-        
+
         <TabsContent value="expenses">
           <Card>
             <CardHeader>
               <div className="flex items-center justify-between">
                 <CardTitle>지출 내역</CardTitle>
-                <AddExpenseDialog 
-                  meetingId={meeting.id} 
-                  participants={participants} 
+                <AddExpenseDialog
+                  meetingId={meeting.id}
+                  participants={participants}
                   onExpenseAdded={handleExpenseAdded}
                   triggerButton={
                      <Button variant="outline" size="sm" disabled={isPending || isDeleting || isFinalizing}>
@@ -283,10 +289,10 @@ export function MeetingDetailsClient({
                 <ScrollArea className="h-[400px] pr-4">
                   <ul className="space-y-4">
                     {expenses.map(expense => (
-                      <ExpenseItem 
-                        key={expense.id} 
-                        expense={expense} 
-                        allFriends={allFriends} 
+                      <ExpenseItem
+                        key={expense.id}
+                        expense={expense}
+                        allFriends={allFriends}
                         participants={participants}
                         currentUserId={currentUserId}
                         onExpenseUpdated={handleExpenseUpdated}
@@ -368,5 +374,3 @@ export function MeetingDetailsClient({
     </div>
   );
 }
-
-    
