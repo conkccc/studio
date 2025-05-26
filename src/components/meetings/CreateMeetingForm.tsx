@@ -11,7 +11,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { CalendarIcon, Check, ChevronsUpDown, Loader2, MapPinIcon } from 'lucide-react';
+import { CalendarIcon, Check, ChevronsUpDown, Loader2, MapPinIcon, Search } from 'lucide-react';
 import { Calendar } from '@/components/ui/calendar';
 import { cn } from '@/lib/utils';
 import { format } from 'date-fns';
@@ -48,7 +48,7 @@ const meetingSchema = meetingSchemaBase.refine(data => {
   message: '부분 사용 시 회비 사용 금액을 0보다 크게 입력해야 합니다.',
   path: ['partialReserveFundAmount'],
 }).refine(data => {
-  if (data.endTime && data.dateTime > data.endTime) {
+  if (data.endTime && data.dateTime && data.dateTime > data.endTime) {
     return false;
   }
   return true;
@@ -163,6 +163,13 @@ export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, 
   };
 
   const selectedParticipants = friends.filter(friend => watchParticipantIds?.includes(friend.id));
+
+  const handleAddressSearch = () => {
+    toast({
+      title: "주소 검색",
+      description: "주소 검색 기능이 여기에 연동될 예정입니다.",
+    });
+  };
 
   return (
     <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
@@ -287,9 +294,14 @@ export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, 
 
       <div>
         <Label htmlFor="locationName">장소 <span className="text-destructive">*</span></Label>
-        <div className="relative">
-          <Input id="locationName" {...form.register('locationName')} disabled={isPending} className="pl-8" />
-          <MapPinIcon className="absolute left-2 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+        <div className="flex items-center gap-2">
+          <div className="relative flex-grow">
+            <Input id="locationName" {...form.register('locationName')} disabled={isPending} className="pl-8" />
+            <MapPinIcon className="absolute left-2 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          </div>
+          <Button type="button" variant="outline" size="icon" onClick={handleAddressSearch} disabled={isPending} aria-label="주소 검색">
+            <Search className="h-4 w-4" />
+          </Button>
         </div>
         {form.formState.errors.locationName && <p className="text-sm text-destructive mt-1">{form.formState.errors.locationName.message}</p>}
       </div>
@@ -483,5 +495,6 @@ export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, 
     </form>
   );
 }
+    
 
     
