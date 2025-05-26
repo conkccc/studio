@@ -1,8 +1,8 @@
+
 import { getMeetingById, getFriends } from '@/lib/data-store';
 import { notFound } from 'next/navigation';
 import { CreateMeetingForm } from '@/components/meetings/CreateMeetingForm';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
-import { Separator } from '@/components/ui/separator';
 
 interface EditMeetingPageProps {
   params: {
@@ -11,7 +11,15 @@ interface EditMeetingPageProps {
 }
 
 export default async function EditMeetingPage({ params }: EditMeetingPageProps) {
-  const meeting = await getMeetingById(params.meetingId);
+  const { meetingId } = params; // Explicitly destructure meetingId
+
+  // meetingId가 유효한 문자열인지 기본적인 확인을 합니다.
+  // Next.js 라우팅은 보통 이 부분을 보장하지만, 추가적인 방어 코드입니다.
+  if (typeof meetingId !== 'string' || !meetingId.trim()) {
+    notFound();
+  }
+
+  const meeting = await getMeetingById(meetingId);
   const friends = await getFriends();
 
   // For simplicity, assume current user is the first friend or a mock ID.
@@ -19,7 +27,9 @@ export default async function EditMeetingPage({ params }: EditMeetingPageProps) 
   const currentUserId = friends.length > 0 ? friends[0].id : 'mock-user-id';
 
   if (!meeting) {
-    notFound(); // Use Next.js notFound for 404
+    // 이 부분이 404 에러의 가장 일반적인 원인입니다:
+    // 제공된 meetingId로 데이터 저장소에서 모임을 찾을 수 없습니다.
+    notFound();
   }
 
   return (
@@ -30,12 +40,11 @@ export default async function EditMeetingPage({ params }: EditMeetingPageProps) 
           <CardDescription>모임의 세부 정보를 수정하세요.</CardDescription>
         </CardHeader>
         <CardContent>
-           {/* Assuming MeetingForm is a unified component for create/edit */}
            <CreateMeetingForm
             initialData={meeting}
             friends={friends}
             currentUserId={currentUserId}
-            isEditMode={true} // <-- isEditMode prop 추가
+            isEditMode={true}
           />
         </CardContent>
       </Card>
