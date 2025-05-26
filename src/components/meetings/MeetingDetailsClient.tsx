@@ -1,3 +1,4 @@
+
 'use client';
 
 import type { Meeting, Expense, Friend, CostAnalysisResult } from '@/lib/types';
@@ -128,10 +129,9 @@ export function MeetingDetailsClient({
             </div>
             {isCreator && (
               <div className="flex space-x-2">
-                {/* TODO: Edit Meeting Functionality */}
-                {/* <Button variant="outline" size="sm" disabled> 
+                <Button variant="outline" size="sm" onClick={() => router.push(`/meetings/${meeting.id}/edit`)} disabled={isPending || isDeleting}> 
                   <Edit3 className="mr-2 h-4 w-4" /> 수정
-                </Button> */}
+                </Button>
                 <AlertDialog>
                   <AlertDialogTrigger asChild>
                     <Button variant="destructive" size="sm" disabled={isDeleting || isPending}>
@@ -165,7 +165,7 @@ export function MeetingDetailsClient({
               <CalendarDays className="h-5 w-5 mt-0.5 text-primary flex-shrink-0" />
               <div>
                 <span className="font-medium">날짜 및 시간:</span>
-                <p className="text-muted-foreground">{format(new Date(meeting.dateTime), 'yyyy년 M월 d일 (EEE) HH:mm', { locale: ko })}</p>
+                <p className="text-muted-foreground">{format(meeting.dateTime, 'yyyy년 M월 d일 (EEE) HH:mm', { locale: ko })}</p>
               </div>
             </div>
             <div className="flex items-start gap-2">
@@ -187,6 +187,24 @@ export function MeetingDetailsClient({
                 <p className="text-muted-foreground">{participants.map(p => p.nickname).join(', ')}</p>
             </div>
           </div>
+          {meeting.useReserveFund && (
+            <div className="p-3 bg-secondary/30 rounded-md border border-primary/30 text-sm space-y-1">
+              <div className="flex items-center gap-2">
+                <PiggyBank className="h-4 w-4 text-primary" />
+                <span className="font-medium">회비 사용 설정:</span>
+              </div>
+              <p className="text-muted-foreground pl-6">
+                {meeting.reserveFundUsageType === 'all' ? '정산 시 모든 비용 회비에서 우선 차감' : 
+                 meeting.reserveFundUsageType === 'partial' && meeting.partialReserveFundAmount ? 
+                 `회비에서 ${meeting.partialReserveFundAmount.toLocaleString()}원 사용` : '회비 사용 설정됨 (전체 또는 특정 금액)'}
+              </p>
+              {meeting.nonReserveFundParticipants && meeting.nonReserveFundParticipants.length > 0 && (
+                <p className="text-muted-foreground pl-6 text-xs">
+                  (제외: {meeting.nonReserveFundParticipants.map(id => allFriends.find(f => f.id === id)?.nickname || '알 수 없음').join(', ')})
+                </p>
+              )}
+            </div>
+          )}
         </CardContent>
       </Card>
 
@@ -240,7 +258,7 @@ export function MeetingDetailsClient({
         </TabsContent>
 
         <TabsContent value="summary">
-          <PaymentSummary expenses={expenses} participants={participants} allFriends={allFriends} />
+          <PaymentSummary meeting={meeting} expenses={expenses} participants={participants} allFriends={allFriends} />
         </TabsContent>
 
         <TabsContent value="ai-analysis">
@@ -282,3 +300,4 @@ export function MeetingDetailsClient({
     </div>
   );
 }
+
