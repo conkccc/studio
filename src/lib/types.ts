@@ -1,3 +1,4 @@
+
 export type Friend = {
   id: string;
   nickname: string;
@@ -36,9 +37,9 @@ export type Meeting = {
 
   useReserveFund: boolean;
   reserveFundUsageType: 'all' | 'partial';
-  partialReserveFundAmount?: number; // Optional, used if reserveFundUsageType is 'partial'
+  partialReserveFundAmount?: number; // Used if reserveFundUsageType is 'partial'
   nonReserveFundParticipants: string[]; // Friend IDs who DO NOT benefit from reserve fund
-  // associatedReserveFundTransactionId?: string; // Optional: to link to the specific fund transaction
+  isSettled?: boolean; // True if the meeting's fund usage (especially for 'all' type) has been finalized and recorded
 };
 
 export type ReserveFundTransaction = {

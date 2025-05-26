@@ -1,4 +1,6 @@
+
 import type { Friend, Meeting, Expense, ReserveFundTransaction } from './types';
+import { calculateActualFundUsageForAllType } from './settlement-utils'; // Assuming this utility will be created
 
 // In-memory store
 let friends: Friend[] = [
@@ -20,6 +22,7 @@ let meetings: Meeting[] = [
     reserveFundUsageType: 'partial',
     partialReserveFundAmount: 10000,
     nonReserveFundParticipants: [],
+    isSettled: true, // Assuming m1 was settled for partial usage
   },
   {
     id: 'm2',
@@ -30,8 +33,9 @@ let meetings: Meeting[] = [
     participantIds: ['1', '2', '3'],
     createdAt: new Date('2023-11-18T10:00:00'),
     useReserveFund: false,
-    reserveFundUsageType: 'all', // Default, not actively used if useReserveFund is false
+    reserveFundUsageType: 'all',
     nonReserveFundParticipants: [],
+    isSettled: false,
   },
 ];
 
@@ -112,7 +116,6 @@ export const deleteFriend = async (id: string): Promise<boolean> => {
   expenses.forEach(expense => {
     if (expense.paidById === id) {
       // For simplicity, if a payer is deleted, the expense remains associated with their ID.
-      // A real app might require re-assigning the payer or other handling.
     }
     expense.splitAmongIds = expense.splitAmongIds?.filter(sId => sId !== id);
     expense.customSplits = expense.customSplits?.filter(cs => cs.friendId !== id);
@@ -135,17 +138,25 @@ export const addMeeting = async (meetingData: Omit<Meeting, 'id' | 'createdAt'>)
     ...meetingData,
     id: newMeetingId,
     createdAt: new Date(),
+    isSettled: false, // Initialize isSettled
   };
   meetings.push(newMeeting);
 
+  // For 'partial' usage, create transaction immediately
   if (newMeeting.useReserveFund && newMeeting.reserveFundUsageType === 'partial' && (newMeeting.partialReserveFundAmount || 0) > 0) {
-    addReserveFundTransaction({
-      type: 'meeting_contribution',
-      amount: -(newMeeting.partialReserveFundAmount as number),
-      description: `모임 (${newMeeting.name}) 회비 사용`,
-      date: newMeeting.dateTime, // Use meeting date for the transaction
-      meetingId: newMeetingId,
-    });
+    // Ensure no duplicate transaction for this partial amount
+    const existingPartialTx = reserveFundTransactions.find(
+      tx => tx.meetingId === newMeetingId && tx.type === 'meeting_contribution' && tx.amount === -(newMeeting.partialReserveFundAmount as number)
+    );
+    if (!existingPartialTx) {
+      addReserveFundTransaction({
+        type: 'meeting_contribution',
+        amount: -(newMeeting.partialReserveFundAmount as number),
+        description: `모임 (${newMeeting.name}) 회비 부분 사용`,
+        date: newMeeting.dateTime,
+        meetingId: newMeetingId,
+      });
+    }
   }
   return newMeeting;
 };
@@ -154,42 +165,59 @@ export const updateMeeting = async (id: string, updates: Partial<Meeting>): Prom
   const meetingIndex = meetings.findIndex(m => m.id === id);
   if (meetingIndex === -1) return null;
 
-  const originalMeeting = meetings[meetingIndex];
-  const updatedMeeting = { ...originalMeeting, ...updates };
-  meetings[meetingIndex] = updatedMeeting;
+  const originalMeeting = { ...meetings[meetingIndex] }; // Keep a copy for comparison
+  const updatedMeetingData = { ...originalMeeting, ...updates };
+  
+  // If isSettled is being set to true, this should ideally be done via finalizeMeetingSettlementAction
+  // to ensure 'all' type transactions are correctly handled.
+  // For now, this update will just update the meeting fields.
+  // Special handling for 'partial' fund usage changes:
+  if (
+    (originalMeeting.useReserveFund && originalMeeting.reserveFundUsageType === 'partial' && originalMeeting.partialReserveFundAmount !== updatedMeetingData.partialReserveFundAmount) ||
+    (originalMeeting.useReserveFund !== updatedMeetingData.useReserveFund && originalMeeting.reserveFundUsageType === 'partial') ||
+    (originalMeeting.reserveFundUsageType !== updatedMeetingData.reserveFundUsageType && originalMeeting.reserveFundUsageType === 'partial')
+  ) {
+    // Remove any existing 'partial' contribution transaction for this meeting
+    reserveFundTransactions = reserveFundTransactions.filter(
+      tx => !(tx.meetingId === id && tx.type === 'meeting_contribution' && tx.description.includes('부분 사용'))
+    );
 
-  // Find and remove any existing reserve fund transaction for this meeting
-  const existingTransactionIndex = reserveFundTransactions.findIndex(
-    (tx) => tx.meetingId === id && tx.type === 'meeting_contribution'
-  );
-  if (existingTransactionIndex !== -1) {
-    reserveFundTransactions.splice(existingTransactionIndex, 1);
+    // Add new 'partial' transaction if applicable
+    if (updatedMeetingData.useReserveFund && updatedMeetingData.reserveFundUsageType === 'partial' && (updatedMeetingData.partialReserveFundAmount || 0) > 0) {
+      addReserveFundTransaction({
+        type: 'meeting_contribution',
+        amount: -(updatedMeetingData.partialReserveFundAmount as number),
+        description: `모임 (${updatedMeetingData.name}) 회비 부분 사용 (수정)`,
+        date: updatedMeetingData.dateTime,
+        meetingId: id,
+      });
+    }
+  }
+  
+  // If the meeting was 'all' type and is now being marked as !isSettled (e.g. reopened),
+  // and a 'meeting_contribution' of 'all' type existed, it should be removed.
+  // This might be complex if an admin "reopens" a settled meeting.
+  // For now, `finalizeMeetingSettlementAction` will handle creating 'all' type transactions.
+  // If isSettled is changed to false for an 'all' type meeting, its 'all' transaction should be removed.
+  if (originalMeeting.isSettled && originalMeeting.reserveFundUsageType === 'all' && updatedMeetingData.isSettled === false) {
+      reserveFundTransactions = reserveFundTransactions.filter(
+          tx => !(tx.meetingId === id && tx.type === 'meeting_contribution' && tx.description.includes('전체 정산'))
+      );
   }
 
-  // Add new transaction if applicable
-  if (updatedMeeting.useReserveFund && updatedMeeting.reserveFundUsageType === 'partial' && (updatedMeeting.partialReserveFundAmount || 0) > 0) {
-    addReserveFundTransaction({
-      type: 'meeting_contribution',
-      amount: -(updatedMeeting.partialReserveFundAmount as number),
-      description: `모임 (${updatedMeeting.name}) 회비 사용 (수정)`,
-      date: updatedMeeting.dateTime,
-      meetingId: id,
-    });
-  }
-  return updatedMeeting;
+
+  meetings[meetingIndex] = { ...updatedMeetingData };
+  return meetings[meetingIndex];
 };
 
 export const deleteMeeting = async (id: string): Promise<boolean> => {
   const initialLength = meetings.length;
   meetings = meetings.filter(m => m.id !== id);
   expenses = expenses.filter(e => e.meetingId !== id);
-  // Remove any associated reserve fund transaction
-  const existingTransactionIndex = reserveFundTransactions.findIndex(
-    (tx) => tx.meetingId === id && tx.type === 'meeting_contribution'
+  // Remove ANY associated reserve fund contribution transaction for this meeting
+  reserveFundTransactions = reserveFundTransactions.filter(
+    (tx) => !(tx.meetingId === id && tx.type === 'meeting_contribution')
   );
-  if (existingTransactionIndex !== -1) {
-    reserveFundTransactions.splice(existingTransactionIndex, 1);
-  }
   return meetings.length < initialLength;
 };
 
@@ -198,7 +226,22 @@ export const getExpensesByMeetingId = async (meetingId: string): Promise<Expense
   return expenses.filter(e => e.meetingId === meetingId).sort((a,b) => b.createdAt.getTime() - a.createdAt.getTime());
 };
 
+export const getExpenseById = async (id: string): Promise<Expense | undefined> => {
+  return expenses.find(e => e.id === id);
+};
+
+
 export const addExpense = async (expenseData: Omit<Expense, 'id' | 'createdAt'>): Promise<Expense> => {
+  // When adding an expense, if the meeting was 'all' type and settled, it should become unsettled.
+  const meeting = await getMeetingById(expenseData.meetingId);
+  if (meeting && meeting.isSettled && meeting.reserveFundUsageType === 'all') {
+    await updateMeeting(meeting.id, { isSettled: false });
+    // Also remove the 'all' type fund transaction as it's no longer valid
+     reserveFundTransactions = reserveFundTransactions.filter(
+        tx => !(tx.meetingId === meeting.id && tx.type === 'meeting_contribution' && tx.description.includes('전체 정산'))
+    );
+  }
+
   const newExpense: Expense = { ...expenseData, id: String(Date.now()), createdAt: new Date() };
   expenses.push(newExpense);
   return newExpense;
@@ -207,13 +250,36 @@ export const addExpense = async (expenseData: Omit<Expense, 'id' | 'createdAt'>)
 export const updateExpense = async (id: string, updates: Partial<Expense>): Promise<Expense | null> => {
   const expenseIndex = expenses.findIndex(e => e.id === id);
   if (expenseIndex === -1) return null;
-  expenses[expenseIndex] = { ...expenses[expenseIndex], ...updates };
+  
+  const originalExpense = expenses[expenseIndex];
+  expenses[expenseIndex] = { ...originalExpense, ...updates };
+
+  // If an expense is updated, and the meeting was 'all' type and settled, it should become unsettled.
+  const meeting = await getMeetingById(expenses[expenseIndex].meetingId);
+  if (meeting && meeting.isSettled && meeting.reserveFundUsageType === 'all') {
+     await updateMeeting(meeting.id, { isSettled: false });
+     reserveFundTransactions = reserveFundTransactions.filter(
+        tx => !(tx.meetingId === meeting.id && tx.type === 'meeting_contribution' && tx.description.includes('전체 정산'))
+    );
+  }
   return expenses[expenseIndex];
 };
 
 export const deleteExpense = async (id: string): Promise<boolean> => {
+  const expense = await getExpenseById(id);
+  if (!expense) return false;
+
   const initialLength = expenses.length;
   expenses = expenses.filter(e => e.id !== id);
+
+  // If an expense is deleted, and the meeting was 'all' type and settled, it should become unsettled.
+  const meeting = await getMeetingById(expense.meetingId);
+  if (meeting && meeting.isSettled && meeting.reserveFundUsageType === 'all') {
+    await updateMeeting(meeting.id, { isSettled: false });
+    reserveFundTransactions = reserveFundTransactions.filter(
+        tx => !(tx.meetingId === meeting.id && tx.type === 'meeting_contribution' && tx.description.includes('전체 정산'))
+    );
+  }
   return expenses.length < initialLength;
 };
 
@@ -228,6 +294,26 @@ export const getReserveFundTransactions = async (): Promise<ReserveFundTransacti
 
 export const addReserveFundTransaction = async (transactionData: Omit<ReserveFundTransaction, 'id'>): Promise<ReserveFundTransaction> => {
   const newTransaction: ReserveFundTransaction = { ...transactionData, id: String(Date.now()) };
+  // Prevent duplicate meeting_contribution transactions for the same meeting if it's 'partial' or a specific manually added one.
+  // 'all' type transactions will be handled by finalizeMeetingSettlementAction.
+  if (transactionData.type === 'meeting_contribution' && transactionData.meetingId) {
+    const existingTx = reserveFundTransactions.find(
+      tx => tx.meetingId === transactionData.meetingId && 
+            tx.type === 'meeting_contribution' &&
+            // For partial, amounts would be specific. For 'all', descriptions would match.
+            // This simple check might need refinement if manual 'meeting_contribution' types are allowed outside of automation.
+            ( (tx.amount === transactionData.amount && transactionData.description.includes("부분 사용")) ||
+              (transactionData.description.includes("전체 정산") && tx.description.includes("전체 정산")) )
+    );
+    if (existingTx && !transactionData.description.includes("(수정)")) { // Allow if it's explicitly an update
+        // console.warn("Attempted to add a duplicate meeting_contribution transaction. Skipping.");
+        // return existingTx; // Or throw error, or update existing one. For now, skip if seems like a duplicate.
+        // For safety, allow if not an exact duplicate description to allow re-settlement if forced
+        if (existingTx.description === transactionData.description && existingTx.amount === transactionData.amount) {
+            return existingTx;
+        }
+    }
+  }
   reserveFundTransactions.push(newTransaction);
   return newTransaction;
 };
@@ -273,3 +359,13 @@ export const getAllSpendingDataForYear = async (year: number): Promise<string> =
   }
   return allSpendingDetails;
 };
+
+// Exporting calculateActualFundUsageForAllType to be used in actions.ts
+// This function needs to be defined, perhaps in a new settlement-utils.ts file or directly here if simple enough.
+// For now, let's assume it will be defined in actions.ts or a similar place where it's consumed.
+// export { calculateActualFundUsageForAllType };
+// To avoid circular dependencies or defining it here, the action will implement this logic.
+
+export const getMeetingExpenses = async (meetingId: string): Promise<Expense[]> => {
+    return expenses.filter(exp => exp.meetingId === meetingId);
+}
