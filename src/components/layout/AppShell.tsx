@@ -45,7 +45,7 @@ const navItems: NavItem[] = [
 
 export function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
-  const { isMobile, setOpen, setOpenMobile, toggleSidebar, open, state } = useSidebar();
+  const { isMobile, setOpen, setOpenMobile } = useSidebar();
 
   const handleClose = () => {
     if (isMobile) {
@@ -61,12 +61,13 @@ export function AppShell({ children }: { children: ReactNode }) {
         const isActive = item.matchExact ? pathname === item.href : pathname.startsWith(item.href);
         return (
           <SidebarMenuItem key={item.href}>
-            <Link href={item.href} passHref onClick={() => handleClose()}>
+            <Link href={item.href} passHref>
               <SidebarMenuButton
                 asChild={!isSheet}
                 isActive={isActive}
                 className="w-full"
                 tooltip={isMobile ? undefined : item.label}
+                onClick={() => handleClose()} // Moved onClick to SidebarMenuButton
               >
                 <span>
                   <item.icon aria-hidden="true" />
@@ -84,7 +85,7 @@ export function AppShell({ children }: { children: ReactNode }) {
     <div className={`flex min-h-screen w-full flex-col bg-muted/40 ${!isMobile ? 'sm:pl-[calc(var(--sidebar-width-icon)_+_1rem)] group-data-[state=expanded]/sidebar-wrapper:sm:pl-[calc(var(--sidebar-width)_+_1rem)]' : 'sm:pl-0'} transition-[padding-left] duration-300 ease-in-out`}>
         <Sidebar collapsible="icon" variant="sidebar" side="left" className="border-r group/sidebar">
           <SidebarHeader className="p-4">
-            <Link href="/" className="flex items-center gap-2 font-semibold group-data-[collapsible=icon]:justify-center">
+            <Link href="/" className="flex items-center gap-2 font-semibold group-data-[collapsible=icon]:justify-center" onClick={handleClose}>
               <Briefcase className="h-6 w-6 text-primary group-data-[collapsible=icon]:h-7 group-data-[collapsible=icon]:w-7" />
               <span className="group-data-[collapsible=icon]:hidden">N빵친구</span>
             </Link>
@@ -108,7 +109,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             </SidebarMenu>
           </SidebarFooter>
         </Sidebar>
- <header className="sticky top-0 z-30 flex h-14 items-center gap-4 border-b bg-background px-4 sm:static sm:h-auto sm:border-0 sm:bg-transparent sm:px-6 mb-4">
+       <header className="sticky top-0 z-30 flex h-14 items-center gap-4 border-b bg-background px-4 sm:static sm:h-auto sm:border-0 sm:bg-transparent sm:px-6 mb-4">
           {isMobile && (
             <Sheet>
               <SheetTrigger asChild>
