@@ -9,9 +9,9 @@ import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter }
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { format } from 'date-fns';
 import { ko } from 'date-fns/locale';
-import { deleteMeetingAction } from '@/lib/actions'; // Assuming updateMeetingAction exists
+import { deleteMeetingAction, finalizeMeetingSettlementAction } from '@/lib/actions';
 import { useToast } from '@/hooks/use-toast';
-import { CalendarDays, MapPin, Users, Edit3, Trash2, PlusCircle, Loader2, Sparkles, ExternalLink, PiggyBank } from 'lucide-react';
+import { CalendarDays, MapPin, Users, Edit3, Trash2, PlusCircle, Loader2, Sparkles, ExternalLink, PiggyBank, CheckCircle2, AlertCircle } from 'lucide-react';
 import { AddExpenseDialog } from './AddExpenseDialog';
 import { ExpenseItem } from './ExpenseItem';
 import { PaymentSummary } from './PaymentSummary';
@@ -30,6 +30,7 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import Image from 'next/image';
+import { Badge } from '@/components/ui/badge';
 
 interface MeetingDetailsClientProps {
   initialMeeting: Meeting;
@@ -52,10 +53,16 @@ export function MeetingDetailsClient({
   const [isAiLoading, setIsAiLoading] = useState(false);
   const [aiResult, setAiResult] = useState<CostAnalysisResult | null>(null);
   const [aiError, setAiError] = useState<string | null>(null);
+  const [isFinalizing, setIsFinalizing] = useState(false);
 
   const { toast } = useToast();
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
+
+  useEffect(() => {
+    setMeeting(initialMeeting);
+    setExpenses(initialExpenses);
+  }, [initialMeeting, initialExpenses]);
 
 
   const participants = useMemo(() => 
@@ -74,14 +81,24 @@ export function MeetingDetailsClient({
 
   const handleExpenseAdded = (newExpense: Expense) => {
     setExpenses(prev => [newExpense, ...prev].sort((a,b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime() ));
+    // If an expense is added to an 'all' type settled meeting, it should become unsettled.
+    if (meeting.useReserveFund && meeting.reserveFundUsageType === 'all' && meeting.isSettled) {
+      setMeeting(prev => ({ ...prev, isSettled: false }));
+    }
   };
 
   const handleExpenseUpdated = (updatedExpense: Expense) => {
     setExpenses(prev => prev.map(e => e.id === updatedExpense.id ? updatedExpense : e).sort((a,b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()));
+     if (meeting.useReserveFund && meeting.reserveFundUsageType === 'all' && meeting.isSettled) {
+      setMeeting(prev => ({ ...prev, isSettled: false }));
+    }
   };
   
   const handleExpenseDeleted = (deletedExpenseId: string) => {
     setExpenses(prev => prev.filter(e => e.id !== deletedExpenseId));
+     if (meeting.useReserveFund && meeting.reserveFundUsageType === 'all' && meeting.isSettled) {
+      setMeeting(prev => ({ ...prev, isSettled: false }));
+    }
   };
 
   const handleDeleteMeeting = async () => {
@@ -113,8 +130,24 @@ export function MeetingDetailsClient({
     }
   };
 
+  const handleFinalizeSettlement = () => {
+    setIsFinalizing(true);
+    startTransition(async () => {
+      const result = await finalizeMeetingSettlementAction(meeting.id);
+      if (result.success && result.meeting) {
+        setMeeting(result.meeting); // Update local meeting state with the settled one
+        toast({ title: '성공', description: '모임 정산이 확정되고 회비 사용 내역이 기록되었습니다.' });
+      } else {
+        toast({ title: '오류', description: result.error || '정산 확정에 실패했습니다.', variant: 'destructive' });
+      }
+      setIsFinalizing(false);
+    });
+  };
+
+
   const mapLink = `https://maps.google.com/?q=${encodeURIComponent(meeting.locationName)}`;
 
+  const canFinalizeSettlement = meeting.useReserveFund && meeting.reserveFundUsageType === 'all' && !meeting.isSettled && expenses.length > 0;
 
   return (
     <div className="space-y-6">
@@ -122,20 +155,32 @@ export function MeetingDetailsClient({
         <CardHeader className="bg-muted/30 p-6">
           <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
             <div>
-              <CardTitle className="text-3xl font-bold">{meeting.name}</CardTitle>
+              <div className="flex items-center gap-2">
+                <CardTitle className="text-3xl font-bold">{meeting.name}</CardTitle>
+                {meeting.isSettled && meeting.reserveFundUsageType === 'all' && (
+                  <Badge variant="default" className="bg-green-600 hover:bg-green-700">
+                    <CheckCircle2 className="h-4 w-4 mr-1.5" /> 정산 확정됨
+                  </Badge>
+                )}
+                 {meeting.useReserveFund && meeting.reserveFundUsageType === 'all' && !meeting.isSettled && expenses.length > 0 && (
+                  <Badge variant="outline" className="border-orange-500 text-orange-600">
+                    <AlertCircle className="h-4 w-4 mr-1.5" /> 정산 확정 필요
+                  </Badge>
+                )}
+              </div>
               <CardDescription className="text-base mt-1">
                 만든이: {creator?.nickname || '알 수 없음'}
               </CardDescription>
             </div>
             {isCreator && (
               <div className="flex space-x-2">
-                <Button variant="outline" size="sm" onClick={() => router.push(`/meetings/${meeting.id}/edit`)} disabled={isPending || isDeleting}> 
+                <Button variant="outline" size="sm" onClick={() => router.push(`/meetings/${meeting.id}/edit`)} disabled={isPending || isDeleting || isFinalizing}> 
                   <Edit3 className="mr-2 h-4 w-4" /> 수정
                 </Button>
                 <AlertDialog>
                   <AlertDialogTrigger asChild>
-                    <Button variant="destructive" size="sm" disabled={isDeleting || isPending}>
-                      {isDeleting || isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Trash2 className="mr-2 h-4 w-4" />}
+                    <Button variant="destructive" size="sm" disabled={isDeleting || isPending || isFinalizing}>
+                      {(isDeleting || isPending) ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Trash2 className="mr-2 h-4 w-4" />}
                        삭제
                     </Button>
                   </AlertDialogTrigger>
@@ -147,9 +192,9 @@ export function MeetingDetailsClient({
                       </AlertDialogDescription>
                     </AlertDialogHeader>
                     <AlertDialogFooter>
-                      <AlertDialogCancel disabled={isDeleting || isPending}>취소</AlertDialogCancel>
-                      <AlertDialogAction onClick={handleDeleteMeeting} disabled={isDeleting || isPending} className="bg-destructive hover:bg-destructive/90">
-                        {isDeleting || isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                      <AlertDialogCancel disabled={isDeleting || isPending || isFinalizing}>취소</AlertDialogCancel>
+                      <AlertDialogAction onClick={handleDeleteMeeting} disabled={isDeleting || isPending || isFinalizing} className="bg-destructive hover:bg-destructive/90">
+                        {(isDeleting || isPending) ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
                         삭제 확인
                       </AlertDialogAction>
                     </AlertDialogFooter>
@@ -194,13 +239,13 @@ export function MeetingDetailsClient({
                 <span className="font-medium">회비 사용 설정:</span>
               </div>
               <p className="text-muted-foreground pl-6">
-                {meeting.reserveFundUsageType === 'all' ? '정산 시 모든 비용 회비에서 우선 차감' : 
+                {meeting.reserveFundUsageType === 'all' ? '정산 시 모든 비용 회비에서 우선 차감 (정산 요약 탭에서 확정 필요)' : 
                  meeting.reserveFundUsageType === 'partial' && meeting.partialReserveFundAmount ? 
-                 `회비에서 ${meeting.partialReserveFundAmount.toLocaleString()}원 사용` : '회비 사용 설정됨 (전체 또는 특정 금액)'}
+                 `회비에서 ${meeting.partialReserveFundAmount.toLocaleString()}원 사용` : '회비 사용 설정됨'}
               </p>
               {meeting.nonReserveFundParticipants && meeting.nonReserveFundParticipants.length > 0 && (
                 <p className="text-muted-foreground pl-6 text-xs">
-                  (제외: {meeting.nonReserveFundParticipants.map(id => allFriends.find(f => f.id === id)?.nickname || '알 수 없음').join(', ')})
+                  (회비 사용 제외: {meeting.nonReserveFundParticipants.map(id => allFriends.find(f => f.id === id)?.nickname || '알 수 없음').join(', ')})
                 </p>
               )}
             </div>
@@ -225,7 +270,7 @@ export function MeetingDetailsClient({
                   participants={participants} 
                   onExpenseAdded={handleExpenseAdded}
                   triggerButton={
-                     <Button variant="outline" size="sm">
+                     <Button variant="outline" size="sm" disabled={isPending || isDeleting || isFinalizing}>
                         <PlusCircle className="mr-2 h-4 w-4" /> 새 지출 추가
                       </Button>
                   }
@@ -258,7 +303,30 @@ export function MeetingDetailsClient({
         </TabsContent>
 
         <TabsContent value="summary">
-          <PaymentSummary meeting={meeting} expenses={expenses} participants={participants} allFriends={allFriends} />
+          <Card>
+            <CardHeader>
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                <CardTitle>정산 요약</CardTitle>
+                {canFinalizeSettlement && (
+                  <Button onClick={handleFinalizeSettlement} disabled={isFinalizing || isPending || isDeleting || expenses.length === 0} size="sm">
+                    {isFinalizing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <CheckCircle2 className="mr-2 h-4 w-4" />}
+                    정산 확정 및 회비 사용 기록
+                  </Button>
+                )}
+              </div>
+              {meeting.useReserveFund && meeting.reserveFundUsageType === 'all' && meeting.isSettled && expenses.length > 0 && (
+                 <CardDescription className="text-green-600 flex items-center gap-1">
+                    <CheckCircle2 className="h-4 w-4"/> 이 모임의 '전체 회비 사용' 정산이 확정되어 회비 내역에 기록되었습니다.
+                 </CardDescription>
+              )}
+               {meeting.useReserveFund && meeting.reserveFundUsageType === 'all' && !meeting.isSettled && expenses.length === 0 && (
+                 <CardDescription className="text-muted-foreground flex items-center gap-1">
+                    <AlertCircle className="h-4 w-4"/> 지출 내역이 없어 회비 사용을 확정할 수 없습니다.
+                 </CardDescription>
+              )}
+            </CardHeader>
+            <PaymentSummary meeting={meeting} expenses={expenses} participants={participants} allFriends={allFriends} />
+          </Card>
         </TabsContent>
 
         <TabsContent value="ai-analysis">
@@ -272,7 +340,7 @@ export function MeetingDetailsClient({
                 <h3 className="font-semibold mb-2">분석할 지출 데이터:</h3>
                 <Textarea value={spendingDataForAI} readOnly rows={8} className="bg-muted/50 text-sm"/>
               </div>
-              <Button onClick={runAiAnalysis} disabled={isAiLoading || isPending}>
+              <Button onClick={runAiAnalysis} disabled={isAiLoading || isPending || isDeleting || isFinalizing}>
                 {isAiLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                 분석 실행
               </Button>
@@ -301,3 +369,4 @@ export function MeetingDetailsClient({
   );
 }
 
+    
