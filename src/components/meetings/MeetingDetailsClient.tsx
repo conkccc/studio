@@ -11,7 +11,7 @@ import { format } from 'date-fns';
 import { ko } from 'date-fns/locale';
 import { deleteMeetingAction } from '@/lib/actions'; // Assuming updateMeetingAction exists
 import { useToast } from '@/hooks/use-toast';
-import { CalendarDays, MapPin, Users, Edit3, Trash2, PlusCircle, Loader2, Sparkles, ExternalLink } from 'lucide-react';
+import { CalendarDays, MapPin, Users, Edit3, Trash2, PlusCircle, Loader2, Sparkles, ExternalLink, PiggyBank } from 'lucide-react';
 import { AddExpenseDialog } from './AddExpenseDialog';
 import { ExpenseItem } from './ExpenseItem';
 import { PaymentSummary } from './PaymentSummary';
