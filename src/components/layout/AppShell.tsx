@@ -1,4 +1,4 @@
-// src/components/layout/AppShell.tsx
+
 "use client";
 
 import type { ReactNode } from 'react';
@@ -23,8 +23,6 @@ import {
   SidebarMenuItem,
   SidebarMenuButton,
   SidebarFooter,
-  // SidebarTrigger, // Not used directly in this file, but available from sidebar export
-  // SidebarInset, // Not used directly
   useSidebar,
 } from '@/components/ui/sidebar';
 import { Button } from '@/components/ui/button';
@@ -47,15 +45,12 @@ const navItems: NavItem[] = [
 
 export function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
-  // Destructure all needed properties from useSidebar
   const { isMobile, setOpen, setOpenMobile, toggleSidebar, open, state } = useSidebar();
 
-  // Define handleClose based on the context (mobile or desktop)
   const handleClose = () => {
     if (isMobile) {
       setOpenMobile(false);
     } else {
-      // For desktop, this will collapse the sidebar if it's 'icon' collapsible and open
       setOpen(false);
     }
   };
@@ -73,7 +68,6 @@ export function AppShell({ children }: { children: ReactNode }) {
                 className="w-full"
                 tooltip={isMobile ? undefined : item.label}
               >
-                {/* Ensure single child for Slot when asChild is true */}
                 <span>
                   <item.icon aria-hidden="true" />
                   <span>{item.label}</span>
@@ -89,7 +83,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   return (
     <div className="flex min-h-screen w-full flex-col bg-muted/40">
       {!isMobile && (
-        <Sidebar collapsible="icon" variant="default" side="left" className="border-r group/sidebar"> {/* Added group/sidebar for data state access */}
+        <Sidebar collapsible="icon" variant="sidebar" side="left" className="border-r group/sidebar">
           <SidebarHeader className="p-4">
             <Link href="/" className="flex items-center gap-2 font-semibold group-data-[collapsible=icon]:justify-center">
               <Briefcase className="h-6 w-6 text-primary group-data-[collapsible=icon]:h-7 group-data-[collapsible=icon]:w-7" />
@@ -104,9 +98,8 @@ export function AppShell({ children }: { children: ReactNode }) {
               <SidebarMenuItem>
                 <SidebarMenuButton
                   tooltip={isMobile ? undefined : "Settings"}
-                  onClick={handleClose} // Use defined handleClose
+                  onClick={handleClose}
                 >
-                  {/* Ensure single child wrapper even if asChild is false (default) for consistency */}
                   <span>
                     <Settings aria-hidden="true" />
                     <span>Settings</span>
@@ -133,7 +126,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                   <Link
                     href="/"
                     className="group flex h-16 items-center justify-center gap-2 border-b px-6 text-lg font-semibold text-primary"
-                    onClick={handleClose} // Close sheet on navigating from sheet header link
+                    onClick={handleClose}
                   >
                     <Briefcase className="h-7 w-7" />
                     <span>N빵친구</span>
