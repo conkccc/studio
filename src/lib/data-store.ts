@@ -1,382 +1,378 @@
 
-import { db } from './firebase';
-import {
-  collection,
-  doc,
-  addDoc,
-  getDoc,
-  getDocs,
-  updateDoc,
-  deleteDoc,
-  query,
-  where,
-  orderBy,
-  Timestamp,
-  serverTimestamp,
-  writeBatch,
-  QuerySnapshot,
-  DocumentSnapshot,
-} from 'firebase/firestore';
+// In-memory data store (for demonstration purposes)
 import type { Friend, Meeting, Expense, ReserveFundTransaction } from './types';
 
-// Helper function to convert Firestore document snapshot to typed data with ID
-const dataFromSnapshot = <T>(snapshot: DocumentSnapshot): T | undefined => {
-  if (!snapshot.exists()) {
-    return undefined;
-  }
-  const data = snapshot.data();
-  // Convert all Timestamp fields to Date objects
-  for (const key in data) {
-    if (data[key] instanceof Timestamp) {
-      data[key] = data[key].toDate();
-    }
-  }
-  return { ...data, id: snapshot.id } as T;
-};
+let friends: Friend[] = [
+  { id: '1', nickname: '철수', name: '김철수', createdAt: new Date('2024-01-01T10:00:00Z') },
+  { id: '2', nickname: '영희', name: '이영희', createdAt: new Date('2024-01-02T11:00:00Z') },
+  { id: '3', nickname: '민준', name: '박민준', createdAt: new Date('2024-01-03T12:00:00Z') },
+];
 
-// Helper function to convert Firestore query snapshot to array of typed data
-const arrayFromSnapshot = <T>(snapshot: QuerySnapshot): T[] => {
-  return snapshot.docs.map(doc => dataFromSnapshot<T>(doc as DocumentSnapshot)).filter(Boolean) as T[];
-};
+let nextNumericMeetingId = 4; // Start after existing m1, m2, m3
+let meetings: Meeting[] = [
+  {
+    id: 'm1', // Initial data includes 'm1'
+    name: '점심 식사 🍕',
+    dateTime: new Date('2025-05-28T14:00:00'), // Consistent time
+    endTime: new Date('2025-05-28T15:00:00'),
+    locationName: '강남역 맛집',
+    creatorId: '1',
+    participantIds: ['1', '2'],
+    createdAt: new Date('2024-07-15T10:00:00Z'),
+    useReserveFund: true,
+    reserveFundUsageType: 'partial',
+    partialReserveFundAmount: 10000,
+    nonReserveFundParticipants: [],
+    isSettled: true,
+  },
+  {
+    id: 'm2',
+    name: '저녁 모임 🍻',
+    dateTime: new Date('2025-06-10T19:00:00'), // Consistent time
+    locationName: '홍대 펍',
+    creatorId: '2',
+    participantIds: ['1', '2', '3'],
+    createdAt: new Date('2024-07-16T10:00:00Z'),
+    useReserveFund: true,
+    reserveFundUsageType: 'all',
+    nonReserveFundParticipants: ['3'],
+    isSettled: false,
+  },
+    {
+    id: 'm3',
+    name: '주말 스터디 📚',
+    dateTime: new Date('2025-07-20T14:00:00'), // Consistent time
+    endTime: new Date('2025-07-20T17:00:00'),
+    locationName: '스터디 카페 XYZ',
+    creatorId: '3',
+    participantIds: ['1', '3'],
+    createdAt: new Date('2024-07-18T09:00:00Z'),
+    useReserveFund: false,
+    reserveFundUsageType: 'all', // even if false, type might be set
+    nonReserveFundParticipants: [],
+    isSettled: false,
+  },
+];
 
+let expenses: Expense[] = [
+  {
+    id: 'e1',
+    meetingId: 'm1',
+    description: '피자',
+    totalAmount: 30000,
+    paidById: '1',
+    splitType: 'equally',
+    splitAmongIds: ['1', '2'],
+    createdAt: new Date('2024-07-15T12:35:00Z'),
+  },
+  {
+    id: 'e2',
+    meetingId: 'm1',
+    description: '음료',
+    totalAmount: 5000,
+    paidById: '2',
+    splitType: 'equally',
+    splitAmongIds: ['1', '2'],
+    createdAt: new Date('2024-07-15T12:36:00Z'),
+  },
+  {
+    id: 'e3',
+    meetingId: 'm2',
+    description: '맥주와 안주',
+    totalAmount: 75000,
+    paidById: '2',
+    splitType: 'custom',
+    customSplits: [
+      { friendId: '1', amount: 25000 },
+      { friendId: '2', amount: 25000 },
+      { friendId: '3', amount: 25000 }, // Even though '3' is nonReserveFundParticipant, they still pay their share
+    ],
+    createdAt: new Date('2024-07-16T19:30:00Z'),
+  },
+];
+
+let reserveFundTransactions: ReserveFundTransaction[] = [
+  { id: 'tx1', type: 'deposit', description: '초기 입금', amount: 100000, date: new Date('2024-01-01T09:00:00Z') },
+  { id: 'tx2', type: 'meeting_contribution', meetingId: 'm1', description: "모임 (점심 식사 🍕) 회비 부분 사용", amount: -10000, date: new Date('2025-05-28T14:00:00')},
+];
 
 // Friend functions
-export const getFriends = async (): Promise<Friend[]> => {
-  const friendsCol = collection(db, 'friends');
-  const snapshot = await getDocs(query(friendsCol, orderBy('nickname')));
-  return arrayFromSnapshot<Friend>(snapshot);
+export const getFriends = (): Friend[] => {
+  return [...friends].sort((a, b) => a.nickname.localeCompare(b.nickname));
 };
 
-export const getFriendById = async (id: string): Promise<Friend | undefined> => {
-  if (!id) return undefined;
-  const friendDoc = doc(db, 'friends', id);
-  const snapshot = await getDoc(friendDoc);
-  return dataFromSnapshot<Friend>(snapshot);
+export const getFriendById = (id: string): Friend | undefined => {
+  return friends.find(f => f.id === id);
 };
 
-export const addFriend = async (nickname: string, name?: string): Promise<Friend> => {
-  const friendsCol = collection(db, 'friends');
-  const docRef = await addDoc(friendsCol, {
+export const addFriend = (nickname: string, name?: string): Friend => {
+  const newFriend: Friend = {
+    id: String(Date.now()), // Simple ID generation for in-memory
     nickname,
     name: name || '',
-    createdAt: serverTimestamp(), // Use serverTimestamp for creation time
-  });
-  return { id: docRef.id, nickname, name }; // createdAt will be populated by server
+    createdAt: new Date(), // Added createdAt
+  };
+  friends.push(newFriend);
+  return newFriend;
 };
 
-export const updateFriend = async (id: string, updates: Partial<Omit<Friend, 'id'>>): Promise<Friend | null> => {
-  const friendDoc = doc(db, 'friends', id);
-  await updateDoc(friendDoc, updates);
-  const updatedSnapshot = await getDoc(friendDoc);
-  return dataFromSnapshot<Friend>(updatedSnapshot);
+export const updateFriend = (id: string, updates: Partial<Omit<Friend, 'id' | 'createdAt'>>): Friend | null => {
+  const friendIndex = friends.findIndex(f => f.id === id);
+  if (friendIndex === -1) return null;
+  friends[friendIndex] = { ...friends[friendIndex], ...updates };
+  return friends[friendIndex];
 };
 
-export const deleteFriend = async (id: string): Promise<boolean> => {
-  const friendDoc = doc(db, 'friends', id);
-  await deleteDoc(friendDoc);
-  // Note: This doesn't automatically remove the friend from meetings' participantIds or expenses.
-  // That would require more complex logic (e.g., querying all meetings/expenses).
-  // For simplicity, we'll leave that to be handled manually or via UI if needed.
-  // However, we can try to update meetings where this friend is a participant.
-  const meetingsQuery = query(collection(db, 'meetings'), where('participantIds', 'array-contains', id));
-  const meetingsSnapshot = await getDocs(meetingsQuery);
-  const batch = writeBatch(db);
-  meetingsSnapshot.forEach(meetingDocSnapshot => {
-    const meetingData = dataFromSnapshot<Meeting>(meetingDocSnapshot);
-    if (meetingData) {
-      const updatedParticipantIds = meetingData.participantIds.filter(pId => pId !== id);
-      const updatedNonReserveFundParticipants = meetingData.nonReserveFundParticipants.filter(nrpId => nrpId !== id);
-      batch.update(meetingDocSnapshot.ref, { 
-        participantIds: updatedParticipantIds,
-        nonReserveFundParticipants: updatedNonReserveFundParticipants
-      });
+export const deleteFriend = (id: string): boolean => {
+  const initialLength = friends.length;
+  friends = friends.filter(f => f.id !== id);
+  // Remove friend from meetings they participated in
+  meetings = meetings.map(m => ({
+    ...m,
+    participantIds: m.participantIds.filter(pId => pId !== id),
+    nonReserveFundParticipants: m.nonReserveFundParticipants.filter(nrpId => nrpId !== id),
+  }));
+  // Potentially remove friend from expenses (paidById, splitAmongIds, customSplits)
+  // This can get complex and might need more robust handling in a real app
+  expenses = expenses.map(e => {
+    const newExpense = {...e};
+    if (e.paidById === id) {
+      // This is problematic - who pays now? For simplicity, we'll leave it, but real app needs a strategy.
+      // Or prevent deletion if friend is a payer in unsettled expenses.
+      console.warn(`Friend ${id} was a payer for expense ${e.id}. This needs handling.`);
     }
+    if (e.splitAmongIds) {
+      newExpense.splitAmongIds = e.splitAmongIds.filter(sId => sId !== id);
+    }
+    if (e.customSplits) {
+      newExpense.customSplits = e.customSplits.filter(cs => cs.friendId !== id);
+      // If custom splits change, totalAmount might need re-evaluation or validation.
+    }
+    return newExpense;
+  }).filter(e => { // Remove expense if it no longer makes sense (e.g. no one to split among)
+      if (e.splitType === 'equally' && e.splitAmongIds && e.splitAmongIds.length === 0) return false;
+      if (e.splitType === 'custom' && e.customSplits && e.customSplits.length === 0) return false;
+      return true;
   });
-  await batch.commit();
-  return true;
+
+  return friends.length < initialLength;
 };
+
 
 // Meeting functions
-export const getMeetings = async (): Promise<Meeting[]> => {
-  const meetingsCol = collection(db, 'meetings');
-  const snapshot = await getDocs(query(meetingsCol, orderBy('dateTime', 'desc')));
-  return arrayFromSnapshot<Meeting>(snapshot);
+export const getMeetings = (): Meeting[] => {
+  return [...meetings].sort((a, b) => new Date(b.dateTime).getTime() - new Date(a.dateTime).getTime());
 };
 
-export const getMeetingById = async (id: string): Promise<Meeting | undefined> => {
-  if (!id) return undefined;
-  const meetingDoc = doc(db, 'meetings', id);
-  const snapshot = await getDoc(meetingDoc);
-  return dataFromSnapshot<Meeting>(snapshot);
+export const getMeetingById = (id: string): Meeting | undefined => {
+  return meetings.find(m => m.id === id);
 };
 
-export const addMeeting = async (meetingData: Omit<Meeting, 'id' | 'createdAt' | 'isSettled'>): Promise<Meeting> => {
-  const meetingsCol = collection(db, 'meetings');
-  const dataToSave = {
+const getNextMeetingId = (): string => {
+    const numericIds = meetings
+        .map(m => parseInt(m.id.replace('m', '')))
+        .filter(num => !isNaN(num));
+    const maxId = numericIds.length > 0 ? Math.max(...numericIds) : 0;
+    return `m${maxId + 1}`;
+};
+
+
+export const addMeeting = (meetingData: Omit<Meeting, 'id' | 'createdAt' | 'isSettled'>): Meeting => {
+  const newMeeting: Meeting = {
     ...meetingData,
-    dateTime: Timestamp.fromDate(new Date(meetingData.dateTime)),
-    endTime: meetingData.endTime ? Timestamp.fromDate(new Date(meetingData.endTime)) : null,
-    createdAt: serverTimestamp(),
-    isSettled: false,
+    id: getNextMeetingId(),
+    createdAt: new Date(),
+    isSettled: false, // New meetings are not settled by default
   };
-  const docRef = await addDoc(meetingsCol, dataToSave);
-  
-  const newMeeting = { ...meetingData, id: docRef.id, createdAt: new Date(), isSettled: false }; // Simulate createdAt for return
-
+  meetings.push(newMeeting);
   if (newMeeting.useReserveFund && newMeeting.reserveFundUsageType === 'partial' && (newMeeting.partialReserveFundAmount || 0) > 0) {
-    await addReserveFundTransaction({
+    addReserveFundTransaction({
       type: 'meeting_contribution',
       amount: -(newMeeting.partialReserveFundAmount as number),
       description: `모임 (${newMeeting.name}) 회비 부분 사용`,
-      date: new Date(newMeeting.dateTime),
-      meetingId: docRef.id,
+      date: new Date(newMeeting.dateTime), // Ensure this is a Date object
+      meetingId: newMeeting.id,
     });
   }
   return newMeeting;
 };
 
-export const updateMeeting = async (id: string, updates: Partial<Omit<Meeting, 'id'>>): Promise<Meeting | null> => {
-  const meetingDocRef = doc(db, 'meetings', id);
-  const originalMeetingSnap = await getDoc(meetingDocRef);
-  const originalMeeting = dataFromSnapshot<Meeting>(originalMeetingSnap);
+export const updateMeeting = (id: string, updates: Partial<Omit<Meeting, 'id'>>): Meeting | null => {
+  const meetingIndex = meetings.findIndex(m => m.id === id);
+  if (meetingIndex === -1) return null;
 
-  if (!originalMeeting) return null;
-
-  const dataToUpdate: any = { ...updates };
-  if (updates.dateTime) dataToUpdate.dateTime = Timestamp.fromDate(new Date(updates.dateTime));
-  if (updates.hasOwnProperty('endTime')) { // Check if endTime is explicitly being set (even to null)
-    dataToUpdate.endTime = updates.endTime ? Timestamp.fromDate(new Date(updates.endTime)) : null;
-  }
-
-
-  await updateDoc(meetingDocRef, dataToUpdate);
-
-  const updatedMeetingSnap = await getDoc(meetingDocRef);
-  const updatedMeeting = dataFromSnapshot<Meeting>(updatedMeetingSnap);
-  if (!updatedMeeting) return null;
+  const originalMeeting = meetings[meetingIndex];
+  const updatedMeetingData = { ...originalMeeting, ...updates };
 
   // Handle changes in 'partial' fund usage
   const originalPartialAmount = (originalMeeting.useReserveFund && originalMeeting.reserveFundUsageType === 'partial') ? originalMeeting.partialReserveFundAmount : 0;
-  const updatedPartialAmount = (updatedMeeting.useReserveFund && updatedMeeting.reserveFundUsageType === 'partial') ? updatedMeeting.partialReserveFundAmount : 0;
+  const updatedPartialAmount = (updatedMeetingData.useReserveFund && updatedMeetingData.reserveFundUsageType === 'partial') ? updatedMeetingData.partialReserveFundAmount : 0;
 
   if (originalPartialAmount !== updatedPartialAmount ||
-      (originalMeeting.reserveFundUsageType === 'partial' && updatedMeeting.reserveFundUsageType !== 'partial') ||
-      (!originalMeeting.useReserveFund && updatedMeeting.useReserveFund && updatedMeeting.reserveFundUsageType === 'partial')) {
-
+      (originalMeeting.reserveFundUsageType === 'partial' && updatedMeetingData.reserveFundUsageType !== 'partial') ||
+      (!originalMeeting.useReserveFund && updatedMeetingData.useReserveFund && updatedMeetingData.reserveFundUsageType === 'partial')) {
+    
     // Remove any existing 'partial' contribution transaction for this meeting
-    const q = query(collection(db, 'reserveFundTransactions'), 
-                    where('meetingId', '==', id), 
-                    where('type', '==', 'meeting_contribution'),
-                    // A bit fragile, but try to identify partial transactions
-                    where('description', 'custom_operator_contains', '부분 사용')); 
-    const txSnap = await getDocs(q);
-    const batch = writeBatch(db);
-    txSnap.forEach(doc => {
-       // A more robust check might be needed if description format changes
-      if (doc.data().description.includes('부분 사용')) {
-        batch.delete(doc.ref);
-      }
-    });
-    await batch.commit();
+    reserveFundTransactions = reserveFundTransactions.filter(
+        tx => !(tx.meetingId === id && tx.type === 'meeting_contribution' && tx.description.includes('부분 사용'))
+    );
 
-
-    if (updatedMeeting.useReserveFund && updatedMeeting.reserveFundUsageType === 'partial' && (updatedMeeting.partialReserveFundAmount || 0) > 0) {
-      await addReserveFundTransaction({
+    if (updatedMeetingData.useReserveFund && updatedMeetingData.reserveFundUsageType === 'partial' && (updatedMeetingData.partialReserveFundAmount || 0) > 0) {
+      addReserveFundTransaction({
         type: 'meeting_contribution',
-        amount: -(updatedMeeting.partialReserveFundAmount as number),
-        description: `모임 (${updatedMeeting.name}) 회비 부분 사용 (수정)`,
-        date: new Date(updatedMeeting.dateTime),
+        amount: -(updatedMeetingData.partialReserveFundAmount as number),
+        description: `모임 (${updatedMeetingData.name}) 회비 부분 사용 (수정)`,
+        date: new Date(updatedMeetingData.dateTime),
         meetingId: id,
       });
     }
   }
   
-  // If an 'all' type meeting was settled and is now being unsettled (e.g. by expense change)
-  if (originalMeeting.isSettled && originalMeeting.reserveFundUsageType === 'all' && updatedMeeting.isSettled === false) {
-    const q = query(collection(db, 'reserveFundTransactions'), 
-                  where('meetingId', '==', id), 
-                  where('type', '==', 'meeting_contribution'),
-                  where('description', 'custom_operator_contains', '전체 정산'));
-    const txSnap = await getDocs(q);
-    const batch = writeBatch(db);
-    txSnap.forEach(doc => {
-      if (doc.data().description.includes('전체 정산')) {
-        batch.delete(doc.ref);
-      }
-    });
-    await batch.commit();
+  // If an 'all' type meeting was settled and is now being explicitly unsettled in updates, or fund usage changes
+  if (originalMeeting.isSettled && originalMeeting.reserveFundUsageType === 'all' && 
+      (updates.isSettled === false || 
+       updates.useReserveFund === false || 
+       (updates.useReserveFund && updates.reserveFundUsageType !== 'all'))) {
+    reserveFundTransactions = reserveFundTransactions.filter(
+        tx => !(tx.meetingId === id && tx.type === 'meeting_contribution' && tx.description.includes('전체 정산'))
+    );
+    updatedMeetingData.isSettled = false; // Ensure it's marked unsettled
   }
 
-  return updatedMeeting;
+
+  meetings[meetingIndex] = updatedMeetingData;
+  return meetings[meetingIndex];
 };
 
-export const deleteMeeting = async (id: string): Promise<boolean> => {
-  const batch = writeBatch(db);
-  const meetingDocRef = doc(db, 'meetings', id);
-  batch.delete(meetingDocRef);
-
-  // Delete expenses subcollection
-  const expensesColRef = collection(db, 'meetings', id, 'expenses');
-  const expensesSnapshot = await getDocs(expensesColRef);
-  expensesSnapshot.forEach(doc => batch.delete(doc.ref));
-
-  // Delete related reserve fund transactions
-  const reserveTxQuery = query(collection(db, 'reserveFundTransactions'), where('meetingId', '==', id));
-  const reserveTxSnapshot = await getDocs(reserveTxQuery);
-  reserveTxSnapshot.forEach(doc => batch.delete(doc.ref));
-  
-  await batch.commit();
-  return true;
+export const deleteMeeting = (id: string): boolean => {
+  const initialLength = meetings.length;
+  meetings = meetings.filter(m => m.id !== id);
+  expenses = expenses.filter(e => e.meetingId !== id);
+  reserveFundTransactions = reserveFundTransactions.filter(tx => tx.meetingId !== id);
+  return meetings.length < initialLength;
 };
 
 // Expense functions
-// Expenses will be stored as a subcollection of meetings: /meetings/{meetingId}/expenses/{expenseId}
-export const getExpensesByMeetingId = async (meetingId: string): Promise<Expense[]> => {
-  const expensesCol = collection(db, 'meetings', meetingId, 'expenses');
-  const snapshot = await getDocs(query(expensesCol, orderBy('createdAt', 'desc')));
-  return arrayFromSnapshot<Expense>(snapshot);
+export const getExpensesByMeetingId = (meetingId: string): Expense[] => {
+  return expenses.filter(e => e.meetingId === meetingId).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 };
 
-export const getExpenseById = async (meetingId: string, expenseId: string): Promise<Expense | undefined> => {
-  if (!meetingId || !expenseId) return undefined;
-  const expenseDoc = doc(db, 'meetings', meetingId, 'expenses', expenseId);
-  const snapshot = await getDoc(expenseDoc);
-  return dataFromSnapshot<Expense>(snapshot);
+export const getExpenseById = (id: string): Expense | undefined => {
+  return expenses.find(e => e.id === id);
 };
 
-export const addExpense = async (expenseData: Omit<Expense, 'id' | 'createdAt'>): Promise<Expense> => {
-  const expensesCol = collection(db, 'meetings', expenseData.meetingId, 'expenses');
-  const dataToSave = {
+export const addExpense = (expenseData: Omit<Expense, 'id' | 'createdAt'>): Expense => {
+  const newExpense: Expense = {
     ...expenseData,
-    createdAt: serverTimestamp(),
+    id: String(Date.now()),
+    createdAt: new Date(),
   };
-  const docRef = await addDoc(expensesCol, dataToSave);
+  expenses.push(newExpense);
 
-  // If the meeting was 'all' type and settled, unsettle it
-  const meeting = await getMeetingById(expenseData.meetingId);
+  const meeting = getMeetingById(newExpense.meetingId);
   if (meeting && meeting.isSettled && meeting.reserveFundUsageType === 'all') {
-    await updateMeeting(expenseData.meetingId, { isSettled: false });
+    reserveFundTransactions = reserveFundTransactions.filter(
+        tx => !(tx.meetingId === meeting.id && tx.type === 'meeting_contribution' && tx.description.includes('전체 정산'))
+    );
+    updateMeeting(meeting.id, { ...meeting, isSettled: false });
   }
-
-  return { ...expenseData, id: docRef.id, createdAt: new Date() }; // Simulate createdAt for return
+  return newExpense;
 };
 
-export const updateExpense = async (id: string, updates: Partial<Expense>): Promise<Expense | null> => {
-  if (!updates.meetingId) { // meetingId is crucial for subcollection path
-    // Try to get original expense to find meetingId if not provided in updates
-    // This is a bit complex as we don't know which meeting it belongs to without querying.
-    // For now, assume updates.meetingId will be present or handle error.
-    // A better approach: updateExpense(meetingId, expenseId, updates)
-    console.error("updateExpense requires meetingId in updates for subcollection path");
-    // To keep the signature, we'd have to query all meetings' expense subcollections or change it.
-    // Let's assume for now it's called in a context where meetingId is known.
-    // If not, this will fail or needs a more robust way to find the expense.
-    // For simplicity, if updates.meetingId is not there, we try to get it from original expense if possible
-    // (but that's not passed here).
-    // THIS IS A POTENTIAL ISSUE if not called carefully.
-    return null; 
+export const updateExpense = (id: string, updates: Partial<Omit<Expense, 'id' | 'createdAt'>>): Expense | null => {
+  const expenseIndex = expenses.findIndex(e => e.id === id);
+  if (expenseIndex === -1) return null;
+  
+  const originalExpense = expenses[expenseIndex];
+  expenses[expenseIndex] = { ...originalExpense, ...updates };
+  
+  const meeting = getMeetingById(expenses[expenseIndex].meetingId);
+  if (meeting && meeting.isSettled && meeting.reserveFundUsageType === 'all') {
+     reserveFundTransactions = reserveFundTransactions.filter(
+        tx => !(tx.meetingId === meeting.id && tx.type === 'meeting_contribution' && tx.description.includes('전체 정산'))
+    );
+    updateMeeting(meeting.id, { ...meeting, isSettled: false });
   }
-  const expenseDocRef = doc(db, 'meetings', updates.meetingId, 'expenses', id);
-  await updateDoc(expenseDocRef, updates);
-  const updatedSnapshot = await getDoc(expenseDocRef);
-  const updatedExpense = dataFromSnapshot<Expense>(updatedSnapshot);
-
-  if (updatedExpense) {
-    const meeting = await getMeetingById(updatedExpense.meetingId);
-    if (meeting && meeting.isSettled && meeting.reserveFundUsageType === 'all') {
-      await updateMeeting(updatedExpense.meetingId, { isSettled: false });
-    }
-  }
-  return updatedExpense;
+  return expenses[expenseIndex];
 };
 
-// To delete, we need the meetingId to locate the subcollection
-export const deleteExpense = async (meetingId: string, expenseId: string): Promise<boolean> => {
-  const expenseDocRef = doc(db, 'meetings', meetingId, 'expenses', expenseId);
-  await deleteDoc(expenseDocRef);
+export const deleteExpense = (id: string): boolean => {
+  const expense = getExpenseById(id);
+  if (!expense) return false;
 
-  const meeting = await getMeetingById(meetingId);
+  const initialLength = expenses.length;
+  expenses = expenses.filter(e => e.id !== id);
+
+  const meeting = getMeetingById(expense.meetingId);
   if (meeting && meeting.isSettled && meeting.reserveFundUsageType === 'all') {
-     await updateMeeting(meetingId, { isSettled: false });
+     reserveFundTransactions = reserveFundTransactions.filter(
+        tx => !(tx.meetingId === meeting.id && tx.type === 'meeting_contribution' && tx.description.includes('전체 정산'))
+    );
+    updateMeeting(meeting.id, { ...meeting, isSettled: false });
   }
-  return true;
+  return expenses.length < initialLength;
 };
 
 // Reserve Fund functions
-export const getReserveFundBalance = async (): Promise<number> => {
-  const transactions = await getReserveFundTransactions();
-  return transactions.reduce((acc, curr) => acc + curr.amount, 0);
+export const getReserveFundBalance = (): number => {
+  return reserveFundTransactions.reduce((acc, curr) => acc + curr.amount, 0);
 };
 
-export const getReserveFundTransactions = async (): Promise<ReserveFundTransaction[]> => {
-  const transactionsCol = collection(db, 'reserveFundTransactions');
-  const snapshot = await getDocs(query(transactionsCol, orderBy('date', 'desc')));
-  return arrayFromSnapshot<ReserveFundTransaction>(snapshot);
+export const getReserveFundTransactions = (): ReserveFundTransaction[] => {
+  return [...reserveFundTransactions].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 };
 
-export const addReserveFundTransaction = async (transactionData: Omit<ReserveFundTransaction, 'id'>): Promise<ReserveFundTransaction> => {
-  const transactionsCol = collection(db, 'reserveFundTransactions');
-  const dataToSave = {
-    ...transactionData,
-    date: Timestamp.fromDate(new Date(transactionData.date)),
-  };
-
+export const addReserveFundTransaction = (transactionData: Omit<ReserveFundTransaction, 'id'>): ReserveFundTransaction => {
   // Prevent duplicate meeting_contribution transactions if one already exists for the same meeting and type
   if (transactionData.type === 'meeting_contribution' && transactionData.meetingId) {
-    let q;
-    if (transactionData.description.includes('부분 사용')) {
-      q = query(transactionsCol, 
-                where('meetingId', '==', transactionData.meetingId),
-                where('type', '==', 'meeting_contribution'),
-                where('description', '==', transactionData.description), // Exact match for partial
-                where('amount', '==', transactionData.amount)
-              );
-    } else if (transactionData.description.includes('전체 정산')) {
-        q = query(transactionsCol, 
-                where('meetingId', '==', transactionData.meetingId),
-                where('type', '==', 'meeting_contribution'),
-                where('description', 'custom_operator_contains', '전체 정산') // Check if 'all' type already exists
-              );
-    }
-    if (q) {
-      const existingTxSnap = await getDocs(q);
-      if (!existingTxSnap.empty && !(transactionData.description.includes('(수정)'))) {
-         // If it's an 'all' type and one already exists, or 'partial' and exact match exists.
-         // This logic might need refinement based on how "updates" vs "new" are handled.
-        console.warn("Skipping potentially duplicate meeting_contribution transaction:", transactionData);
-        return dataFromSnapshot<ReserveFundTransaction>(existingTxSnap.docs[0])!; // Return existing
-      }
+    const existingTx = reserveFundTransactions.find(tx =>
+      tx.meetingId === transactionData.meetingId &&
+      tx.type === 'meeting_contribution' &&
+      // For partial, match description and amount; for all, match if description indicates 'all'
+      ( (tx.description.includes('부분 사용') && tx.description === transactionData.description && tx.amount === transactionData.amount) ||
+        (tx.description.includes('전체 정산') && transactionData.description.includes('전체 정산')) ) &&
+      !(transactionData.description.includes('(수정)')) // Allow if explicitly marked as modification
+    );
+    if (existingTx) {
+      console.warn("Skipping potentially duplicate meeting_contribution transaction:", transactionData);
+      return existingTx;
     }
   }
 
-  const docRef = await addDoc(transactionsCol, dataToSave);
-  return { ...transactionData, id: docRef.id, date: new Date(transactionData.date) }; // Simulate for return
+  const newTransaction: ReserveFundTransaction = {
+    ...transactionData,
+    id: `tx${String(Date.now())}${reserveFundTransactions.length}`,
+    date: new Date(transactionData.date), // Ensure it's a Date object
+  };
+  reserveFundTransactions.push(newTransaction);
+  return newTransaction;
 };
 
+
 // Utility to get all data for AI analysis for a specific meeting
-export const getSpendingDataForMeeting = async (meetingId: string): Promise<string> => {
-  const meeting = await getMeetingById(meetingId);
+export const getSpendingDataForMeeting = (meetingId: string): string => {
+  const meeting = getMeetingById(meetingId);
   if (!meeting) return "Meeting not found.";
 
-  const meetingExpenses = await getExpensesByMeetingId(meetingId);
+  const meetingExpenses = getExpensesByMeetingId(meetingId);
   if (meetingExpenses.length === 0) return `No expenses recorded for meeting: ${meeting.name}.`;
 
   let spendingDetails = `Meeting: ${meeting.name} on ${new Date(meeting.dateTime).toLocaleDateString()}\nLocation: ${meeting.locationName}\nParticipants: ${meeting.participantIds.length}\n\nExpenses:\n`;
 
   for (const expense of meetingExpenses) {
-    const payer = await getFriendById(expense.paidById);
+    const payer = getFriendById(expense.paidById);
     spendingDetails += `- Description: ${expense.description}\n`;
     spendingDetails += `  Amount: ${expense.totalAmount.toLocaleString()} KRW\n`;
     spendingDetails += `  Paid by: ${payer?.nickname || 'Unknown'}\n`;
     spendingDetails += `  Split: ${expense.splitType}\n`;
     if (expense.splitType === 'equally' && expense.splitAmongIds) {
-      const splitAmongFriends = await Promise.all(expense.splitAmongIds.map(id => getFriendById(id)));
+      const splitAmongFriends = expense.splitAmongIds.map(id => getFriendById(id));
       spendingDetails += `  Among: ${splitAmongFriends.map(f => f?.nickname).filter(Boolean).join(', ')}\n`;
     } else if (expense.splitType === 'custom' && expense.customSplits) {
-      const customSplitDetails = await Promise.all(expense.customSplits.map(async split => {
-        const friend = await getFriendById(split.friendId);
+      const customSplitDetails = expense.customSplits.map(split => {
+        const friend = getFriendById(split.friendId);
         return `${friend?.nickname || 'Unknown'}: ${split.amount.toLocaleString()} KRW`;
-      }));
+      });
       spendingDetails += `  Custom Split: ${customSplitDetails.join('; ')}\n`;
     }
     spendingDetails += "\n";
@@ -385,43 +381,28 @@ export const getSpendingDataForMeeting = async (meetingId: string): Promise<stri
 };
 
 export const getAllSpendingDataForYear = async (year: number): Promise<string> => {
-  const allMeetings = await getMeetings(); // Fetch all meetings first
+  const allMeetings = getMeetings(); // Fetch all meetings first
   const yearMeetings = allMeetings.filter(m => new Date(m.dateTime).getFullYear() === year);
   if (yearMeetings.length === 0) return `No meetings found for the year ${year}.`;
 
   let allSpendingDetails = `Spending data for the year ${year}:\n\n`;
   for (const meeting of yearMeetings) {
-    allSpendingDetails += (await getSpendingDataForMeeting(meeting.id)) + "\n---\n";
+    // getSpendingDataForMeeting is synchronous with in-memory data
+    allSpendingDetails += getSpendingDataForMeeting(meeting.id) + "\n---\n";
   }
   return allSpendingDetails;
 };
 
-export const getMeetingExpenses = async (meetingId: string): Promise<Expense[]> => {
+export const getMeetingExpenses = (meetingId: string): Expense[] => {
     return getExpensesByMeetingId(meetingId);
 }
 
-// Placeholder for a more specific query for description contains in Firestore
-// Firestore doesn't directly support 'contains' for strings in where clauses like SQL LIKE.
-// For 'custom_operator_contains', you'd typically fetch and filter client-side,
-// or use a more advanced search solution like Algolia/Typesense, or structure data differently (e.g., keywords array).
-// For this prototype, I'll use a simple string.includes after fetching for descriptions if absolutely needed,
-// but it's better to make descriptions more exact or use specific fields.
-// The 'description contains' pseudo-operator in the data-store.ts is a simplification
-// and might need adjustment for production (e.g. by making transaction descriptions more standardized).
-// For now, I'll assume the current where clauses are sufficient or will be adapted.
-// In addReserveFundTransaction and updateMeeting, the logic for finding existing transactions
-// related to partial/all meeting contributions might need this. I will simplify the query to be more direct.
-// e.g. for 'all' type, might store a specific marker in description or a boolean field.
-// For now, I'll remove the 'custom_operator_contains' and rely on the description being somewhat standard
-// or accept that finding existing 'all' or 'partial' type transactions might be less precise.
+// Initialize some numeric IDs if they don't exist from the initial data
+const initializeNumericIds = () => {
+    const meetingNumericIds = meetings
+        .map(m => parseInt(m.id.replace('m', '')))
+        .filter(num => !isNaN(num));
+    nextNumericMeetingId = meetingNumericIds.length > 0 ? Math.max(...meetingNumericIds) + 1 : 1;
+};
 
-// Correcting the query in updateMeeting for existing transactions:
-// For 'partial' type, the description match should be more specific or rely on a flag.
-// For 'all' type, similarly. The current logic is a placeholder.
-// I will remove the `custom_operator_contains` comments as it's not a real operator.
-// The logic for addReserveFundTransaction and updateMeeting regarding finding existing
-// meeting_contribution transactions needs careful testing.
-// The queries used are:
-// `where('description', '==', transactionData.description)` for partial (exact match)
-// `where('description', 'custom_operator_contains', '전체 정산')` for all
-// I will assume for now that the string matching on description is sufficient for the prototype's purpose.
+initializeNumericIds();

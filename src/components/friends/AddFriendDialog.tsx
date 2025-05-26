@@ -1,3 +1,4 @@
+
 'use client';
 
 import React, { useState, useTransition } from 'react';
@@ -19,6 +20,8 @@ import { Label } from '@/components/ui/label';
 import { createFriendAction } from '@/lib/actions';
 import { useToast } from '@/hooks/use-toast';
 import { Loader2 } from 'lucide-react';
+import { useRouter } from 'next/navigation'; // Added for router.refresh()
+import type { Friend } from '@/lib/types'; // Ensure Friend type is imported
 
 const friendSchema = z.object({
   nickname: z.string().min(1, '닉네임을 입력해주세요.').max(50, '닉네임은 50자 이내여야 합니다.'),
@@ -29,13 +32,14 @@ type FriendFormData = z.infer<typeof friendSchema>;
 
 interface AddFriendDialogProps {
   triggerButton?: React.ReactNode; // Optional custom trigger
-  onFriendAdded?: (friend: FriendFormData) => void; // Callback after successful addition
+  onFriendAdded?: (friend: Friend) => void; // Callback after successful addition, type changed to Friend
 }
 
 export function AddFriendDialog({ triggerButton, onFriendAdded }: AddFriendDialogProps) {
   const [open, setOpen] = useState(false);
   const [isPending, startTransition] = useTransition();
   const { toast } = useToast();
+  const router = useRouter(); // Initialize router
 
   const form = useForm<FriendFormData>({
     resolver: zodResolver(friendSchema),
@@ -51,8 +55,11 @@ export function AddFriendDialog({ triggerButton, onFriendAdded }: AddFriendDialo
       if (result.success) {
         toast({ title: '성공', description: '새로운 친구가 추가되었습니다.' });
         form.reset();
-        setOpen(false);
-        if (onFriendAdded && result.friend) onFriendAdded(result.friend);
+        setOpen(false); // Close dialog *before* refreshing
+        router.refresh(); // Refresh server data for the current route
+        if (onFriendAdded && result.friend) { // Ensure result.friend exists for the callback
+          onFriendAdded(result.friend);
+        }
       } else {
         toast({
           title: '오류',
