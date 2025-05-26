@@ -1,3 +1,4 @@
+
 'use client';
 
 import React, { useState, useTransition, useEffect } from 'react';
@@ -25,12 +26,13 @@ import { Checkbox } from "@/components/ui/checkbox";
 
 const meetingSchemaBase = z.object({
   name: z.string().min(1, '모임 이름을 입력해주세요.').max(100, '모임 이름은 100자 이내여야 합니다.'),
-  dateTime: z.date({ required_error: '날짜와 시간을 선택해주세요.' }),
+  dateTime: z.date({ required_error: '시작 날짜와 시간을 선택해주세요.' }),
+  endTime: z.date().optional(),
   locationName: z.string().min(1, '장소를 입력해주세요.').max(100, '장소 이름은 100자 이내여야 합니다.'),
   participantIds: z.array(z.string()).min(1, '참여자를 최소 1명 선택해주세요.'),
   useReserveFund: z.boolean(),
   reserveFundUsageType: z.enum(['all', 'partial']),
-  partialReserveFundAmount: z.preprocess( 
+  partialReserveFundAmount: z.preprocess(
     (val) => (val === '' || val === undefined || val === null ? undefined : Number(String(val).replace(/,/g, ''))),
     z.number().min(0, '금액은 0 이상이어야 합니다.').optional()
   ),
@@ -45,6 +47,14 @@ const meetingSchema = meetingSchemaBase.refine(data => {
 }, {
   message: '부분 사용 시 회비 사용 금액을 0보다 크게 입력해야 합니다.',
   path: ['partialReserveFundAmount'],
+}).refine(data => {
+  if (data.endTime && data.dateTime > data.endTime) {
+    return false;
+  }
+  return true;
+}, {
+  message: '종료 시간은 시작 시간보다 이후여야 합니다.',
+  path: ['endTime'],
 });
 
 type MeetingFormData = z.infer<typeof meetingSchema>;
@@ -61,12 +71,15 @@ export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, 
   const [isPending, startTransition] = useTransition();
   const { toast } = useToast();
   const [participantSearchOpen, setParticipantSearchOpen] = useState(false);
+  const [startDateOpen, setStartDateOpen] = useState(false);
+  const [endDateOpen, setEndDateOpen] = useState(false);
 
   const form = useForm<MeetingFormData>({
     resolver: zodResolver(meetingSchema),
     defaultValues: initialData ? {
       name: initialData.name,
       dateTime: new Date(initialData.dateTime),
+      endTime: initialData.endTime ? new Date(initialData.endTime) : undefined,
       locationName: initialData.locationName,
       participantIds: initialData.participantIds,
       useReserveFund: initialData.useReserveFund,
@@ -76,11 +89,12 @@ export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, 
     } : {
       name: '',
       dateTime: undefined,
+      endTime: undefined,
       locationName: '',
       participantIds: [currentUserId],
       useReserveFund: false,
-      reserveFundUsageType: 'all', // Default to 'all', amount field hidden unless 'partial'
-      partialReserveFundAmount: undefined, // Default to undefined
+      reserveFundUsageType: 'all',
+      partialReserveFundAmount: undefined,
       nonReserveFundParticipants: [],
     },
   });
@@ -99,7 +113,6 @@ export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, 
     }
   }, [watchParticipantIds, isEditMode, initialData, form]);
 
-  // Reset partialReserveFundAmount if useReserveFund is false or type is 'all'
   useEffect(() => {
     if (!watchUseReserveFund || watchReserveFundUsageType === 'all') {
       form.setValue('partialReserveFundAmount', undefined, { shouldValidate: true });
@@ -112,12 +125,10 @@ export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, 
     return isNaN(num) ? '' : num.toLocaleString();
   };
 
-
   const onSubmit = (data: MeetingFormData) => {
     startTransition(async () => {
       const payload = {
         ...data,
-        // Ensure partialReserveFundAmount is a number or undefined
         partialReserveFundAmount: data.useReserveFund && data.reserveFundUsageType === 'partial' 
                                     ? Number(data.partialReserveFundAmount) 
                                     : undefined,
@@ -161,9 +172,10 @@ export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, 
         {form.formState.errors.name && <p className="text-sm text-destructive mt-1">{form.formState.errors.name.message}</p>}
       </div>
 
+      {/* Start Date/Time Picker */}
       <div>
-        <Label htmlFor="dateTime">날짜 및 시간 <span className="text-destructive">*</span></Label>
-        <Popover>
+        <Label htmlFor="dateTime">시작 날짜 및 시간 <span className="text-destructive">*</span></Label>
+        <Popover open={startDateOpen} onOpenChange={setStartDateOpen}>
           <PopoverTrigger asChild>
             <Button
               variant="outline"
@@ -190,12 +202,13 @@ export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, 
                 }
               }}
               initialFocus
+              disabled={isPending}
             />
-            <div className="p-3 border-t border-border">
-              <Label htmlFor="time">시간</Label>
+            <div className="p-3 border-t border-border space-y-2">
+              <Label htmlFor="startTime">시작 시간</Label>
               <Input
                 type="time"
-                id="time"
+                id="startTime"
                 defaultValue={form.watch('dateTime') ? format(form.watch('dateTime'), "HH:mm") : "12:00"}
                 onChange={(e) => {
                   const newTime = e.target.value;
@@ -204,13 +217,73 @@ export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, 
                   currentDateTime.setHours(hours, minutes, 0, 0);
                   form.setValue('dateTime', new Date(currentDateTime), { shouldValidate: true });
                 }}
-                className="w-full mt-1"
+                className="w-full"
+                disabled={isPending}
               />
+              <Button size="sm" onClick={() => setStartDateOpen(false)} className="w-full">확인</Button>
             </div>
           </PopoverContent>
         </Popover>
         {form.formState.errors.dateTime && <p className="text-sm text-destructive mt-1">{form.formState.errors.dateTime.message}</p>}
       </div>
+
+      {/* End Date/Time Picker */}
+      <div>
+        <Label htmlFor="endTime">종료 날짜 및 시간 (선택)</Label>
+        <Popover open={endDateOpen} onOpenChange={setEndDateOpen}>
+          <PopoverTrigger asChild>
+            <Button
+              variant="outline"
+              className={cn(
+                'w-full justify-start text-left font-normal',
+                !form.watch('endTime') && 'text-muted-foreground'
+              )}
+              disabled={isPending}
+            >
+              <CalendarIcon className="mr-2 h-4 w-4" />
+              {form.watch('endTime') ? format(form.watch('endTime'), 'PPP HH:mm', { locale: ko }) : <span>날짜 및 시간 선택</span>}
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent className="w-auto p-0">
+            <Calendar
+              mode="single"
+              selected={form.watch('endTime')}
+              onSelect={(date) => {
+                if (date) {
+                  const currentTime = form.watch('endTime') || form.watch('dateTime') || new Date();
+                  const newDateTime = new Date(date);
+                  newDateTime.setHours(currentTime.getHours(), currentTime.getMinutes(), 0, 0);
+                  form.setValue('endTime', newDateTime, { shouldValidate: true });
+                } else {
+                  form.setValue('endTime', undefined, { shouldValidate: true }); // Allow clearing the end date
+                }
+              }}
+              initialFocus
+              disabled={isPending}
+            />
+            <div className="p-3 border-t border-border space-y-2">
+              <Label htmlFor="endTimeInput">종료 시간</Label>
+              <Input
+                type="time"
+                id="endTimeInput"
+                defaultValue={form.watch('endTime') ? format(form.watch('endTime'), "HH:mm") : form.watch('dateTime') ? format(form.watch('dateTime'), "HH:mm") : "12:00"}
+                onChange={(e) => {
+                  const newTime = e.target.value;
+                  const currentDateTime = form.watch('endTime') || form.watch('dateTime') || new Date();
+                  const [hours, minutes] = newTime.split(':').map(Number);
+                  currentDateTime.setHours(hours, minutes, 0, 0);
+                  form.setValue('endTime', new Date(currentDateTime), { shouldValidate: true });
+                }}
+                className="w-full"
+                disabled={isPending}
+              />
+              <Button size="sm" onClick={() => setEndDateOpen(false)} className="w-full">확인</Button>
+            </div>
+          </PopoverContent>
+        </Popover>
+        {form.formState.errors.endTime && <p className="text-sm text-destructive mt-1">{form.formState.errors.endTime.message}</p>}
+      </div>
+
 
       <div>
         <Label htmlFor="locationName">장소 <span className="text-destructive">*</span></Label>
@@ -313,7 +386,7 @@ export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, 
                                   : currentNonParticipants.filter(id => id !== participant.id);
                                 field.onChange(newNonParticipants);
                               }}
-                              disabled={isPending || (participant.id === currentUserId && selectedParticipants.length === 1 && field.value?.includes(currentUserId) && checked === false )} // Creator cannot be un-excluded if they are the only one and already excluded
+                              disabled={isPending || (participant.id === currentUserId && selectedParticipants.length === 1 && field.value?.includes(currentUserId) && checked === false )}
                             />
                            )}
                         />
@@ -365,16 +438,14 @@ export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, 
                           ? currentParticipantIds.filter(id => id !== friend.id)
                           : [...currentParticipantIds, friend.id];
                         
-                        // Ensure creator is always included, unless they are the one being deselected AND others remain.
                         if (friend.id === currentUserId && !newParticipantIds.includes(currentUserId) && newParticipantIds.length > 0) {
                             // If unselecting creator and there are other participants, allow it.
                         } else if (!newParticipantIds.includes(currentUserId)) {
-                           newParticipantIds.push(currentUserId); // Always keep creator if they are not explicitly removed or list becomes empty
+                           newParticipantIds.push(currentUserId); 
                         }
-                        if (newParticipantIds.length === 0 && friend.id === currentUserId){ // if trying to deselect the last member (creator)
-                            newParticipantIds = [currentUserId]; // prevent deselection
+                        if (newParticipantIds.length === 0 && friend.id === currentUserId){ 
+                            newParticipantIds = [currentUserId]; 
                         }
-
 
                         form.setValue("participantIds", newParticipantIds, { shouldValidate: true });
                          const currentNonParticipants = form.getValues('nonReserveFundParticipants') || [];
@@ -412,3 +483,5 @@ export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, 
     </form>
   );
 }
+
+    
