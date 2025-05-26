@@ -1,92 +1,98 @@
+
 'use client';
 
 import type { ReserveFundTransaction } from '@/lib/types';
 import React, { useState, useTransition } from 'react';
-import { useForm } from 'react-hook-form';
+import { useForm, Controller } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
-import { addReserveTransactionAction } from '@/lib/actions';
+import { setReserveFundBalanceAction } from '@/lib/actions'; // Updated action
 import { useToast } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Textarea } from '@/components/ui/textarea';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { format } from 'date-fns';
 import { ko } from 'date-fns/locale';
-import { PlusCircle, Loader2, TrendingUp, TrendingDown } from 'lucide-react';
+import { TrendingDown, Edit, Loader2, History, PiggyBank } from 'lucide-react'; // Edit instead of PlusCircle
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from '@/components/ui/dialog';
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { Calendar } from '@/components/ui/calendar';
-import { CalendarIcon } from 'lucide-react';
-import { cn } from '@/lib/utils';
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 
-const transactionSchema = z.object({
-  type: z.enum(['deposit', 'withdrawal'], { required_error: '거래 유형을 선택해주세요.' }),
-  amount: z.preprocess(
+const balanceUpdateSchema = z.object({
+  newBalance: z.preprocess(
     (val) => (typeof val === 'string' ? parseFloat(val.replace(/,/g, '')) : val),
-    z.number().positive('금액은 0보다 커야 합니다.')
+    z.number().min(0, '잔액은 0 이상이어야 합니다.')
   ),
-  description: z.string().min(1, '설명을 입력해주세요.').max(100, '설명은 100자 이내여야 합니다.'),
-  date: z.date({ required_error: '날짜를 선택해주세요.' }),
+  description: z.string().min(1, "설명을 입력해주세요.").max(100, "설명은 100자 이내여야 합니다.").optional(),
 });
 
-type TransactionFormData = z.infer<typeof transactionSchema>;
+type BalanceUpdateFormData = z.infer<typeof balanceUpdateSchema>;
 
 interface ReserveFundClientProps {
-  initialTransactions: ReserveFundTransaction[];
+  initialTransactions: ReserveFundTransaction[]; // These are logged transactions
   initialBalance: number;
 }
 
 export function ReserveFundClient({ initialTransactions, initialBalance }: ReserveFundClientProps) {
   const [transactions, setTransactions] = useState<ReserveFundTransaction[]>(initialTransactions);
-  const [balance, setBalance] = useState<number>(initialBalance);
-  const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [currentBalance, setCurrentBalance] = useState<number>(initialBalance); // Local state for balance
+  const [isUpdateDialogOpen, setIsUpdateDialogOpen] = useState(false);
   const [isPending, startTransition] = useTransition();
   const { toast } = useToast();
 
-  const form = useForm<TransactionFormData>({
-    resolver: zodResolver(transactionSchema),
+  const form = useForm<BalanceUpdateFormData>({
+    resolver: zodResolver(balanceUpdateSchema),
     defaultValues: {
-      type: 'deposit',
-      amount: 0,
-      description: '',
-      date: new Date(),
+      newBalance: initialBalance, // Default to current balance
+      description: '수동 잔액 조정',
     },
   });
+  
+  React.useEffect(() => {
+    setCurrentBalance(initialBalance);
+    form.setValue('newBalance', initialBalance);
+  }, [initialBalance, form]);
 
-  const onSubmit = (data: TransactionFormData) => {
+  React.useEffect(() => {
+    setTransactions(initialTransactions);
+  }, [initialTransactions]);
+
+
+  const handleBalanceUpdate = (data: BalanceUpdateFormData) => {
     startTransition(async () => {
-      // For deposit, amount is positive. For withdrawal, make it negative.
-      const transactionAmount = data.type === 'deposit' ? data.amount : -data.amount;
-      const result = await addReserveTransactionAction({
-        type: data.type,
-        amount: transactionAmount,
-        description: data.description,
-        date: data.date,
-      });
+      const result = await setReserveFundBalanceAction(data.newBalance, data.description);
+      if (result.success && result.newBalance !== undefined) {
+        toast({ title: '성공', description: '회비 잔액이 업데이트되었습니다.' });
+        setCurrentBalance(result.newBalance); // Update local balance state
+        // Optimistically add the balance update log, or re-fetch if necessary
+        // For simplicity, we'll assume revalidation from action handles transaction list update
+        // Or manually add:
+        const newLogEntry: ReserveFundTransaction = {
+            id: `temp-${Date.now()}`, // Temporary ID
+            type: 'balance_update',
+            amount: result.newBalance, // The new balance itself for this type
+            description: data.description || `잔액 ${result.newBalance.toLocaleString()}원으로 설정됨`,
+            date: new Date(),
+        };
+        setTransactions(prev => [newLogEntry, ...prev].sort((a,b) => new Date(b.date).getTime() - new Date(a.date).getTime()));
 
-      if (result.success && result.transaction) {
-        toast({ title: '성공', description: '거래 내역이 추가되었습니다.' });
-        setTransactions(prev => [result.transaction!, ...prev].sort((a,b) => new Date(b.date).getTime() - new Date(a.date).getTime() ));
-        setBalance(prev => prev + transactionAmount);
-        form.reset();
-        setIsDialogOpen(false);
+        form.reset({ newBalance: result.newBalance, description: '수동 잔액 조정' });
+        setIsUpdateDialogOpen(false);
       } else {
         toast({
           title: '오류',
-          description: result.error || '거래 내역 추가에 실패했습니다.',
+          description: result.error || '잔액 업데이트에 실패했습니다.',
           variant: 'destructive',
         });
       }
@@ -100,146 +106,117 @@ export function ReserveFundClient({ initialTransactions, initialBalance }: Reser
     return isNaN(num) ? String(value) : num.toLocaleString();
   };
 
-
   return (
-    <Card>
-      <CardHeader className="flex flex-row items-center justify-between">
-        <div>
-          <CardTitle>거래 내역</CardTitle>
-          <CardDescription>회비의 입출금 내역입니다.</CardDescription>
-        </div>
-        <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-          <DialogTrigger asChild>
-            <Button variant="outline">
-              <PlusCircle className="mr-2 h-4 w-4" /> 새 거래 추가
-            </Button>
-          </DialogTrigger>
-          <DialogContent className="sm:max-w-md">
-            <DialogHeader>
-              <DialogTitle>새 거래 추가</DialogTitle>
-              <DialogDescription>회비 입금 또는 출금 내역을 기록합니다.</DialogDescription>
-            </DialogHeader>
-            <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
-              <div>
-                <Label>거래 유형 <span className="text-destructive">*</span></Label>
-                <RadioGroup
-                  onValueChange={(value: "deposit" | "withdrawal") => form.setValue('type', value)}
-                  defaultValue={form.watch('type')}
-                  className="flex space-x-4 mt-1"
-                  disabled={isPending}
-                >
-                  <div className="flex items-center space-x-2">
-                    <RadioGroupItem value="deposit" id="deposit" />
-                    <Label htmlFor="deposit">입금</Label>
-                  </div>
-                  <div className="flex items-center space-x-2">
-                    <RadioGroupItem value="withdrawal" id="withdrawal" />
-                    <Label htmlFor="withdrawal">출금</Label>
-                  </div>
-                </RadioGroup>
-              </div>
-              <div>
-                <Label htmlFor="amount">금액 <span className="text-destructive">*</span></Label>
-                 <Input 
-                    id="amount" 
-                    type="text" 
-                    value={formatNumber(form.watch('amount'))}
-                    onChange={(e) => {
-                      const rawValue = e.target.value.replace(/,/g, '');
-                      form.setValue('amount', rawValue === '' ? 0 : parseFloat(rawValue), {shouldValidate: true});
-                    }}
-                    disabled={isPending} 
-                  />
-                {form.formState.errors.amount && <p className="text-sm text-destructive mt-1">{form.formState.errors.amount.message}</p>}
-              </div>
-              <div>
-                <Label htmlFor="description">설명 <span className="text-destructive">*</span></Label>
-                <Textarea id="description" {...form.register('description')} disabled={isPending} />
-                {form.formState.errors.description && <p className="text-sm text-destructive mt-1">{form.formState.errors.description.message}</p>}
-              </div>
-              <div>
-                <Label htmlFor="date">날짜 <span className="text-destructive">*</span></Label>
-                <Popover>
-                  <PopoverTrigger asChild>
-                    <Button
-                      variant="outline"
-                      className={cn(
-                        'w-full justify-start text-left font-normal',
-                        !form.watch('date') && 'text-muted-foreground'
-                      )}
-                      disabled={isPending}
-                    >
-                      <CalendarIcon className="mr-2 h-4 w-4" />
-                      {form.watch('date') ? format(form.watch('date'), 'PPP', { locale: ko }) : <span>날짜 선택</span>}
-                    </Button>
-                  </PopoverTrigger>
-                  <PopoverContent className="w-auto p-0">
-                    <Calendar
-                      mode="single"
-                      selected={form.watch('date')}
-                      onSelect={(date) => date && form.setValue('date', date, { shouldValidate: true })}
-                      initialFocus
-                      disabled={isPending}
-                    />
-                  </PopoverContent>
-                </Popover>
-                {form.formState.errors.date && <p className="text-sm text-destructive mt-1">{form.formState.errors.date.message}</p>}
-              </div>
-              <DialogFooter>
-                <Button type="button" variant="outline" onClick={() => setIsDialogOpen(false)} disabled={isPending}>
-                  취소
+    <div className="space-y-6">
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between">
+          <CardTitle>잔액 설정</CardTitle>
+            <AlertDialog open={isUpdateDialogOpen} onOpenChange={setIsUpdateDialogOpen}>
+              <AlertDialogTrigger asChild>
+                <Button variant="outline">
+                  <Edit className="mr-2 h-4 w-4" /> 현재 잔액 설정
                 </Button>
-                <Button type="submit" disabled={isPending}>
-                  {isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                  저장
-                </Button>
-              </DialogFooter>
-            </form>
-          </DialogContent>
-        </Dialog>
-      </CardHeader>
-      <CardContent>
-        {transactions.length > 0 ? (
-          <ScrollArea className="h-[400px]">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>날짜</TableHead>
-                  <TableHead>설명</TableHead>
-                  <TableHead>유형</TableHead>
-                  <TableHead className="text-right">금액</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {transactions.map((tx) => (
-                  <TableRow key={tx.id}>
-                    <TableCell>{format(new Date(tx.date), 'yyyy.MM.dd', { locale: ko })}</TableCell>
-                    <TableCell>{tx.description}{tx.meetingId && ` (모임: ${tx.meetingId})`}</TableCell>
-                    <TableCell>
-                      {tx.type === 'deposit' || (tx.type === 'meeting_contribution' && tx.amount > 0) ? (
-                        <span className="inline-flex items-center text-xs text-green-700 bg-green-100 px-2 py-0.5 rounded-full">
-                          <TrendingUp className="h-3 w-3 mr-1"/> 입금
-                        </span>
-                      ) : (
-                        <span className="inline-flex items-center text-xs text-red-700 bg-red-100 px-2 py-0.5 rounded-full">
-                           <TrendingDown className="h-3 w-3 mr-1"/> 출금
-                        </span>
-                      )}
-                    </TableCell>
-                    <TableCell className={`text-right font-medium ${tx.amount >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                      {tx.amount >= 0 ? `+${tx.amount.toLocaleString()}` : tx.amount.toLocaleString()}원
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </ScrollArea>
-        ) : (
-          <p className="text-center text-muted-foreground py-8">
-            등록된 거래 내역이 없습니다.
+              </AlertDialogTrigger>
+              <AlertDialogContent className="sm:max-w-md">
+                <AlertDialogHeader>
+                  <AlertDialogTitle>현재 회비 잔액 설정</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    외부에서 관리되는 회비의 현재 총 잔액을 입력해주세요.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <form onSubmit={form.handleSubmit(handleBalanceUpdate)} className="space-y-4 py-4">
+                  <div>
+                    <Label htmlFor="newBalance">새로운 잔액 (원) <span className="text-destructive">*</span></Label>
+                    <Input 
+                        id="newBalance" 
+                        type="text" 
+                        value={formatNumber(form.watch('newBalance'))}
+                        onChange={(e) => {
+                          const rawValue = e.target.value.replace(/,/g, '');
+                          form.setValue('newBalance', rawValue === '' ? 0 : parseFloat(rawValue), {shouldValidate: true});
+                        }}
+                        disabled={isPending} 
+                      />
+                    {form.formState.errors.newBalance && <p className="text-sm text-destructive mt-1">{form.formState.errors.newBalance.message}</p>}
+                  </div>
+                  <div>
+                    <Label htmlFor="description">설명 (선택)</Label>
+                    <Input 
+                        id="description" 
+                        {...form.register('description')}
+                        placeholder="예: 2024년 7월 정산 후 잔액"
+                        disabled={isPending} 
+                      />
+                     {form.formState.errors.description && <p className="text-sm text-destructive mt-1">{form.formState.errors.description.message}</p>}
+                  </div>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel onClick={() => setIsUpdateDialogOpen(false)} disabled={isPending}>취소</AlertDialogCancel>
+                    <AlertDialogAction type="submit" disabled={isPending}>
+                      {isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                      잔액 저장
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </form>
+              </AlertDialogContent>
+            </AlertDialog>
+        </CardHeader>
+        <CardContent>
+          <p className="text-muted-foreground">
+            현재 설정된 회비 잔액은 <strong className="text-primary">{currentBalance.toLocaleString()}원</strong> 입니다.
+            모임에서 회비를 사용하면 이 잔액에서 자동으로 차감됩니다.
           </p>
-        )}
-      </CardContent>
-    </Card>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2"><History className="h-5 w-5 text-primary"/>회비 변경 내역</CardTitle>
+          <CardDescription>모임에서의 회비 사용 또는 수동 잔액 설정 내역입니다.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          {transactions.length > 0 ? (
+            <ScrollArea className="h-[400px]">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>날짜</TableHead>
+                    <TableHead>설명</TableHead>
+                    <TableHead>유형</TableHead>
+                    <TableHead className="text-right">금액 (원)</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {transactions.map((tx) => (
+                    <TableRow key={tx.id}>
+                      <TableCell>{format(new Date(tx.date), 'yyyy.MM.dd HH:mm', { locale: ko })}</TableCell>
+                      <TableCell>{tx.description}</TableCell>
+                      <TableCell>
+                        {tx.type === 'meeting_deduction' ? (
+                          <span className="inline-flex items-center text-xs text-red-700 bg-red-100 px-2 py-0.5 rounded-full">
+                            <TrendingDown className="h-3 w-3 mr-1"/> 모임 차감
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center text-xs text-blue-700 bg-blue-100 px-2 py-0.5 rounded-full">
+                            <PiggyBank className="h-3 w-3 mr-1"/> 잔액 설정
+                          </span>
+                        )}
+                      </TableCell>
+                      <TableCell className={`text-right font-medium ${tx.type === 'meeting_deduction' ? 'text-red-600' : 'text-foreground'}`}>
+                        {/* For balance_update, amount is the new balance. For deduction, it's the change. */}
+                        {tx.type === 'balance_update' ? tx.amount.toLocaleString() : tx.amount.toLocaleString()}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </ScrollArea>
+          ) : (
+            <p className="text-center text-muted-foreground py-8">
+              기록된 회비 변경 내역이 없습니다.
+            </p>
+          )}
+        </CardContent>
+      </Card>
+    </div>
   );
 }

@@ -11,14 +11,18 @@ import {
   deleteMeeting as dbDeleteMeeting,
   addExpense as dbAddExpense,
   updateExpense as dbUpdateExpense,
-  deleteExpense as dbDeleteExpense, // Signature will change: deleteExpense(meetingId, expenseId)
-  addReserveFundTransaction as dbAddReserveFundTransaction,
+  deleteExpense as dbDeleteExpense,
   getFriendById,
   getMeetingById as dbGetMeetingById,
   getExpensesByMeetingId as dbGetExpensesByMeetingId,
   getFriends as dbGetFriends,
-  getReserveFundTransactions,
-  getReserveFundBalance, // Added for finalizeMeetingSettlementAction
+  // Reserve fund specific:
+  getReserveFundBalance,
+  setReserveFundBalance as dbSetReserveFundBalance,
+  recordMeetingDeduction as dbRecordMeetingDeduction,
+  revertMeetingDeduction as dbRevertMeetingDeduction,
+  getLoggedReserveFundTransactions,
+
 } from './data-store';
 import type { Friend, Meeting, Expense, ReserveFundTransaction } from './types';
 
@@ -40,7 +44,6 @@ export async function updateFriendAction(id: string, updates: Partial<Omit<Frien
     if (!updatedFriend) throw new Error('Friend not found');
     revalidatePath('/friends');
     revalidatePath(`/meetings`);
-    // Consider revalidating specific meeting pages if friend participated
     return { success: true, friend: updatedFriend };
   } catch (error) {
     return { success: false, error: error instanceof Error ? error.message : 'Failed to update friend' };
@@ -53,10 +56,6 @@ export async function deleteFriendAction(id: string) {
     if (!success) throw new Error('Failed to delete friend or friend not found');
     revalidatePath('/friends');
     revalidatePath('/meetings');
-    // Revalidate all meeting detail pages if friend could have been a participant.
-    // This is broad, but safer than trying to find all specific meetings.
-    // For a production app, a more targeted revalidation might be needed.
-    // revalidatePath('/meetings/[meetingId]', 'page'); // This syntax might be tricky for dynamic paths
     return { success: true };
   } catch (error) {
     return { success: false, error: error instanceof Error ? error.message : 'Failed to delete friend' };
@@ -69,7 +68,10 @@ export async function createMeetingAction(meetingData: Omit<Meeting, 'id' | 'cre
     const newMeeting = await dbAddMeeting(meetingData);
     revalidatePath('/meetings');
     revalidatePath('/');
-    revalidatePath(`/meetings/${newMeeting.id}`); // Revalidate the new meeting's page
+    revalidatePath(`/meetings/${newMeeting.id}`);
+    if (newMeeting.useReserveFund && newMeeting.reserveFundUsageType === 'partial' && (newMeeting.partialReserveFundAmount || 0) > 0) {
+      revalidatePath('/reserve-fund');
+    }
     return { success: true, meeting: newMeeting };
   } catch (error) {
     return { success: false, error: error instanceof Error ? error.message : 'Failed to create meeting' };
@@ -82,7 +84,7 @@ export async function updateMeetingAction(id: string, updates: Partial<Omit<Meet
     if (!updatedMeeting) throw new Error('Meeting not found');
     revalidatePath('/meetings');
     revalidatePath(`/meetings/${id}`);
-    revalidatePath('/reserve-fund'); // if fund usage changed
+    revalidatePath('/reserve-fund'); 
     return { success: true, meeting: updatedMeeting };
   } catch (error) {
     return { success: false, error: error instanceof Error ? error.message : 'Failed to update meeting' };
@@ -105,28 +107,14 @@ export async function deleteMeetingAction(id: string) {
 // Expense Actions
 export async function createExpenseAction(expenseData: Omit<Expense, 'id' | 'createdAt'>) {
   try {
-    const payerExists = await getFriendById(expenseData.paidById);
-    if (!payerExists) {
-      throw new Error('Payer (friend) does not exist.');
-    }
-
-    if (expenseData.splitType === 'equally' && expenseData.splitAmongIds) {
-      for (const friendId of expenseData.splitAmongIds) {
-        if (!(await getFriendById(friendId))) {
-          throw new Error(`Participant friend with ID ${friendId} does not exist.`);
-        }
-      }
-    } else if (expenseData.splitType === 'custom' && expenseData.customSplits) {
-       for (const split of expenseData.customSplits) {
-        if (!(await getFriendById(split.friendId))) {
-          throw new Error(`Participant friend with ID ${split.friendId} in custom split does not exist.`);
-        }
-      }
-    }
-
+    // Validation already done in data-store or should be there
     const newExpense = await dbAddExpense(expenseData);
     revalidatePath(`/meetings/${expenseData.meetingId}`);
-    revalidatePath('/reserve-fund');
+    
+    const meeting = await dbGetMeetingById(expenseData.meetingId);
+    if (meeting && meeting.isSettled && meeting.reserveFundUsageType === 'all') {
+        revalidatePath('/reserve-fund');
+    }
     return { success: true, expense: newExpense };
   } catch (error) {
     return { success: false, error: error instanceof Error ? error.message : 'Failed to create expense' };
@@ -135,33 +123,33 @@ export async function createExpenseAction(expenseData: Omit<Expense, 'id' | 'cre
 
 export async function updateExpenseAction(id: string, updates: Partial<Expense>) {
   try {
-    // Firestore update for subcollection needs meetingId.
-    // The current signature doesn't provide it directly. Assuming updates contains meetingId.
-    if (!updates.meetingId) {
-        // This is a fallback, ideally the caller should provide meetingId
-        // Or we need to change the function signature or find the expense first to get its meetingId
-        // For now, let's assume it will fail if meetingId isn't in updates.
-        // This part of the code needs a more robust way to get the original meetingId if not in updates.
-        // For a prototype, we might require `updates.meetingId` to be present.
-        throw new Error("meetingId is required in updates to update an expense in a subcollection.");
-    }
-    const updatedExpense = await dbUpdateExpense(id, updates); // dbUpdateExpense must handle subcollection logic
-    if (!updatedExpense) throw new Error('Expense not found or meetingId missing in updates');
+    const updatedExpense = await dbUpdateExpense(id, updates);
+    if (!updatedExpense) throw new Error('Expense not found');
     revalidatePath(`/meetings/${updatedExpense.meetingId}`);
-    revalidatePath('/reserve-fund');
+
+    const meeting = await dbGetMeetingById(updatedExpense.meetingId);
+     if (meeting && meeting.isSettled && meeting.reserveFundUsageType === 'all') {
+        revalidatePath('/reserve-fund');
+    }
     return { success: true, expense: updatedExpense };
   } catch (error) {
     return { success: false, error: error instanceof Error ? error.message : 'Failed to update expense' };
   }
 }
 
-// Signature changed to include meetingId
-export async function deleteExpenseAction(meetingId: string, expenseId: string) {
+export async function deleteExpenseAction(expenseId: string) {
   try {
-    const success = await dbDeleteExpense(meetingId, expenseId);
-    if (!success) throw new Error('Failed to delete expense or expense not found');
-    revalidatePath(`/meetings/${meetingId}`);
-    revalidatePath('/reserve-fund');
+    const expense = await getExpenseById(expenseId); // Get expense to find its meetingId for revalidation
+    if (!expense) throw new Error('Expense not found for deletion');
+    
+    const success = await dbDeleteExpense(expenseId);
+    if (!success) throw new Error('Failed to delete expense');
+    
+    revalidatePath(`/meetings/${expense.meetingId}`);
+    const meeting = await dbGetMeetingById(expense.meetingId);
+     if (meeting && meeting.isSettled && meeting.reserveFundUsageType === 'all') {
+        revalidatePath('/reserve-fund');
+    }
     return { success: true };
   } catch (error) {
     return { success: false, error: error instanceof Error ? error.message : 'Failed to delete expense' };
@@ -169,17 +157,14 @@ export async function deleteExpenseAction(meetingId: string, expenseId: string) 
 }
 
 // Reserve Fund Actions
-export async function addReserveTransactionAction(transactionData: Omit<ReserveFundTransaction, 'id'>) {
+export async function setReserveFundBalanceAction(newBalance: number, description?: string) {
   try {
-    const newTransaction = await dbAddReserveFundTransaction(transactionData);
+    await dbSetReserveFundBalance(newBalance, description || "수동 잔액 설정");
     revalidatePath('/reserve-fund');
-    revalidatePath('/');
-    if (newTransaction.meetingId) {
-      revalidatePath(`/meetings/${newTransaction.meetingId}`);
-    }
-    return { success: true, transaction: newTransaction };
+    revalidatePath('/'); // Balance might be shown on dashboard
+    return { success: true, newBalance };
   } catch (error) {
-    return { success: false, error: error instanceof Error ? error.message : 'Failed to add reserve fund transaction' };
+    return { success: false, error: error instanceof Error ? error.message : '회비 잔액 업데이트에 실패했습니다.' };
   }
 }
 
@@ -196,7 +181,6 @@ export async function finalizeMeetingSettlementAction(meetingId: string) {
 
     const expenses = await dbGetExpensesByMeetingId(meetingId);
     if (expenses.length === 0) {
-      // If no expenses, mark as settled without fund transaction
       const settledMeeting = await dbUpdateMeeting(meetingId, { isSettled: true });
       revalidatePath(`/meetings/${meetingId}`);
       return { success: true, meeting: settledMeeting, message: "No expenses to settle, marked as settled." };
@@ -243,46 +227,27 @@ export async function finalizeMeetingSettlementAction(meetingId: string) {
     });
     
     calculatedFundToUse = parseFloat(calculatedFundToUse.toFixed(2));
-
-    let actualFundUsedForThisMeeting = 0;
-    let transactionDescription = `모임 (${meeting.name}) 회비 전체 정산 사용`;
+    let message = `모임 (${meeting.name}) 정산 완료.`;
 
     if (calculatedFundToUse > 0) {
       const currentReserveBalance = await getReserveFundBalance();
-      if (currentReserveBalance <= 0) {
-        actualFundUsedForThisMeeting = 0;
-        transactionDescription = `모임 (${meeting.name}) 정산: 회비 잔액 부족으로 사용 불가`;
+      const amountToDeductFromFund = Math.min(calculatedFundToUse, currentReserveBalance);
+
+      if (amountToDeductFromFund > 0) {
+        await dbRecordMeetingDeduction(meeting.id, meeting.name, amountToDeductFromFund, new Date(meeting.dateTime));
+        message = `모임 (${meeting.name}) 정산 완료. 회비에서 ${amountToDeductFromFund.toLocaleString()}원 사용.`;
+        if (amountToDeductFromFund < calculatedFundToUse) {
+          message += ` (잔액 부족으로 부분 사용)`;
+        }
+      } else if (currentReserveBalance <=0) {
+        message = `모임 (${meeting.name}) 정산: 회비 잔액 부족으로 사용 불가.`;
       } else {
-        actualFundUsedForThisMeeting = Math.min(calculatedFundToUse, currentReserveBalance);
-        if (actualFundUsedForThisMeeting < calculatedFundToUse) {
-            transactionDescription = `모임 (${meeting.name}) 회비 전체 정산 사용 (잔액 부족으로 부분 사용: ${actualFundUsedForThisMeeting.toLocaleString()}원)`;
-        }
+         message = `모임 (${meeting.name}) 정산: 회비 사용 대상자의 부담금이 없어 회비가 사용되지 않았습니다.`;
       }
-
-      if (actualFundUsedForThisMeeting > 0) {
-        // Check for existing 'all' type transaction to prevent duplicates
-        const existingTransactions = await getReserveFundTransactions(); // Fetches all, then filters
-        const duplicateTx = existingTransactions.find(
-            tx => tx.meetingId === meetingId && 
-                  tx.type === 'meeting_contribution' &&
-                  tx.description.includes("전체 정산") // Heuristic for 'all' type
-        );
-
-        if (!duplicateTx) {
-          await dbAddReserveFundTransaction({
-            type: 'meeting_contribution',
-            amount: -actualFundUsedForThisMeeting,
-            description: transactionDescription,
-            date: new Date(meeting.dateTime),
-            meetingId: meetingId,
-          });
-        } else {
-           console.warn("Settlement for this 'all' type meeting might have already been recorded.", duplicateTx);
-           // Optionally, update the existing transaction if amount differs significantly, or just rely on it.
-           // For now, we assume if one exists, it's handled.
-        }
-      }
+    } else {
+        message = `모임 (${meeting.name}) 정산: 회비 사용 대상자의 부담금이 없어 회비가 사용되지 않았습니다.`;
     }
+
 
     const updatedMeeting = await dbUpdateMeeting(meetingId, { isSettled: true });
     if (!updatedMeeting) throw new Error('Failed to mark meeting as settled.');
@@ -290,7 +255,7 @@ export async function finalizeMeetingSettlementAction(meetingId: string) {
     revalidatePath(`/meetings/${meetingId}`);
     revalidatePath('/reserve-fund');
     revalidatePath('/');
-    return { success: true, meeting: updatedMeeting, message: transactionDescription };
+    return { success: true, meeting: updatedMeeting, message: message };
 
   } catch (error) {
     console.error("Finalize Meeting Settlement Error:", error);

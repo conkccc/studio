@@ -3,6 +3,7 @@ export type Friend = {
   id: string;
   nickname: string;
   name?: string; // Optional full name
+  createdAt: Date; // Added from previous modifications
 };
 
 export type ExpenseSplit = {
@@ -17,8 +18,6 @@ export type Expense = {
   totalAmount: number;
   paidById: string; // Friend ID of who paid
   splitType: "equally" | "custom";
-  // If 'equally', splitAmongIds indicates who to split amongst.
-  // If 'custom', customSplits defines specific amounts.
   splitAmongIds?: string[]; 
   customSplits?: ExpenseSplit[]; 
   createdAt: Date;
@@ -28,27 +27,30 @@ export type Meeting = {
   id: string;
   name: string;
   dateTime: Date;
-  endTime?: Date; // Made endTime optional as it might not always be set
+  endTime?: Date;
   locationName: string;
-  locationCoordinates?: { lat: number; lng: number }; // Optional
-  creatorId: string; // Friend ID of the creator
-  participantIds: string[]; // Array of Friend IDs
+  locationCoordinates?: { lat: number; lng: number };
+  creatorId: string;
+  participantIds: string[];
   createdAt: Date;
 
   useReserveFund: boolean;
   reserveFundUsageType: 'all' | 'partial';
-  partialReserveFundAmount?: number; // Used if reserveFundUsageType is 'partial'
-  nonReserveFundParticipants: string[]; // Friend IDs who DO NOT benefit from reserve fund
-  isSettled?: boolean; // True if the meeting's fund usage (especially for 'all' type) has been finalized and recorded
+  partialReserveFundAmount?: number;
+  nonReserveFundParticipants: string[];
+  isSettled?: boolean; 
 };
 
 export type ReserveFundTransaction = {
   id: string;
-  type: "deposit" | "withdrawal" | "meeting_contribution";
+  // 'deposit' and 'withdrawal' removed for direct balance setting
+  // 'meeting_contribution' can be simplified to 'meeting_deduction'
+  // 'balance_update' for manual setting of balance
+  type: "meeting_deduction" | "balance_update"; 
   description: string;
-  amount: number; // Positive for deposit/contribution_refund, negative for withdrawal/contribution_usage
+  amount: number; // For 'meeting_deduction', this will be negative. For 'balance_update', this is the new balance.
   date: Date;
-  meetingId?: string; // if withdrawal is for a meeting or contribution is from a meeting
+  meetingId?: string; // if type is 'meeting_deduction'
 };
 
 export type CostAnalysisResult = {
