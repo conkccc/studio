@@ -61,7 +61,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         const isActive = item.matchExact ? pathname === item.href : pathname.startsWith(item.href);
         return (
           <SidebarMenuItem key={item.href}>
-            <Link href={item.href} passHref legacyBehavior onClick={isSheet ? handleClose : undefined}>
+            <Link href={item.href} passHref onClick={() => handleClose()}>
               <SidebarMenuButton
                 asChild={!isSheet}
                 isActive={isActive}
@@ -81,8 +81,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   );
 
   return (
-    <div className="flex min-h-screen w-full flex-col bg-muted/40">
-      {!isMobile && (
+    <div className={`flex min-h-screen w-full flex-col bg-muted/40 ${!isMobile ? 'sm:pl-[calc(var(--sidebar-width-icon)_+_1rem)] group-data-[state=expanded]/sidebar-wrapper:sm:pl-[calc(var(--sidebar-width)_+_1rem)]' : 'sm:pl-0'} transition-[padding-left] duration-300 ease-in-out`}>
         <Sidebar collapsible="icon" variant="sidebar" side="left" className="border-r group/sidebar">
           <SidebarHeader className="p-4">
             <Link href="/" className="flex items-center gap-2 font-semibold group-data-[collapsible=icon]:justify-center">
@@ -91,7 +90,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             </Link>
           </SidebarHeader>
           <SidebarContent className="flex-1 p-2">
-            {renderNavLinks()}
+            {renderNavLinks(false)}
           </SidebarContent>
           <SidebarFooter className="p-2">
             <SidebarMenu>
@@ -109,10 +108,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             </SidebarMenu>
           </SidebarFooter>
         </Sidebar>
-      )}
-
-      <div className={`flex flex-col sm:gap-4 sm:py-4 ${isMobile ? 'sm:pl-0' : 'sm:pl-[calc(var(--sidebar-width-icon)_+_1rem)] group-data-[state=expanded]/sidebar-wrapper:sm:pl-[calc(var(--sidebar-width)_+_1rem)]'} transition-[padding-left] duration-300 ease-in-out`}>
-        <header className="sticky top-0 z-30 flex h-14 items-center gap-4 border-b bg-background px-4 sm:static sm:h-auto sm:border-0 sm:bg-transparent sm:px-6">
+ <header className="sticky top-0 z-30 flex h-14 items-center gap-4 border-b bg-background px-4 sm:static sm:h-auto sm:border-0 sm:bg-transparent sm:px-6 mb-4">
           {isMobile && (
             <Sheet>
               <SheetTrigger asChild>
@@ -146,7 +142,6 @@ export function AppShell({ children }: { children: ReactNode }) {
         <main className="flex-1 p-4 sm:px-6 sm:py-0">
           {children}
         </main>
-      </div>
     </div>
   );
 }

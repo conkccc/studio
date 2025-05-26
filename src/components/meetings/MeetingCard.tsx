@@ -1,10 +1,10 @@
+'use client';
 import Link from 'next/link';
 import type { Meeting, Friend } from '@/lib/types';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { CalendarDays, MapPin, Users, ArrowRight } from 'lucide-react';
 import { format } from 'date-fns';
-import { ko } from 'date-fns/locale';
 
 interface MeetingCardProps {
   meeting: Meeting;
@@ -29,7 +29,11 @@ export function MeetingCard({ meeting, allFriends }: MeetingCardProps) {
       <CardContent className="flex-grow space-y-3 text-sm">
         <div className="flex items-center gap-2 text-muted-foreground">
           <CalendarDays className="h-4 w-4" />
-          <span>{format(new Date(meeting.dateTime), 'yyyy년 M월 d일 (EEE) HH:mm', { locale: ko })}</span>
+          <span>
+            {`${format(meeting.dateTime, 'yyyy년 M월 d일 HH:mm')}`}
+            {meeting.endTime && meeting.endTime instanceof Date && !isNaN(meeting.endTime.getTime())
+              ? ` - ${format(meeting.endTime, 'HH:mm')}` : ''}
+          </span>
         </div>
         <div className="flex items-center gap-2 text-muted-foreground">
           <MapPin className="h-4 w-4" />

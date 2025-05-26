@@ -10,7 +10,7 @@ export type ExpenseSplit = {
 };
 
 export type Expense = {
-  id: string;
+  id:string;
   meetingId: string;
   description: string;
   totalAmount: number;
@@ -27,21 +27,27 @@ export type Meeting = {
   id: string;
   name: string;
   dateTime: Date;
+  endTime?: Date; // Made endTime optional as it might not always be set
   locationName: string;
   locationCoordinates?: { lat: number; lng: number }; // Optional
   creatorId: string; // Friend ID of the creator
   participantIds: string[]; // Array of Friend IDs
-  // expenses are now fetched separately or managed within the meeting component
   createdAt: Date;
+
+  useReserveFund: boolean;
+  reserveFundUsageType: 'all' | 'partial';
+  partialReserveFundAmount?: number; // Optional, used if reserveFundUsageType is 'partial'
+  nonReserveFundParticipants: string[]; // Friend IDs who DO NOT benefit from reserve fund
+  // associatedReserveFundTransactionId?: string; // Optional: to link to the specific fund transaction
 };
 
 export type ReserveFundTransaction = {
   id: string;
   type: "deposit" | "withdrawal" | "meeting_contribution";
   description: string;
-  amount: number;
+  amount: number; // Positive for deposit/contribution_refund, negative for withdrawal/contribution_usage
   date: Date;
-  meetingId?: string; // if withdrawal is for a meeting
+  meetingId?: string; // if withdrawal is for a meeting or contribution is from a meeting
 };
 
 export type CostAnalysisResult = {

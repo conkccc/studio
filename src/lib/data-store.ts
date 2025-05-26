@@ -16,6 +16,10 @@ let meetings: Meeting[] = [
     creatorId: '1',
     participantIds: ['1', '2'],
     createdAt: new Date('2024-07-15T10:00:00'),
+    useReserveFund: true,
+    reserveFundUsageType: 'partial',
+    partialReserveFundAmount: 10000,
+    nonReserveFundParticipants: [],
   },
   {
     id: 'm2',
@@ -25,6 +29,9 @@ let meetings: Meeting[] = [
     creatorId: '2',
     participantIds: ['1', '2', '3'],
     createdAt: new Date('2023-11-18T10:00:00'),
+    useReserveFund: false,
+    reserveFundUsageType: 'all', // Default, not actively used if useReserveFund is false
+    nonReserveFundParticipants: [],
   },
 ];
 
@@ -65,10 +72,9 @@ let expenses: Expense[] = [
   },
 ];
 
-let reserveFundBalance: number = 100000;
 let reserveFundTransactions: ReserveFundTransaction[] = [
     { id: 'rf1', type: 'deposit', description: '초기 회비', amount: 150000, date: new Date('2023-01-01')},
-    { id: 'rf2', type: 'meeting_contribution', meetingId: 'm1', description: '점심 식사 지원', amount: -20000, date: new Date('2024-07-15')},
+    { id: 'rf2', type: 'meeting_contribution', meetingId: 'm1', description: '모임 (점심 식사 🍕) 회비 사용', amount: -10000, date: new Date('2024-07-15')},
     { id: 'rf3', type: 'withdrawal', description: '경조사비', amount: -30000, date: new Date('2024-08-01')},
 ];
 
@@ -101,10 +107,12 @@ export const deleteFriend = async (id: string): Promise<boolean> => {
   // Also remove friend from meeting participants and expenses
   meetings.forEach(meeting => {
     meeting.participantIds = meeting.participantIds.filter(pId => pId !== id);
+    meeting.nonReserveFundParticipants = meeting.nonReserveFundParticipants.filter(nrpId => nrpId !== id);
   });
   expenses.forEach(expense => {
     if (expense.paidById === id) {
-      // Handle case where payer is deleted - for simplicity, not handled here
+      // For simplicity, if a payer is deleted, the expense remains associated with their ID.
+      // A real app might require re-assigning the payer or other handling.
     }
     expense.splitAmongIds = expense.splitAmongIds?.filter(sId => sId !== id);
     expense.customSplits = expense.customSplits?.filter(cs => cs.friendId !== id);
@@ -122,23 +130,66 @@ export const getMeetingById = async (id: string): Promise<Meeting | undefined> =
 };
 
 export const addMeeting = async (meetingData: Omit<Meeting, 'id' | 'createdAt'>): Promise<Meeting> => {
-  const newMeeting: Meeting = { ...meetingData, id: String(Date.now()), createdAt: new Date() };
+  const newMeetingId = String(Date.now());
+  const newMeeting: Meeting = {
+    ...meetingData,
+    id: newMeetingId,
+    createdAt: new Date(),
+  };
   meetings.push(newMeeting);
+
+  if (newMeeting.useReserveFund && newMeeting.reserveFundUsageType === 'partial' && (newMeeting.partialReserveFundAmount || 0) > 0) {
+    addReserveFundTransaction({
+      type: 'meeting_contribution',
+      amount: -(newMeeting.partialReserveFundAmount as number),
+      description: `모임 (${newMeeting.name}) 회비 사용`,
+      date: newMeeting.dateTime, // Use meeting date for the transaction
+      meetingId: newMeetingId,
+    });
+  }
   return newMeeting;
 };
 
 export const updateMeeting = async (id: string, updates: Partial<Meeting>): Promise<Meeting | null> => {
   const meetingIndex = meetings.findIndex(m => m.id === id);
   if (meetingIndex === -1) return null;
-  meetings[meetingIndex] = { ...meetings[meetingIndex], ...updates };
-  return meetings[meetingIndex];
+
+  const originalMeeting = meetings[meetingIndex];
+  const updatedMeeting = { ...originalMeeting, ...updates };
+  meetings[meetingIndex] = updatedMeeting;
+
+  // Find and remove any existing reserve fund transaction for this meeting
+  const existingTransactionIndex = reserveFundTransactions.findIndex(
+    (tx) => tx.meetingId === id && tx.type === 'meeting_contribution'
+  );
+  if (existingTransactionIndex !== -1) {
+    reserveFundTransactions.splice(existingTransactionIndex, 1);
+  }
+
+  // Add new transaction if applicable
+  if (updatedMeeting.useReserveFund && updatedMeeting.reserveFundUsageType === 'partial' && (updatedMeeting.partialReserveFundAmount || 0) > 0) {
+    addReserveFundTransaction({
+      type: 'meeting_contribution',
+      amount: -(updatedMeeting.partialReserveFundAmount as number),
+      description: `모임 (${updatedMeeting.name}) 회비 사용 (수정)`,
+      date: updatedMeeting.dateTime,
+      meetingId: id,
+    });
+  }
+  return updatedMeeting;
 };
 
 export const deleteMeeting = async (id: string): Promise<boolean> => {
   const initialLength = meetings.length;
   meetings = meetings.filter(m => m.id !== id);
-  // Also delete associated expenses
   expenses = expenses.filter(e => e.meetingId !== id);
+  // Remove any associated reserve fund transaction
+  const existingTransactionIndex = reserveFundTransactions.findIndex(
+    (tx) => tx.meetingId === id && tx.type === 'meeting_contribution'
+  );
+  if (existingTransactionIndex !== -1) {
+    reserveFundTransactions.splice(existingTransactionIndex, 1);
+  }
   return meetings.length < initialLength;
 };
 
@@ -172,13 +223,12 @@ export const getReserveFundBalance = async (): Promise<number> => {
 };
 
 export const getReserveFundTransactions = async (): Promise<ReserveFundTransaction[]> => {
-  return [...reserveFundTransactions].sort((a,b) => b.date.getTime() - a.date.getTime());
+  return [...reserveFundTransactions].sort((a,b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 };
 
 export const addReserveFundTransaction = async (transactionData: Omit<ReserveFundTransaction, 'id'>): Promise<ReserveFundTransaction> => {
   const newTransaction: ReserveFundTransaction = { ...transactionData, id: String(Date.now()) };
   reserveFundTransactions.push(newTransaction);
-  // reserveFundBalance += newTransaction.amount; // Balance is now computed
   return newTransaction;
 };
 
