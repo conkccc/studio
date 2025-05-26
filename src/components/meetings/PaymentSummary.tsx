@@ -10,15 +10,15 @@ import { TrendingUp, TrendingDown, UserCircle, PiggyBank, Info } from 'lucide-re
 import { Badge } from '@/components/ui/badge';
 
 interface PaymentSummaryProps {
-  meeting: Meeting; // Added meeting prop
+  meeting: Meeting;
   expenses: Expense[];
-  participants: Friend[]; // Meeting participants
-  allFriends: Friend[]; // All friends to resolve names
+  participants: Friend[];
+  allFriends: Friend[];
 }
 
 interface LedgerEntry {
   friendId: string;
-  amount: number; // positive if paid more (creditor), negative if owes (debtor)
+  amount: number;
 }
 
 export function PaymentSummary({ meeting, expenses, participants, allFriends }: PaymentSummaryProps) {
@@ -65,7 +65,8 @@ export function PaymentSummary({ meeting, expenses, participants, allFriends }: 
     );
   }, [meeting.useReserveFund, meeting.nonReserveFundParticipants, participants]);
 
-  const fundContributionDetails = useMemo(() => {
+  const derivedDetails = useMemo(() => {
+    const currentTotalSpent = expenses.reduce((sum, e) => sum + e.totalAmount, 0);
     let amountToCoverByFund = 0;
     let description = "회비 사용 없음";
 
@@ -82,21 +83,23 @@ export function PaymentSummary({ meeting, expenses, participants, allFriends }: 
         });
         amountToCoverByFund = totalOwedByBenefiting;
         description = `회비에서 최대 ${amountToCoverByFund.toLocaleString()}원 사용 (혜택자 총 부담금 기준)`;
-        if (amountToCoverByFund === 0 && totalSpent > 0) {
+        
+        if (amountToCoverByFund === 0 && currentTotalSpent > 0) {
              description = "회비 사용 대상자의 부담금이 없어 회비가 사용되지 않았습니다.";
-        } else if (totalSpent === 0) {
+        } else if (currentTotalSpent === 0) {
              description = "총 지출이 없어 회비가 사용되지 않았습니다.";
         }
       }
     }
     
-    return { amount: amountToCoverByFund, description };
-  }, [meeting, initialPaymentLedger, benefitingParticipantIds]);
+    return { amount: amountToCoverByFund, description, totalSpent: currentTotalSpent };
+  }, [expenses, meeting, initialPaymentLedger, benefitingParticipantIds]);
 
+  const { amount: fundAmountForMeeting, description: fundDescription, totalSpent } = derivedDetails;
 
   const finalPaymentLedger = useMemo(() => {
     const finalLedger = { ...initialPaymentLedger };
-    let fundRemainingToDistribute = fundContributionDetails.amount;
+    let fundRemainingToDistribute = fundAmountForMeeting;
 
     if (meeting.useReserveFund && fundRemainingToDistribute > 0) {
       // Sort benefiting participants: those who owe more get fund priority
@@ -115,10 +118,8 @@ export function PaymentSummary({ meeting, expenses, participants, allFriends }: 
       }
     }
     return finalLedger;
-  }, [initialPaymentLedger, fundContributionDetails, benefitingParticipantIds, meeting.useReserveFund]);
+  }, [initialPaymentLedger, fundAmountForMeeting, benefitingParticipantIds, meeting.useReserveFund]);
   
-  const totalSpent = useMemo(() => expenses.reduce((sum, e) => sum + e.totalAmount, 0), [expenses]);
-
   const simplifiedDebts = useMemo(() => {
     const balances: LedgerEntry[] = Object.entries(finalPaymentLedger)
       .map(([friendId, amount]) => ({ friendId, amount }))
@@ -179,16 +180,16 @@ export function PaymentSummary({ meeting, expenses, participants, allFriends }: 
         <CardTitle>정산 요약</CardTitle>
         <CardDescription>
           총 지출: {totalSpent.toLocaleString()}원.
-          {meeting.useReserveFund && fundContributionDetails.amount > 0 && (
+          {meeting.useReserveFund && fundAmountForMeeting > 0 && (
             <span className="block text-sm text-primary mt-1">
               <PiggyBank className="inline-block h-4 w-4 mr-1" />
-              {fundContributionDetails.description} (아래 정산에 반영됨)
+              {fundDescription}
             </span>
           )}
-           {meeting.useReserveFund && fundContributionDetails.amount === 0 && totalSpent > 0 && (
+           {meeting.useReserveFund && fundAmountForMeeting === 0 && totalSpent > 0 && (
              <span className="block text-sm text-muted-foreground mt-1">
                 <Info className="inline-block h-4 w-4 mr-1" />
-                {fundContributionDetails.description}
+                {fundDescription}
              </span>
            )}
         </CardDescription>
@@ -289,5 +290,3 @@ export function PaymentSummary({ meeting, expenses, participants, allFriends }: 
     </Card>
   );
 }
-
-    
