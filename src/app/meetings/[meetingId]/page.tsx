@@ -1,3 +1,4 @@
+
 import { getMeetingById, getExpensesByMeetingId, getFriends, getSpendingDataForMeeting } from '@/lib/data-store';
 import { MeetingDetailsClient } from '@/components/meetings/MeetingDetailsClient';
 import { notFound } from 'next/navigation';
@@ -14,8 +15,8 @@ import {
 } from "@/components/ui/card"
 
 
-export default async function MeetingDetailPage({ params }: { params: { meetingId: string } }) { // Changed params.id to params.meetingId
-  const meetingId = params.meetingId; // Changed params.id to params.meetingId
+export default async function MeetingDetailPage({ params }: { params: { meetingId: string } }) {
+  const meetingId = params.meetingId;
   const meeting = await getMeetingById(meetingId);
 
   if (!meeting) {
