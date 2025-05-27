@@ -5,7 +5,8 @@ import { Sparkles } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
 
 export default function AiAnalysisPage() {
-  // Removed all state, useEffect, and functions related to fetching AI data or using AiCostAnalysisClient
+  // Removed all state, useEffect, and functions that might have used useSearchParams
+  // or were related to fetching AI data or using AiCostAnalysisClient.
 
   return (
     <div className="space-y-6">
