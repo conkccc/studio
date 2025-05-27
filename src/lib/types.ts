@@ -3,7 +3,7 @@ export type Friend = {
   id: string;
   nickname: string;
   name?: string; // Optional full name
-  createdAt: Date; // Added from previous modifications
+  createdAt: Date;
 };
 
 export type ExpenseSplit = {
@@ -35,25 +35,19 @@ export type Meeting = {
   createdAt: Date;
 
   useReserveFund: boolean;
-  reserveFundUsageType: 'all' | 'partial';
-  partialReserveFundAmount?: number;
+  // reserveFundUsageType is removed
+  partialReserveFundAmount?: number; // Amount to use if useReserveFund is true
   nonReserveFundParticipants: string[];
   isSettled?: boolean; 
 };
 
 export type ReserveFundTransaction = {
   id: string;
-  // 'deposit' and 'withdrawal' removed for direct balance setting
-  // 'meeting_contribution' can be simplified to 'meeting_deduction'
-  // 'balance_update' for manual setting of balance
   type: "meeting_deduction" | "balance_update"; 
   description: string;
-  amount: number; // For 'meeting_deduction', this will be negative. For 'balance_update', this is the new balance.
+  amount: number; 
   date: Date;
-  meetingId?: string; // if type is 'meeting_deduction'
+  meetingId?: string; 
 };
 
-export type CostAnalysisResult = {
-  summary: string;
-  costCuttingSuggestions: string;
-};
+// CostAnalysisResult type is removed

@@ -4,16 +4,17 @@
 import type { ReactNode } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import React, { useRef, useEffect } from 'react';
+import React, { useRef, useEffect, useState } from 'react';
 import {
   Home,
   UsersRound,
   CalendarCheck,
   PiggyBank,
-  Brain,
+  // Brain, // Removed Brain icon
   Settings,
   Menu,
   Briefcase,
+  LogOut,
 } from 'lucide-react';
 
 import {
@@ -29,36 +30,42 @@ import {
 import { Button } from '@/components/ui/button';
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { cn } from '@/lib/utils';
+import { useAuth } from '@/contexts/AuthContext'; // Import useAuth
 
 interface NavItem {
   href: string;
   label: string;
   icon: React.ElementType;
   matchExact?: boolean;
+  adminOnly?: boolean;
 }
 
 const navItems: NavItem[] = [
-  { href: '/', label: 'Dashboard', icon: Home, matchExact: true },
-  { href: '/friends', label: 'Friends', icon: UsersRound },
-  { href: '/meetings', label: 'Meetings', icon: CalendarCheck },
-  { href: '/reserve-fund', label: 'Reserve Fund', icon: PiggyBank },
-  { href: '/ai-analysis', label: 'AI Cost Analysis', icon: Brain },
+  { href: '/', label: 'Dashboard', icon: Home, matchExact: true, adminOnly: true },
+  { href: '/friends', label: 'Friends', icon: UsersRound, adminOnly: true },
+  { href: '/meetings', label: 'Meetings', icon: CalendarCheck, adminOnly: false }, // Meetings accessible by all
+  { href: '/reserve-fund', label: 'Reserve Fund', icon: PiggyBank, adminOnly: true },
+  // { href: '/ai-analysis', label: 'AI Cost Analysis', icon: Brain, adminOnly: false }, // Removed AI Analysis link
 ];
 
 export function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
-  const { isMobile, setOpen, open, openMobile, setOpenMobile, toggleSidebar, state } = useSidebar();
+  const { isMobile, setOpenMobile, openMobile, state } = useSidebar();
+  const { currentUser, isAdmin, loading, signOut } = useAuth(); // Get signOut from useAuth
 
   const sheetTriggerRef = useRef<HTMLButtonElement>(null);
   const sheetContentRef = useRef<HTMLDivElement>(null);
+  const [isClient, setIsClient] = useState(false);
+
+  useEffect(() => {
+    setIsClient(true);
+  }, []);
+
 
   const handleClose = () => {
     if (isMobile) {
       setOpenMobile(false);
     }
-    // For desktop, we might not want to close an expanded sidebar on nav click
-    // but if it's 'icon' (collapsed), this won't affect it.
-    // If `open` is managed by `collapsible="icon"`, then `setOpen` might not be needed here for desktop.
   };
 
   useEffect(() => {
@@ -86,29 +93,42 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   const renderNavLinks = (isSheetContext = false) => (
     <SidebarMenu>
-      {navItems.map((item) => {
+      {navItems.filter(item => !item.adminOnly || isAdmin).map((item) => {
         const isActive = item.matchExact ? pathname === item.href : pathname.startsWith(item.href);
         return (
           <SidebarMenuItem key={item.href}>
-            <Link href={item.href} passHref legacyBehavior={false}>
-              <SidebarMenuButton
-                asChild={!isSheetContext} 
-                isActive={isActive}
-                className="w-full"
-                tooltip={isMobile || (state === 'expanded' && !isSheetContext) ? undefined : item.label}
-                onClick={handleClose}
-              >
-                <span> {/* This span is crucial for asChild with multiple children */}
-                  <item.icon aria-hidden="true" />
-                  <span>{item.label}</span>
-                </span>
-              </SidebarMenuButton>
-            </Link>
+            <SidebarMenuButton
+              asChild={!isSheetContext}
+              isActive={isActive}
+              className="w-full"
+              tooltip={isMobile || (state === 'expanded' && !isSheetContext) ? undefined : item.label}
+              onClick={handleClose}
+            >
+              <Link href={item.href} passHref legacyBehavior={false}>
+                <item.icon aria-hidden="true" />
+                <span>{item.label}</span>
+              </Link>
+            </SidebarMenuButton>
           </SidebarMenuItem>
         );
       })}
     </SidebarMenu>
   );
+  
+  if (loading || !isClient) {
+    return (
+      <div className="flex justify-center items-center min-h-screen bg-muted/40">
+        <p className="text-xl text-muted-foreground">앱 로딩 중...</p>
+      </div>
+    );
+  }
+
+
+  // Hide sidebar and main content structure for login page
+  if (pathname === '/login') {
+    return <main className="flex-1">{children}</main>;
+  }
+
 
   return (
     <div 
@@ -116,10 +136,9 @@ export function AppShell({ children }: { children: ReactNode }) {
             "flex min-h-screen w-full flex-col bg-muted/40 transition-[padding-left] duration-300 ease-in-out",
             !isMobile && state === 'expanded' && "sm:pl-[calc(var(--sidebar-width)_+_1rem)]",
             !isMobile && state === 'collapsed' && "sm:pl-[calc(var(--sidebar-width-icon)_+_1rem)]",
-            isMobile && "pl-0" // Ensure no padding-left on mobile
+            isMobile && "pl-0" 
         )}
     >
-        {/* Desktop Sidebar */}
         {!isMobile && (
           <Sidebar collapsible="icon" variant="sidebar" side="left" className="border-r group/sidebar">
             <SidebarHeader className="p-4">
@@ -133,22 +152,23 @@ export function AppShell({ children }: { children: ReactNode }) {
             </SidebarContent>
             <SidebarFooter className="p-2">
               <SidebarMenu>
-                <SidebarMenuItem>
-                  <SidebarMenuButton
-                    tooltip={isMobile || state === 'expanded' ? undefined : "Settings"}
-                    onClick={() => {
-                      // For settings, always close mobile if open
-                      if (isMobile) setOpenMobile(false);
-                      // Potentially open settings modal or navigate
-                      console.log("Settings clicked");
-                    }}
-                  >
-                    <span>
-                      <Settings aria-hidden="true" />
-                      <span>Settings</span>
-                    </span>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
+                {currentUser && (
+                  <SidebarMenuItem>
+                    <SidebarMenuButton
+                      tooltip={isMobile || state === 'expanded' ? undefined : `로그아웃 (${currentUser.email?.split('@')[0]})`}
+                      onClick={async () => {
+                        if (isMobile) setOpenMobile(false);
+                        await signOut();
+                      }}
+                    >
+                      <span>
+                        <LogOut aria-hidden="true" />
+                        <span>로그아웃</span>
+                      </span>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                )}
+                {/* Settings button can be added here if needed */}
               </SidebarMenu>
             </SidebarFooter>
           </Sidebar>
@@ -158,7 +178,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         className={cn(
             "sticky top-0 z-30 flex h-14 items-center gap-4 border-b bg-background px-4",
             "sm:static sm:h-auto sm:border-0 sm:bg-transparent sm:px-6",
-            isMobile ? "mb-0" : "mb-6" // No bottom margin for mobile header, margin for desktop
+            isMobile ? "mb-0" : "sm:mb-6" 
         )}
        >
           {isMobile && (
@@ -181,16 +201,34 @@ export function AppShell({ children }: { children: ReactNode }) {
                   <div className="p-2">
                     {renderNavLinks(true)}
                   </div>
+                   {currentUser && (
+                    <div className="p-2 mt-auto border-t">
+                       <SidebarMenu>
+                          <SidebarMenuItem>
+                            <SidebarMenuButton
+                              onClick={async () => {
+                                setOpenMobile(false);
+                                await signOut();
+                              }}
+                            >
+                              <span>
+                                <LogOut aria-hidden="true" />
+                                <span>로그아웃</span>
+                                {currentUser.email && <span className="text-xs text-muted-foreground ml-auto truncate">({currentUser.email.split('@')[0]})</span>}
+                              </span>
+                            </SidebarMenuButton>
+                          </SidebarMenuItem>
+                       </SidebarMenu>
+                    </div>
+                  )}
                 </nav>
               </SheetContent>
             </Sheet>
           )}
            <div className="flex-1">
-             {/* Optional: Breadcrumbs or Page Title for desktop header */}
            </div>
-           {/* Optional: User Menu for desktop header */}
         </header>
-        <main className="flex-1 p-4 sm:px-6 sm:pb-6 sm:pt-0"> {/* Adjusted padding for main content */}
+        <main className="flex-1 p-4 sm:px-6 sm:pb-6 sm:pt-0"> 
           {children}
         </main>
     </div>

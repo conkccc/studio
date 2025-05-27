@@ -4,7 +4,7 @@
 import Link from 'next/link';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { UsersRound, CalendarCheck, PiggyBank, Brain, ArrowRight, LineChart } from 'lucide-react';
+import { UsersRound, CalendarCheck, PiggyBank, ArrowRight, LineChart } from 'lucide-react'; // Brain icon removed
 import Image from 'next/image';
 import { useAuth } from '@/contexts/AuthContext';
 import { useEffect, useState } from 'react'; 
@@ -13,10 +13,14 @@ import { getReserveFundBalance } from '@/lib/data-store';
 export default function DashboardPage() {
   const { currentUser, isAdmin, loading } = useAuth();
   const [reserveBalance, setReserveBalance] = useState<number | null>(null);
+  const [isClient, setIsClient] = useState(false);
 
   useEffect(() => {
-    // Firestore를 사용하므로, 관리자일 때만 잔액을 가져오도록 수정
-    if (!loading && currentUser && isAdmin) {
+    setIsClient(true);
+  }, []);
+
+  useEffect(() => {
+    if (isClient && !loading && currentUser && isAdmin) {
       const fetchBalance = async () => {
         try {
           const balance = await getReserveFundBalance();
@@ -27,20 +31,20 @@ export default function DashboardPage() {
         }
       };
       fetchBalance();
-    } else if (!currentUser || !isAdmin) {
-      setReserveBalance(null); // 로그아웃되거나 관리자가 아니면 잔액 정보 초기화
+    } else if (isClient && (!currentUser || !isAdmin)) {
+      setReserveBalance(null); 
     }
-  }, [currentUser, isAdmin, loading]);
+  }, [currentUser, isAdmin, loading, isClient]);
 
 
   const quickLinks = [
     { href: '/friends', label: '친구 관리', icon: UsersRound, description: '친구 목록을 보고 새 친구를 추가하세요.', adminOnly: true },
-    { href: '/meetings', label: '모임 관리', icon: CalendarCheck, description: '모임을 만들고 지난 모임을 확인하세요.', adminOnly: false }, // 모임 관리는 이제 공개
+    { href: '/meetings', label: '모임 관리', icon: CalendarCheck, description: '모임을 만들고 지난 모임을 확인하세요.', adminOnly: false }, 
     { href: '/reserve-fund', label: '회비 현황', icon: PiggyBank, description: '회비 잔액과 사용 내역을 보세요.', adminOnly: true },
-    { href: '/ai-analysis', label: 'AI 비용 분석', icon: Brain, description: 'AI로 지출을 분석하고 절약법을 찾으세요.', adminOnly: false }, // AI 분석도 공개
+    // AI Analysis link removed
   ];
 
-  if (loading) {
+  if (loading || !isClient) {
     return (
       <div className="flex justify-center items-center min-h-[calc(100vh-150px)]">
         <p className="text-xl text-muted-foreground">대시보드 로딩 중...</p>
@@ -52,7 +56,7 @@ export default function DashboardPage() {
     return (
       <div className="container mx-auto py-8 text-center">
         <h1 className="text-3xl font-bold mb-4">N빵친구에 오신 것을 환영합니다!</h1>
-        <p className="text-lg text-muted-foreground mb-6">로그인하여 친구들과의 정산을 시작하세요.</p>
+        <p className="text-lg text-muted-foreground mb-6">모임 정산을 관리하려면 로그인해주세요.</p>
         <Button asChild>
           <Link href="/login">로그인 페이지로 이동</Link>
         </Button>
@@ -62,24 +66,39 @@ export default function DashboardPage() {
 
   if (!isAdmin) {
      return (
-      <div className="container mx-auto py-8 text-center">
-        <h1 className="text-3xl font-bold mb-4">접근 권한 없음</h1>
-        <p className="text-lg text-muted-foreground mb-6">
-          이 애플리케이션의 관리자 기능은 지정된 관리자만 사용할 수 있습니다.
-          <br />
-          모임 목록 및 AI 비용 분석 도구는 로그인 없이도 사용 가능합니다.
+      <div className="container mx-auto py-8">
+        <h1 className="text-3xl font-bold mb-4 text-center">환영합니다, {currentUser.displayName || currentUser.email}!</h1>
+        <p className="text-lg text-muted-foreground mb-6 text-center">
+          모임 목록을 확인하거나 지난 모임의 정산 내역을 볼 수 있습니다.
         </p>
-         <Button onClick={async () => {
-            const { signOut } = await import('firebase/auth');
-            const { auth } = await import('@/lib/firebase'); // auth 임포트 확인
-            await signOut(auth);
-            // AuthContext will handle redirect via onAuthStateChanged
-        }}>로그아웃</Button>
+         <section className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-12">
+          {quickLinks.filter(link => !link.adminOnly).map((link) => (
+            <Card key={link.href} className="hover:shadow-lg transition-shadow duration-300">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-xl">
+                  <link.icon className="w-6 h-6 text-primary" />
+                  {link.label}
+                </CardTitle>
+                <CardDescription>{link.description}</CardDescription>
+              </CardHeader>
+              <CardFooter>
+                <Button asChild variant="outline" className="w-full">
+                  <Link href={link.href}>
+                    바로가기 <ArrowRight className="ml-2 h-4 w-4" />
+                  </Link>
+                </Button>
+              </CardFooter>
+            </Card>
+          ))}
+        </section>
+        <div className="text-center mt-8">
+            <p className="text-muted-foreground">친구 관리, 회비 관리 등의 관리자 기능은 지정된 관리자만 사용할 수 있습니다.</p>
+        </div>
       </div>
     );
   }
 
-  // 관리자로 로그인한 경우
+  // Admin view
   return (
     <div className="container mx-auto py-8">
       <header className="mb-12 text-center">
@@ -88,7 +107,7 @@ export default function DashboardPage() {
       </header>
 
       <section className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-2 gap-6 mb-12">
-        {quickLinks.filter(link => !link.adminOnly || isAdmin).map((link) => (
+        {quickLinks.map((link) => ( // Admin sees all links
           <Card key={link.href} className="hover:shadow-lg transition-shadow duration-300">
             <CardHeader>
               <CardTitle className="flex items-center gap-2 text-xl">

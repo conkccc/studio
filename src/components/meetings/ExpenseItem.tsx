@@ -3,11 +3,11 @@
 
 import type { Expense, Friend } from '@/lib/types';
 import React, { useState, useTransition } from 'react';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+// Card components are not used here, removed for cleanup
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/hooks/use-toast';
 import { deleteExpenseAction } from '@/lib/actions';
-import { Coins, UserCircle, Users, CalendarClock, Edit3, Trash2, Loader2 } from 'lucide-react';
+import { UserCircle, Users, Edit3, Trash2, Loader2 } from 'lucide-react'; // CalendarClock removed
 import { format } from 'date-fns';
 import { ko } from 'date-fns/locale';
 import {
@@ -27,20 +27,21 @@ interface ExpenseItemProps {
   expense: Expense;
   allFriends: Friend[];
   participants: Friend[]; // Meeting participants
-  currentUserId: string;
+  // currentUserId prop removed, will use canManage prop based on isAdmin
   onExpenseUpdated: (updatedExpense: Expense) => void;
   onExpenseDeleted: (deletedExpenseId: string) => void;
-  isMeetingSettled: boolean; // Added prop
+  isMeetingSettled: boolean;
+  canManage: boolean; // New prop to determine if current user can manage this expense
 }
 
 export function ExpenseItem({ 
   expense, 
   allFriends, 
   participants,
-  currentUserId, 
   onExpenseUpdated, 
   onExpenseDeleted,
-  isMeetingSettled // Added prop
+  isMeetingSettled,
+  canManage // Use this prop
 }: ExpenseItemProps) {
   const payer = allFriends.find(f => f.id === expense.paidById);
   const { toast } = useToast();
@@ -52,7 +53,11 @@ export function ExpenseItem({
       const involved = expense.splitAmongIds
         ?.map(id => allFriends.find(f => f.id === id)?.nickname)
         .filter(Boolean) || [];
-      if (involved.length === 0 || (participants.length > 0 && involved.length === participants.length)) return "모든 참여자";
+      // If all participants in the meeting are involved, just say "모든 참여자"
+      if (involved.length > 0 && involved.length === participants.length && participants.every(p => involved.includes(p.nickname))) {
+        return "모든 참여자";
+      }
+      if (involved.length === 0) return "참여자 정보 없음";
       return `균등 분배 (${involved.join(', ')})`;
     }
     if (expense.splitType === 'custom' && expense.customSplits) {
@@ -72,9 +77,12 @@ export function ExpenseItem({
       toast({ title: '오류', description: '정산이 완료된 모임의 지출은 삭제할 수 없습니다.', variant: 'destructive' });
       return;
     }
+    if (!canManage) {
+      toast({ title: '권한 없음', description: '이 지출 항목을 삭제할 권한이 없습니다.', variant: 'destructive' });
+      return;
+    }
     setIsDeleting(true);
     startTransition(async () => {
-      // For Firestore, deleteExpenseAction now needs meetingId as well.
       const result = await deleteExpenseAction(expense.meetingId, expense.id);
       if (result.success) {
         toast({ title: '성공', description: '지출 항목이 삭제되었습니다.' });
@@ -85,10 +93,6 @@ export function ExpenseItem({
       setIsDeleting(false);
     });
   };
-
-  // For this exercise, let's assume the creator of the meeting can manage expenses
-  // This logic might need to be tied to AuthContext's isAdmin status for production
-  const canManage = true; 
 
   return (
     <li className="p-4 border rounded-lg bg-background shadow-sm">
@@ -116,7 +120,7 @@ export function ExpenseItem({
       {canManage && (
         <div className="mt-3 flex justify-end space-x-2">
            {/* 
-            // EditExpenseDialog would also need to be adapted for Firestore, passing meetingId.
+            // EditExpenseDialog would also need to be adapted for canManage and isMeetingSettled.
             <EditExpenseDialog 
                 expense={expense} 
                 participants={participants} 
@@ -127,7 +131,8 @@ export function ExpenseItem({
                         <Edit3 className="mr-1 h-3 w-3" /> 수정
                     </Button>
                 }
-                meetingId={expense.meetingId} // Pass meetingId if EditExpenseDialog needs it
+                meetingId={expense.meetingId}
+                canManage={canManage}
             /> 
             */}
           <AlertDialog>
