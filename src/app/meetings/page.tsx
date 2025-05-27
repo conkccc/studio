@@ -2,8 +2,8 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useState } from 'react';
-import { getMeetings, getFriends } from '@/lib/data-store'; // Now async
+import { useEffect, useState, useMemo } from 'react';
+import { getMeetings, getFriends } from '@/lib/data-store';
 import { MeetingListClient } from '@/components/meetings/MeetingListClient';
 import { Button } from '@/components/ui/button';
 import { PlusCircle } from 'lucide-react';
@@ -11,20 +11,26 @@ import { useAuth } from '@/contexts/AuthContext';
 import type { Meeting, Friend } from '@/lib/types';
 import { useSearchParams } from 'next/navigation';
 
+const ITEMS_PER_PAGE = 10;
 
 export default function MeetingsPage() {
   const { currentUser, isAdmin, loading: authLoading } = useAuth();
   const searchParams = useSearchParams();
   const yearParam = searchParams.get('year');
+  const pageParam = searchParams.get('page');
 
-  const [meetings, setMeetings] = useState<Meeting[]>([]);
+  const [allRawMeetings, setAllRawMeetings] = useState<Meeting[]>([]);
   const [allFriends, setAllFriends] = useState<Friend[]>([]);
   const [availableYears, setAvailableYears] = useState<number[]>([]);
   const [selectedYear, setSelectedYear] = useState<number | undefined>(undefined);
   const [dataLoading, setDataLoading] = useState(true);
 
+  const currentPage = useMemo(() => {
+    const page = parseInt(pageParam || '1', 10);
+    return isNaN(page) || page < 1 ? 1 : page;
+  }, [pageParam]);
+
   useEffect(() => {
-    const currentYear = new Date().getFullYear();
     setSelectedYear(yearParam ? parseInt(yearParam) : undefined);
   }, [yearParam]);
 
@@ -33,19 +39,15 @@ export default function MeetingsPage() {
       setDataLoading(true);
       try {
         const [fetchedMeetings, fetchedFriends] = await Promise.all([
-          getMeetings(),
+          getMeetings(), // Fetches all meetings
           getFriends()
         ]);
         
-        const years = Array.from(new Set(fetchedMeetings.map(m => m.dateTime.getFullYear()))).sort((a, b) => b - a);
-        setAvailableYears(years);
-        
-        const meetingsToDisplay = selectedYear
-          ? fetchedMeetings.filter(m => m.dateTime.getFullYear() === selectedYear)
-          : fetchedMeetings;
-
-        setMeetings(meetingsToDisplay);
+        setAllRawMeetings(fetchedMeetings);
         setAllFriends(fetchedFriends);
+
+        const years = Array.from(new Set(fetchedMeetings.map(m => new Date(m.dateTime).getFullYear()))).sort((a, b) => b - a);
+        setAvailableYears(years);
 
       } catch (error) {
         console.error("Failed to fetch meetings or friends:", error);
@@ -54,10 +56,26 @@ export default function MeetingsPage() {
       }
     };
 
-    if (!authLoading) { // Fetch data only after auth state is resolved
+    if (!authLoading) {
         fetchData();
     }
-  }, [authLoading, selectedYear]); // Re-fetch if selectedYear changes
+  }, [authLoading]);
+
+  const filteredMeetings = useMemo(() => {
+    return selectedYear
+      ? allRawMeetings.filter(m => new Date(m.dateTime).getFullYear() === selectedYear)
+      : allRawMeetings;
+  }, [allRawMeetings, selectedYear]);
+
+  const paginatedMeetings = useMemo(() => {
+    const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
+    return filteredMeetings.slice(startIndex, startIndex + ITEMS_PER_PAGE);
+  }, [filteredMeetings, currentPage]);
+
+  const totalPages = useMemo(() => {
+    return Math.ceil(filteredMeetings.length / ITEMS_PER_PAGE);
+  }, [filteredMeetings.length]);
+
 
   if (authLoading || dataLoading) {
     return (
@@ -87,10 +105,12 @@ export default function MeetingsPage() {
       </div>
       
       <MeetingListClient 
-        initialMeetings={meetings} 
+        initialMeetings={paginatedMeetings} 
         allFriends={allFriends}
         availableYears={availableYears}
         selectedYear={selectedYear}
+        currentPage={currentPage}
+        totalPages={totalPages}
       />
     </div>
   );
