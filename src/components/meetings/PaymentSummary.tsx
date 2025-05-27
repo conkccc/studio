@@ -76,34 +76,20 @@ export function PaymentSummary({ meeting, expenses, participants, allFriends }: 
     const initialPerPersonCost = participants.length > 0 ? totalSpent / participants.length : 0;
     
     let fundAmountForMeeting = 0;
-    let fundDesc = "회비 사용 설정 안됨";
+    let description = "회비 사용 설정 안됨";
 
-    if (meeting.useReserveFund && totalSpent > 0) {
-      if (meeting.reserveFundUsageType === 'all') {
-        let totalInitialDebtOfBeneficiaries = 0;
-        benefitingParticipantIds.forEach(id => {
-          const debt = initialPaymentLedger[id] || 0;
-          if (debt < -0.01) { 
-            totalInitialDebtOfBeneficiaries += Math.abs(debt);
-          }
-        });
-        fundAmountForMeeting = parseFloat(totalInitialDebtOfBeneficiaries.toFixed(2));
-        if (fundAmountForMeeting > 0.01) {
-          fundDesc = `모임 전체에 대한 회비 지원 총액: ${fundAmountForMeeting.toLocaleString(undefined, {maximumFractionDigits: 0})}원`;
-        } else {
-          fundDesc = "회비 사용 대상자의 부담금이 없어 회비가 사용되지 않았습니다.";
-        }
-      } else if (meeting.reserveFundUsageType === 'partial') {
-        fundAmountForMeeting = meeting.partialReserveFundAmount || 0;
-        if (fundAmountForMeeting > 0.01) {
-          fundDesc = `모임 회비 부분 사용 총액: ${fundAmountForMeeting.toLocaleString(undefined, {maximumFractionDigits: 0})}원`;
-        } else {
-          fundDesc = "회비 부분 사용액이 설정되지 않았거나 0원입니다.";
-        }
-      }
+    if (meeting.useReserveFund && totalSpent > 0 && meeting.partialReserveFundAmount && meeting.partialReserveFundAmount > 0) {
+        // "일정 금액 사용"의 경우, 설정된 금액을 사용
+        fundAmountForMeeting = meeting.partialReserveFundAmount;
+        description = `모임 회비 사용 총액: ${fundAmountForMeeting.toLocaleString(undefined, {maximumFractionDigits: 0})}원`;
     } else if (meeting.useReserveFund && totalSpent === 0) {
-        fundDesc = "총 지출이 없어 회비가 사용되지 않았습니다.";
+        description = "총 지출이 없어 회비가 사용되지 않았습니다.";
+    } else if (!meeting.useReserveFund) {
+        description = "회비 사용 설정 안됨";
+    } else if (meeting.useReserveFund && (!meeting.partialReserveFundAmount || meeting.partialReserveFundAmount <= 0)) {
+        description = "회비 사용하도록 설정되었으나, 사용할 금액이 지정되지 않았거나 0원입니다.";
     }
+
 
     const perPersonFundBenefit = benefitingParticipantIds.size > 0 && fundAmountForMeeting > 0
       ? fundAmountForMeeting / benefitingParticipantIds.size
@@ -116,11 +102,11 @@ export function PaymentSummary({ meeting, expenses, participants, allFriends }: 
       initialPerPersonCost: initialPerPersonCost,
       fundApplicationDetails: {
         amount: fundAmountForMeeting,
-        description: fundDesc
+        description: description
       },
       finalNetCostAfterFundPerBenefitingParticipant: parseFloat(finalNetCostAfterFundPerBenefitingParticipant.toFixed(2)),
     };
-  }, [expenses, initialPaymentLedger, meeting, benefitingParticipantIds, participants]);
+  }, [expenses, meeting, benefitingParticipantIds, participants]);
 
   const { payoutsList: fundPayoutsToPayersList, finalLedgerForDisplay } = useMemo(() => {
     const calculatedFinalLedger = { ...initialPaymentLedger };
@@ -361,11 +347,8 @@ export function PaymentSummary({ meeting, expenses, participants, allFriends }: 
         <CardFooter>
             <p className="text-xs text-muted-foreground">
                 참고: 소수점 계산으로 인해 10원 미만의 오차가 발생할 수 있습니다.
-                {meeting.useReserveFund && meeting.reserveFundUsageType === 'all' && (
-                     " '모두 사용'의 경우, 회비는 혜택 대상자들의 총 초기 부담금액 내에서 지원됩니다."
-                )}
-                 {meeting.useReserveFund && meeting.reserveFundUsageType === 'partial' && (
-                     " '부분 사용'의 경우, 설정된 금액이 혜택 대상자들의 초기 부담금을 줄이는 데 사용됩니다."
+                {meeting.useReserveFund && meeting.partialReserveFundAmount && meeting.partialReserveFundAmount > 0 && (
+                     " 설정된 회비 사용액이 혜택 대상자들의 초기 부담금을 줄이는 데 사용됩니다."
                 )}
             </p>
         </CardFooter>
@@ -373,4 +356,3 @@ export function PaymentSummary({ meeting, expenses, participants, allFriends }: 
     </Card>
   );
 }
-

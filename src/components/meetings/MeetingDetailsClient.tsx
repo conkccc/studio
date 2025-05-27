@@ -67,17 +67,20 @@ export function MeetingDetailsClient({
 
   useEffect(() => {
     if (meeting?.dateTime) {
-      const startTime = new Date(meeting.dateTime);
-      let formattedString = format(startTime, 'yyyy년 M월 d일 (EEE) HH:mm', { locale: ko });
-
+      let localFormattedString;
+      const startTime = new Date(meeting.dateTime); // Ensure it's a Date object
       if (meeting.endTime && meeting.endTime instanceof Date && !isNaN(meeting.endTime.getTime())) {
-        const endTime = new Date(meeting.endTime);
+        const endTime = new Date(meeting.endTime); // Ensure it's a Date object
         const duration = differenceInCalendarDays(endTime, startTime);
-        if (duration >= 0) { // Only add duration if endTime is same day or later
-          formattedString = `${format(startTime, 'yyyy년 M월 d일 HH:mm', { locale: ko })} (${duration + 1}일)`;
+        if (duration >= 0) {
+          localFormattedString = `${format(startTime, 'yyyy년 M월 d일 HH:mm', { locale: ko })} (${duration + 1}일)`;
+        } else { // endTime is before startTime, invalid, just show start
+          localFormattedString = format(startTime, 'yyyy년 M월 d일 (EEE) HH:mm', { locale: ko });
         }
+      } else {
+        localFormattedString = format(startTime, 'yyyy년 M월 d일 (EEE) HH:mm', { locale: ko });
       }
-      setFormattedMeetingDateTime(formattedString);
+      setFormattedMeetingDateTime(localFormattedString);
     }
   }, [meeting?.dateTime, meeting?.endTime]);
 
@@ -98,21 +101,21 @@ export function MeetingDetailsClient({
 
   const handleExpenseAdded = (newExpense: Expense) => {
     setExpenses(prev => [newExpense, ...prev].sort((a,b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime() ));
-    if (meeting.useReserveFund && meeting.reserveFundUsageType === 'all' && meeting.isSettled) {
+    if (meeting.useReserveFund && meeting.isSettled) {
       setMeeting(prev => ({ ...prev, isSettled: false }));
     }
   };
 
   const handleExpenseUpdated = (updatedExpense: Expense) => {
     setExpenses(prev => prev.map(e => e.id === updatedExpense.id ? updatedExpense : e).sort((a,b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()));
-     if (meeting.useReserveFund && meeting.reserveFundUsageType === 'all' && meeting.isSettled) {
+     if (meeting.useReserveFund && meeting.isSettled) {
       setMeeting(prev => ({ ...prev, isSettled: false }));
     }
   };
 
   const handleExpenseDeleted = (deletedExpenseId: string) => {
     setExpenses(prev => prev.filter(e => e.id !== deletedExpenseId));
-     if (meeting.useReserveFund && meeting.reserveFundUsageType === 'all' && meeting.isSettled) {
+     if (meeting.useReserveFund && meeting.isSettled) {
       setMeeting(prev => ({ ...prev, isSettled: false }));
     }
   };
@@ -147,6 +150,11 @@ export function MeetingDetailsClient({
   };
 
   const handleFinalizeSettlement = () => {
+    if (!meeting.useReserveFund || !meeting.partialReserveFundAmount || meeting.partialReserveFundAmount <= 0) {
+      // If no fund to use or amount is zero, just mark as settled if desired by some other logic,
+      // but this button is primarily for fund-using settlements.
+      // We can simply call the action, which will handle the "no fund" case internally.
+    }
     setIsFinalizing(true);
     startTransition(async () => {
       const result = await finalizeMeetingSettlementAction(meeting.id);
@@ -163,7 +171,11 @@ export function MeetingDetailsClient({
 
   const mapLink = `https://maps.google.com/?q=${encodeURIComponent(meeting.locationName)}`;
 
-  const canFinalizeSettlement = meeting.useReserveFund && meeting.reserveFundUsageType === 'all' && !meeting.isSettled && expenses.length > 0;
+  const canFinalizeSettlement = meeting.useReserveFund && 
+                                 meeting.partialReserveFundAmount && 
+                                 meeting.partialReserveFundAmount > 0 && 
+                                 !meeting.isSettled && 
+                                 expenses.length > 0;
 
   return (
     <div className="space-y-6">
@@ -178,7 +190,7 @@ export function MeetingDetailsClient({
                     <CheckCircle2 className="h-4 w-4 mr-1.5" /> 정산 확정됨
                   </Badge>
                 )}
-                 {meeting.useReserveFund && meeting.reserveFundUsageType === 'all' && !meeting.isSettled && expenses.length > 0 && (
+                 {meeting.useReserveFund && meeting.partialReserveFundAmount && meeting.partialReserveFundAmount > 0 && !meeting.isSettled && expenses.length > 0 && (
                   <Badge variant="outline" className="border-orange-500 text-orange-600">
                     <AlertCircle className="h-4 w-4 mr-1.5" /> 정산 확정 필요
                   </Badge>
@@ -226,7 +238,7 @@ export function MeetingDetailsClient({
               <CalendarDays className="h-5 w-5 mt-0.5 text-primary flex-shrink-0" />
               <div>
                 <span className="font-medium">날짜 및 시간:</span>
-                <p className="text-muted-foreground">{formattedMeetingDateTime || '날짜 로딩 중...'}</p>
+                <p className="text-muted-foreground">{formattedMeetingDateTime || (meeting.dateTime ? format(new Date(meeting.dateTime), 'yyyy년 M월 d일 (EEE) HH:mm', { locale: ko }) : '날짜 정보 없음')}</p>
               </div>
             </div>
             <div className="flex items-start gap-2">
@@ -248,23 +260,37 @@ export function MeetingDetailsClient({
                 <p className="text-muted-foreground">{participants.map(p => p.nickname).join(', ')}</p>
             </div>
           </div>
-          {meeting.useReserveFund && (
+          {meeting.useReserveFund && meeting.partialReserveFundAmount && meeting.partialReserveFundAmount > 0 ? (
             <div className="p-3 bg-secondary/30 rounded-md border border-primary/30 text-sm space-y-1">
               <div className="flex items-center gap-2">
                 <PiggyBank className="h-4 w-4 text-primary" />
                 <span className="font-medium">회비 사용 설정:</span>
               </div>
               <p className="text-muted-foreground pl-6">
-                {meeting.reserveFundUsageType === 'all' ? 
-                  (meeting.isSettled ? '정산 완료됨 (회비에서 모두 사용 처리)' : '정산 시 모든 비용 회비에서 우선 차감 (정산 요약 탭에서 확정 필요)')
-                : meeting.reserveFundUsageType === 'partial' && meeting.partialReserveFundAmount ?
-                 `회비에서 ${meeting.partialReserveFundAmount.toLocaleString()}원 사용` : '회비 사용 설정됨'}
+                {`회비에서 ${meeting.partialReserveFundAmount.toLocaleString()}원 사용 예정`}
+                {meeting.isSettled && ` (정산 확정됨)`}
               </p>
               {meeting.nonReserveFundParticipants && meeting.nonReserveFundParticipants.length > 0 && (
                 <p className="text-muted-foreground pl-6 text-xs">
                   (회비 사용 제외: {meeting.nonReserveFundParticipants.map(id => allFriends.find(f => f.id === id)?.nickname || '알 수 없음').join(', ')})
                 </p>
               )}
+            </div>
+          ) : meeting.useReserveFund ? (
+             <div className="p-3 bg-secondary/30 rounded-md border text-sm space-y-1">
+                <div className="flex items-center gap-2">
+                    <PiggyBank className="h-4 w-4 text-primary" />
+                    <span className="font-medium">회비 사용 설정:</span>
+                </div>
+                <p className="text-muted-foreground pl-6">회비 사용하도록 설정되었으나, 사용할 금액이 지정되지 않았습니다. 모임 수정을 통해 금액을 설정해주세요.</p>
+            </div>
+          ) : (
+            <div className="p-3 bg-secondary/30 rounded-md border text-sm space-y-1">
+                <div className="flex items-center gap-2">
+                    <PiggyBank className="h-4 w-4" />
+                    <span className="font-medium">회비 사용 설정:</span>
+                </div>
+                <p className="text-muted-foreground pl-6">사용 안함</p>
             </div>
           )}
         </CardContent>
@@ -287,7 +313,7 @@ export function MeetingDetailsClient({
                   participants={participants}
                   onExpenseAdded={handleExpenseAdded}
                   triggerButton={
-                     <Button variant="outline" size="sm" disabled={isPending || isDeleting || isFinalizing}>
+                     <Button variant="outline" size="sm" disabled={isPending || isDeleting || isFinalizing || meeting.isSettled}>
                         <PlusCircle className="mr-2 h-4 w-4" /> 새 지출 추가
                       </Button>
                   }
@@ -325,18 +351,18 @@ export function MeetingDetailsClient({
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
                 <CardTitle>정산 요약</CardTitle>
                 {canFinalizeSettlement && (
-                  <Button onClick={handleFinalizeSettlement} disabled={isFinalizing || isPending || isDeleting || expenses.length === 0} size="sm">
+                  <Button onClick={handleFinalizeSettlement} disabled={isFinalizing || isPending || isDeleting} size="sm">
                     {isFinalizing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <CheckCircle2 className="mr-2 h-4 w-4" />}
                     정산 확정 및 회비 사용 기록
                   </Button>
                 )}
               </div>
-              {meeting.useReserveFund && meeting.reserveFundUsageType === 'all' && meeting.isSettled && expenses.length > 0 && (
+              {meeting.useReserveFund && meeting.isSettled && expenses.length > 0 && (
                  <CardDescription className="text-green-600 flex items-center gap-1">
                     <CheckCircle2 className="h-4 w-4"/> 이 모임의 회비 사용 정산이 확정되어 회비 내역에 기록되었습니다.
                  </CardDescription>
               )}
-               {meeting.useReserveFund && meeting.reserveFundUsageType === 'all' && !meeting.isSettled && expenses.length === 0 && (
+               {meeting.useReserveFund && !meeting.isSettled && expenses.length === 0 && meeting.partialReserveFundAmount && meeting.partialReserveFundAmount > 0 && (
                  <CardDescription className="text-muted-foreground flex items-center gap-1">
                     <AlertCircle className="h-4 w-4"/> 지출 내역이 없어 회비 사용을 확정할 수 없습니다.
                  </CardDescription>
