@@ -5,7 +5,7 @@ import type { Meeting, Friend } from '@/lib/types';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { CalendarDays, MapPin, Users, ArrowRight } from 'lucide-react';
-import { format, differenceInCalendarDays } from 'date-fns';
+import { format, differenceInCalendarDays, isValid } from 'date-fns';
 import { ko } from 'date-fns/locale';
 
 interface MeetingCardProps {
@@ -21,13 +21,25 @@ export function MeetingCard({ meeting, allFriends }: MeetingCardProps) {
   const creator = allFriends.find(f => f.id === meeting.creatorId)?.nickname || '알 수 없음';
 
   const formatDate = () => {
-    const startTime = new Date(meeting.dateTime);
-    if (meeting.endTime && meeting.endTime instanceof Date && !isNaN(meeting.endTime.getTime())) {
-      const endTime = new Date(meeting.endTime);
-      const duration = differenceInCalendarDays(endTime, startTime);
-        return `${format(startTime, 'yyyy년 M월 d일 HH:mm', { locale: ko })} (${duration + 1}일)`;
+    // Assuming meeting.dateTime is already a Date object from data-store
+    const startTime = meeting.dateTime;
+
+    // Check if meeting.endTime is a valid Date object
+    if (meeting.endTime && meeting.endTime instanceof Date && isValid(meeting.endTime)) {
+      const endTime = meeting.endTime;
+      // Ensure startTime is also valid before calculating duration
+      if (startTime instanceof Date && isValid(startTime)) {
+        const duration = differenceInCalendarDays(endTime, startTime);
+        // Ensure duration is not negative if endTime is somehow before startTime, though schema should prevent this.
+        // If duration is 0, it's a 1-day event. If 1, it's a 2-day event.
+        return `${format(startTime, 'yyyy년 M월 d일 HH:mm', { locale: ko })} (${Math.max(0, duration) + 1}일)`;
+      }
     }
-    return format(startTime, 'yyyy년 M월 d일 HH:mm', { locale: ko });
+    // Fallback for invalid startTime or if endTime is not present/valid
+    if (startTime instanceof Date && isValid(startTime)) {
+      return format(startTime, 'yyyy년 M월 d일 HH:mm', { locale: ko });
+    }
+    return '날짜 정보 없음';
   };
 
   return (
