@@ -71,122 +71,117 @@ export function PaymentSummary({ meeting, expenses, participants, allFriends }: 
     );
   }, [meeting.useReserveFund, meeting.nonReserveFundParticipants, participants]);
   
-  const { fundAmountUsed, fundDescription, totalSpent, perPersonCost } = useMemo(() => {
+  const derivedDetails = useMemo(() => {
     const currentTotalSpent = expenses.reduce((sum, e) => sum + e.totalAmount, 0);
     const currentPerPersonCost = participants.length > 0 ? currentTotalSpent / participants.length : 0;
     
-    let currentFundAmountUsed = 0;
-    let currentDescription = "회비 사용 없음";
+    let fundAmountUsedForMeeting = 0;
+    let fundApplicationDescription = "회비 사용 없음";
 
     if (meeting.useReserveFund) {
-      let ledgerForFundCalc = { ...initialPaymentLedger };
-
       if (meeting.reserveFundUsageType === 'all') {
+        let totalOwedByBenefiting = 0;
         benefitingParticipantIds.forEach(id => {
-          if (ledgerForFundCalc[id] < -0.01) { // If they owe money
-            const debtCoveredByFund = Math.abs(ledgerForFundCalc[id]);
-            currentFundAmountUsed += debtCoveredByFund;
-            // ledgerForFundCalc[id] = 0; // This line is for intermediate calculation, not for final ledger display yet
+          if (initialPaymentLedger[id] < -0.01) { // If they owe money initially
+            totalOwedByBenefiting += Math.abs(initialPaymentLedger[id]);
           }
         });
-        if (currentFundAmountUsed > 0.01) {
-          currentDescription = `회비에서 총 ${currentFundAmountUsed.toLocaleString(undefined, {maximumFractionDigits: 0})}원 사용`;
+        fundAmountUsedForMeeting = totalOwedByBenefiting; // Potential amount fund would cover
+        if (fundAmountUsedForMeeting > 0.01) {
+          fundApplicationDescription = `회비에서 최대 ${fundAmountUsedForMeeting.toLocaleString(undefined, {maximumFractionDigits: 0})}원 사용`;
         } else if (currentTotalSpent > 0) {
-          currentDescription = "회비 사용 대상자의 부담금이 없어 회비가 사용되지 않았습니다.";
+          fundApplicationDescription = "회비 사용 대상자의 부담금이 없어 회비가 사용되지 않았습니다.";
         } else {
-          currentDescription = "총 지출이 없어 회비가 사용되지 않았습니다.";
+          fundApplicationDescription = "총 지출이 없어 회비가 사용되지 않았습니다.";
         }
       } else if (meeting.reserveFundUsageType === 'partial') {
-        const fundAvailable = meeting.partialReserveFundAmount || 0;
-        let distributedFund = 0;
-        
-        const benefitingDebtors = Array.from(benefitingParticipantIds).filter(id => ledgerForFundCalc[id] < -0.01);
-        const totalBeneficiaryDebt = benefitingDebtors.reduce((sum, id) => sum + Math.abs(ledgerForFundCalc[id]), 0);
-
-        if (fundAvailable > 0 && totalBeneficiaryDebt > 0) {
-          benefitingDebtors.forEach(id => {
-            const originalDebt = Math.abs(ledgerForFundCalc[id]);
-            const fundShareForDebtor = Math.min(originalDebt, (originalDebt / totalBeneficiaryDebt) * fundAvailable);
-            // ledgerForFundCalc[id] += fundShareForDebtor; // Intermediate calculation
-            distributedFund += fundShareForDebtor;
-          });
-        }
-        currentFundAmountUsed = distributedFund;
-        if (currentFundAmountUsed > 0.01) {
-          currentDescription = `회비에서 ${currentFundAmountUsed.toLocaleString(undefined, {maximumFractionDigits: 0})}원 부분 사용`;
+        fundAmountUsedForMeeting = meeting.partialReserveFundAmount || 0;
+        if (fundAmountUsedForMeeting > 0.01) {
+          fundApplicationDescription = `회비에서 ${fundAmountUsedForMeeting.toLocaleString(undefined, {maximumFractionDigits: 0})}원 부분 사용`;
         } else {
-          currentDescription = "회비 부분 사용 설정되었으나, 사용할 금액이 없거나 대상자가 없습니다.";
+          fundApplicationDescription = "회비 부분 사용액이 설정되지 않았거나 0원입니다.";
         }
       }
     }
-    return { fundAmountUsed: currentFundAmountUsed, fundDescription: currentDescription, totalSpent: currentTotalSpent, perPersonCost: currentPerPersonCost };
+    return { 
+      totalSpent: currentTotalSpent, 
+      perPersonCost: currentPerPersonCost,
+      fundApplicationDetails: {
+        amount: fundAmountUsedForMeeting,
+        description: fundApplicationDescription
+      }
+    };
   }, [expenses, initialPaymentLedger, meeting, benefitingParticipantIds, participants.length]);
 
+  const { payoutsList: fundPayoutsToPayersList, finalLedgerForDisplay } = useMemo(() => {
+    const calculatedFinalLedger = { ...initialPaymentLedger };
+    const fundAmountAppliedToShares = derivedDetails.fundApplicationDetails.amount;
 
-  const { payoutsList: fundPayoutsToPayersList, finalLedger } = useMemo(() => {
-    let ledgerAfterBeneficiarySupport = { ...initialPaymentLedger };
-    let actualFundContributionForBeneficiaries = 0;
+    if (meeting.useReserveFund && fundAmountAppliedToShares > 0.01) {
+        if (meeting.reserveFundUsageType === 'partial') {
+            const numBeneficiaries = benefitingParticipantIds.size;
+            if (numBeneficiaries > 0) {
+                const fundSharePerBeneficiary = fundAmountAppliedToShares / numBeneficiaries;
+                benefitingParticipantIds.forEach(id => {
+                    calculatedFinalLedger[id] = (calculatedFinalLedger[id] || 0) + fundSharePerBeneficiary;
+                });
+            }
+        } else if (meeting.reserveFundUsageType === 'all') {
+            // For 'all' type, the fund directly covers the debts of beneficiaries.
+            let remainingFundToCoverDebts = fundAmountAppliedToShares;
+            
+            // Calculate total debt of beneficiaries to distribute the fund proportionally if needed
+            let totalInitialDebtOfBeneficiaries = 0;
+            benefitingParticipantIds.forEach(id => {
+                if (initialPaymentLedger[id] < -0.01) {
+                    totalInitialDebtOfBeneficiaries += Math.abs(initialPaymentLedger[id]);
+                }
+            });
 
-    // Step 1: Fund covers debts of benefiting participants
-    if (meeting.useReserveFund) {
-      if (meeting.reserveFundUsageType === 'all') {
-        benefitingParticipantIds.forEach(id => {
-          if (ledgerAfterBeneficiarySupport[id] < -0.01) {
-            const debtCovered = Math.abs(ledgerAfterBeneficiarySupport[id]);
-            actualFundContributionForBeneficiaries += debtCovered;
-            ledgerAfterBeneficiarySupport[id] = 0;
-          }
-        });
-      } else if (meeting.reserveFundUsageType === 'partial') {
-        const fundAvailable = meeting.partialReserveFundAmount || 0;
-        let distributedFund = 0;
-        const benefitingDebtors = Array.from(benefitingParticipantIds).filter(id => ledgerAfterBeneficiarySupport[id] < -0.01);
-        const totalBeneficiaryDebt = benefitingDebtors.reduce((sum, id) => sum + Math.abs(ledgerAfterBeneficiarySupport[id]), 0);
-
-        if (fundAvailable > 0 && totalBeneficiaryDebt > 0) {
-          benefitingDebtors.forEach(id => {
-            const originalDebt = Math.abs(ledgerAfterBeneficiarySupport[id]);
-            const fundShareForDebtor = Math.min(originalDebt, (originalDebt / totalBeneficiaryDebt) * fundAvailable);
-            ledgerAfterBeneficiarySupport[id] += fundShareForDebtor;
-            distributedFund += fundShareForDebtor;
-          });
+            if (totalInitialDebtOfBeneficiaries > 0.01) {
+                benefitingParticipantIds.forEach(id => {
+                    if (initialPaymentLedger[id] < -0.01) { // If they are a debtor
+                        const originalDebt = Math.abs(initialPaymentLedger[id]);
+                        // Proportionally distribute the fundAmountAppliedToShares (which is totalOwedByBenefiting for 'all')
+                        const fundCoverForThisDebtor = Math.min(originalDebt, (originalDebt / totalInitialDebtOfBeneficiaries) * fundAmountAppliedToShares);
+                        calculatedFinalLedger[id] += fundCoverForThisDebtor;
+                    }
+                });
+            }
         }
-        actualFundContributionForBeneficiaries = distributedFund;
-      }
     }
-    
-    // Step 2: Fund (amount derived from step 1) reimburses payers
+
+    // Calculation for fundPayoutsToPayersList (who gets the fund money from the reserve)
     const payoutsList: FundPayoutToPayer[] = [];
-    let currentFinalLedger = { ...ledgerAfterBeneficiarySupport }; // This ledger now reflects beneficiary support
-    let fundToDistributeToPayers = actualFundContributionForBeneficiaries; // This is the total fund amount used
+    let fundTotalUsedActual = derivedDetails.fundApplicationDetails.amount; 
 
-    if (fundToDistributeToPayers > 0.01) {
-      const sortedPayers = Object.entries(initialPaymentLedger) // Use initial ledger to identify original payers and amounts
-        .filter(([_, amount]) => amount > 0.01) 
-        .sort(([, aAmount], [, bAmount]) => bAmount - aAmount)
-        .map(([id]) => id);
+    if (fundTotalUsedActual > 0.01) {
+        const sortedInitialPayers = Object.entries(initialPaymentLedger)
+            .filter(([_, amount]) => amount > 0.01) 
+            .sort(([, aAmount], [, bAmount]) => bAmount - aAmount) 
+            .map(([id]) => id);
 
-      for (const payerId of sortedPayers) {
-        if (fundToDistributeToPayers <= 0.01) break;
-        const amountOwedToPayerByGroupInitially = initialPaymentLedger[payerId] || 0; // How much group owed this payer before fund use
-        const reimbursementAmount = Math.min(amountOwedToPayerByGroupInitially, fundToDistributeToPayers);
+        for (const payerId of sortedInitialPayers) {
+            if (fundTotalUsedActual <= 0.01) break;
+            // How much the group initially owed this payer
+            const amountOwedToPayerByGroupInitially = initialPaymentLedger[payerId] || 0; 
+            // The fund reimburses this payer up to what they are owed or what's left in the fund for this meeting
+            const reimbursementAmount = Math.min(amountOwedToPayerByGroupInitially, fundTotalUsedActual);
 
-        if (reimbursementAmount > 0.01) {
-          payoutsList.push({ to: payerId, amount: reimbursementAmount });
-          // The finalLedger already reflects beneficiaries' debts being paid by the fund.
-          // Now, we need to adjust the payers' credit in finalLedger because part of what they are owed
-          // is now coming from the "fund" instead of other members directly.
-          // The `currentFinalLedger` for payers should effectively be their initial credit minus what the fund gives them.
-          currentFinalLedger[payerId] = (currentFinalLedger[payerId] || 0) - reimbursementAmount;
-          fundToDistributeToPayers -= reimbursementAmount;
+            if (reimbursementAmount > 0.01) {
+                payoutsList.push({ to: payerId, amount: reimbursementAmount });
+                fundTotalUsedActual -= reimbursementAmount; // Reduce available fund as it's paid out
+            }
         }
-      }
     }
-    return { payoutsList: payoutsList, finalLedger: currentFinalLedger };
-  }, [initialPaymentLedger, meeting, benefitingParticipantIds, fundAmountUsed]);
+    // Ensure payoutsList doesn't exceed the total fund used. This logic should now be correct.
+
+    return { payoutsList, finalLedgerForDisplay: calculatedFinalLedger };
+
+  }, [initialPaymentLedger, meeting, benefitingParticipantIds, derivedDetails.fundApplicationDetails.amount]);
   
   const simplifiedDebts = useMemo(() => {
-    const balances: LedgerEntry[] = Object.entries(finalLedger)
+    const balances: LedgerEntry[] = Object.entries(finalLedgerForDisplay)
       .map(([friendId, amount]) => ({ friendId, amount: parseFloat(amount.toFixed(2)) }))
       .sort((a, b) => a.amount - b.amount);
 
@@ -217,7 +212,7 @@ export function PaymentSummary({ meeting, expenses, participants, allFriends }: 
         if (Math.abs(ower.amount) < 0.01) owersIdx++;
     }
     return transactions;
-  }, [finalLedger]);
+  }, [finalLedgerForDisplay]);
 
   const getFriendNickname = (friendId: string) => {
     return allFriends.find(f => f.id === friendId)?.nickname || '알 수 없음';
@@ -243,12 +238,12 @@ export function PaymentSummary({ meeting, expenses, participants, allFriends }: 
         <CardTitle>정산 요약</CardTitle>
         <CardDescription className="space-y-1">
             <div>
-                총 지출: {totalSpent.toLocaleString(undefined, {maximumFractionDigits: 0})}원 
-                {participants.length > 0 && ` (1인당 ${perPersonCost.toLocaleString(undefined, {maximumFractionDigits: 0})}원)`}
+                총 지출: {derivedDetails.totalSpent.toLocaleString(undefined, {maximumFractionDigits: 0})}원 
+                {participants.length > 0 && ` (1인당 ${derivedDetails.perPersonCost.toLocaleString(undefined, {maximumFractionDigits: 0})}원)`}
             </div>
-            <span className={`block text-sm ${fundAmountUsed > 0.01 ? 'text-primary' : 'text-muted-foreground'}`}>
+            <span className={`block text-sm ${derivedDetails.fundApplicationDetails.amount > 0.01 ? 'text-primary' : 'text-muted-foreground'}`}>
                 <PiggyBank className="inline-block h-4 w-4 mr-1" />
-                {fundDescription}
+                {derivedDetails.fundApplicationDetails.description}
             </span>
         </CardDescription>
       </CardHeader>
@@ -275,7 +270,7 @@ export function PaymentSummary({ meeting, expenses, participants, allFriends }: 
                     </TableRow>
                     </TableHeader>
                     <TableBody>
-                    {Object.entries(finalLedger).map(([friendId, amount]) => (
+                    {Object.entries(finalLedgerForDisplay).map(([friendId, amount]) => (
                         <TableRow key={friendId}>
                         <TableCell className="font-medium flex items-center">
                             <UserCircle className="h-4 w-4 mr-2 opacity-70"/>
@@ -313,7 +308,7 @@ export function PaymentSummary({ meeting, expenses, participants, allFriends }: 
                     <FileText className="h-4 w-4" />
                     최종 송금 제안
                 </h3>
-                 <CardDescription>개인 간 필요한 최종 송금 내역입니다.</CardDescription>
+                 <CardDescription>개인 간 필요한 최종 송금 내역입니다. (회비 지원 모두 반영 후)</CardDescription>
                 <ScrollArea className="h-auto max-h-[150px] pr-3 mt-2">
                     <Table>
                     <TableHeader>
@@ -338,17 +333,17 @@ export function PaymentSummary({ meeting, expenses, participants, allFriends }: 
                 </ScrollArea>
                 </div>
             )}
-            {simplifiedDebts.length === 0 && expenses.length > 0 && fundAmountUsed === 0 && ( // Only show if no fund was used and no debts
+            {simplifiedDebts.length === 0 && expenses.length > 0 && derivedDetails.fundApplicationDetails.amount === 0 && ( 
                 <p className="text-center text-muted-foreground py-3">모든 정산이 완료되었거나 추가 송금이 필요하지 않습니다.</p>
             )}
-
-            {fundAmountUsed > 0.01 && fundPayoutsToPayersList.length > 0 && (
+             {/* This section is moved below "최종 송금 제안" */}
+            {derivedDetails.fundApplicationDetails.amount > 0.01 && fundPayoutsToPayersList.length > 0 && (
               <div>
                 <h3 className="text-md font-semibold mb-2 flex items-center gap-1.5">
                   <PiggyBank className="h-4 w-4 text-primary" />
                   회비 지원 상세 (결제자에게)
                 </h3>
-                <CardDescription>회비에서 각 결제자에게 지원된 금액입니다. 이 금액은 위 개인별 정산 및 최종 송금 제안에 이미 반영되어 있습니다.</CardDescription>
+                <CardDescription>회비에서 각 초기 결제자에게 지원된 금액입니다. 이 내역은 위 개인별 정산 및 최종 송금 제안에 이미 반영되어 있습니다.</CardDescription>
                 <ScrollArea className="h-auto max-h-[150px] pr-3 mt-2">
                   <Table>
                     <TableHeader>
@@ -373,7 +368,6 @@ export function PaymentSummary({ meeting, expenses, participants, allFriends }: 
                 </ScrollArea>
               </div>
             )}
-
             </div>
         )}
       </CardContent>
