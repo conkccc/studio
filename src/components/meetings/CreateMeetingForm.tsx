@@ -10,7 +10,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { CalendarIcon, Check, ChevronsUpDown, Loader2, MapPinIcon, Eye } from 'lucide-react';
+import { CalendarIcon, Check, ChevronsUpDown, Loader2, MapPinIcon, Eye, ExternalLink } from 'lucide-react';
 import { Calendar } from '@/components/ui/calendar';
 import { cn } from '@/lib/utils';
 import { format } from 'date-fns';
@@ -40,8 +40,8 @@ const meetingSchemaBase = z.object({
 });
 
 const meetingSchema = meetingSchemaBase.refine(data => {
-  if (data.useReserveFund) {
-    return data.partialReserveFundAmount !== undefined && data.partialReserveFundAmount > 0;
+  if (data.useReserveFund && (data.partialReserveFundAmount === undefined || data.partialReserveFundAmount <= 0)) {
+    return false;
   }
   return true;
 }, {
@@ -71,13 +71,11 @@ const libraries: ("places" | "maps" | "marker")[] = ["places", "maps", "marker"]
 interface LocationSearchInputProps {
   form: ReturnType<typeof useForm<MeetingFormData>>;
   isPending: boolean;
-  isMapsLoaded: boolean;
-  mapsLoadError: Error | null;
   initialLocationName?: string;
-  onLocationSelected: (coords: { lat: number; lng: number } | undefined) => void;
+  onLocationSelected: (coords: { lat: number; lng: number } | undefined, name: string) => void;
 }
 
-function LocationSearchInput({ form, isPending, isMapsLoaded, mapsLoadError, initialLocationName, onLocationSelected }: LocationSearchInputProps) {
+function LocationSearchInput({ form, isPending, initialLocationName, onLocationSelected }: LocationSearchInputProps) {
   const {
     ready,
     value: placesValue,
@@ -88,10 +86,19 @@ function LocationSearchInput({ form, isPending, isMapsLoaded, mapsLoadError, ini
     requestOptions: { /* Optional: configure to your liking */ },
     debounce: 300,
     defaultValue: initialLocationName || "",
-    disabled: !isMapsLoaded || !!mapsLoadError,
   });
 
   const { toast } = useToast();
+  const [inputFocused, setInputFocused] = useState(false);
+
+  useEffect(() => {
+    // Sync form value to placesValue if form.locationName is changed externally (e.g. by form.reset or initialData)
+    const formLocationName = form.getValues('locationName');
+    if (formLocationName !== placesValue && !inputFocused) {
+      setPlacesValue(formLocationName || '');
+    }
+  }, [form.getValues('locationName'), placesValue, setPlacesValue, inputFocused]);
+
 
   const handlePlaceSelect = async (suggestion: google.maps.places.AutocompletePrediction) => {
     setPlacesValue(suggestion.description, false);
@@ -102,23 +109,15 @@ function LocationSearchInput({ form, isPending, isMapsLoaded, mapsLoadError, ini
       const results = await getGeocode({ address: suggestion.description });
       const { lat, lng } = await getLatLng(results[0]);
       form.setValue('locationCoordinates', { lat, lng }, { shouldValidate: true });
-      onLocationSelected({lat, lng});
+      onLocationSelected({lat, lng}, suggestion.description);
       toast({ title: "장소 선택됨", description: `${suggestion.description}` });
     } catch (error) {
       console.error("Error getting coordinates for selected place: ", error);
       toast({ title: "오류", description: "장소의 좌표를 가져오는 데 실패했습니다.", variant: "destructive" });
       form.setValue('locationCoordinates', undefined, { shouldValidate: true });
-      onLocationSelected(undefined);
+      onLocationSelected(undefined, suggestion.description);
     }
   };
-  
-  // Sync form value back to placesValue if form.locationName is changed externally
-  useEffect(() => {
-    if (form.watch('locationName') !== placesValue) {
-        setPlacesValue(form.watch('locationName') || '');
-    }
-  }, [form.watch('locationName'), placesValue, setPlacesValue]);
-
 
   return (
     <div className="relative">
@@ -130,11 +129,13 @@ function LocationSearchInput({ form, isPending, isMapsLoaded, mapsLoadError, ini
           onChange={(e) => {
             setPlacesValue(e.target.value);
             form.setValue('locationName', e.target.value, { shouldValidate: true });
-            if (!e.target.value) { // Clear coordinates if name is cleared
+            if (!e.target.value) {
                 form.setValue('locationCoordinates', undefined, { shouldValidate: true });
-                onLocationSelected(undefined);
+                onLocationSelected(undefined, '');
             }
           }}
+          onFocus={() => setInputFocused(true)}
+          onBlur={() => setInputFocused(false)}
           disabled={!ready || isPending}
           className="pl-8"
           placeholder="장소 검색..."
@@ -178,7 +179,7 @@ export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, 
 
   const [isMapsLoaded, setIsMapsLoaded] = useState(false);
   const [mapsLoadError, setMapsLoadError] = useState<Error | null>(null);
-  const [showMap, setShowMap] = useState(false); // New state for map visibility
+  const [showMap, setShowMap] = useState(false);
 
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<google.maps.Map | null>(null);
@@ -233,9 +234,9 @@ export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, 
     loader.load()
       .then(() => {
         if (!window.google || !window.google.maps || !window.google.maps.Map || !window.google.maps.marker || !window.google.maps.marker.AdvancedMarkerElement) {
-          console.error("Google Maps API loaded, but AdvancedMarkerElement (or other core components) not found.");
-          setMapsLoadError(new Error("Google Maps API core components missing after load."));
-          setIsMapsLoaded(false);
+          console.error("Google Maps API loaded, but AdvancedMarkerElement (or other core components) not found. Ensure 'marker' library is included.");
+          setMapsLoadError(new Error("Google Maps API core components missing after load. Check 'marker' library."));
+          setIsMapsLoaded(false); // Set to false if essential parts are missing
           return;
         }
         console.log("Google Maps API and required libraries (places, maps, marker) loaded successfully.");
@@ -244,7 +245,7 @@ export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, 
       })
       .catch(e => {
         console.error("Failed to load Google Maps API. Error details:", e);
-        setMapsLoadError(e);
+        setMapsLoadError(e as Error);
         setIsMapsLoaded(false);
       });
   }, []);
@@ -254,7 +255,7 @@ export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, 
     if (showMap && isMapsLoaded && !mapsLoadError && mapContainerRef.current && window.google && window.google.maps && window.google.maps.marker) {
         const { AdvancedMarkerElement } = window.google.maps.marker;
         if (!AdvancedMarkerElement) {
-            console.error("AdvancedMarkerElement not available after API load. Check 'marker' library.");
+            console.error("AdvancedMarkerElement not available. Marker library might not be loaded correctly.");
             return;
         }
 
@@ -262,19 +263,20 @@ export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, 
       const currentCoords = watchedLocationCoordinates || defaultCenter;
       const zoomLevel = watchedLocationCoordinates ? 15 : 10;
 
-      if (!mapInstanceRef.current) {
+      if (!mapInstanceRef.current) { // Create map instance if it doesn't exist or container is new
         mapInstanceRef.current = new window.google.maps.Map(mapContainerRef.current, {
           center: currentCoords,
           zoom: zoomLevel,
           disableDefaultUI: true,
           zoomControl: true,
-          mapId: 'NBBANG_MAP_ID', // Ensure you have a Map ID configured if using advanced markers with styling
+          mapId: 'NBBANG_MAP_ID', 
         });
-      } else {
+      } else { // If map instance exists, just update center and zoom
         mapInstanceRef.current.setCenter(currentCoords);
         mapInstanceRef.current.setZoom(zoomLevel);
       }
 
+      // Handle marker
       if (watchedLocationCoordinates) {
         if (!markerInstanceRef.current) {
           markerInstanceRef.current = new AdvancedMarkerElement({
@@ -283,27 +285,31 @@ export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, 
           });
         } else {
           markerInstanceRef.current.position = watchedLocationCoordinates;
-          if (!markerInstanceRef.current.map) { // Ensure marker is re-added if map was hidden/re-created
-             markerInstanceRef.current.map = mapInstanceRef.current;
-          }
+          markerInstanceRef.current.map = mapInstanceRef.current; // Ensure marker is on the current map instance
         }
       } else { // No coordinates, remove marker
         if (markerInstanceRef.current) {
-          markerInstanceRef.current.map = null; // Remove marker from map
+          markerInstanceRef.current.map = null;
         }
       }
-    } else if (!showMap && markerInstanceRef.current) { // If map is hidden, ensure marker is also removed from potential old map instance
-        markerInstanceRef.current.map = null;
+    } else { // If not showing map or maps not loaded, ensure marker is off
+        if (markerInstanceRef.current) {
+            markerInstanceRef.current.map = null;
+        }
     }
     
-    // Cleanup function
+    // Cleanup: This effect's cleanup logic is tricky because the map instance is tied to mapContainerRef.current.
+    // If mapContainerRef.current itself is unmounted (e.g. by parent conditional rendering), 
+    // the map instance is implicitly destroyed.
+    // We primarily need to clean up the marker if the coordinates change or map is hidden.
+    // A full component unmount cleanup is handled by React for the refs.
     return () => {
-      if (markerInstanceRef.current) {
-        markerInstanceRef.current.map = null;
-        markerInstanceRef.current = null;
-      }
-      // Map instance is not destroyed here, it's reused or destroyed when showMap becomes false and container unmounts
-      // If the map container is removed from DOM by React when showMap is false, map will be destroyed.
+        // When dependencies change and effect re-runs, or component unmounts.
+        // If we are just hiding the map via CSS, the map instance might persist.
+        // If the mapContainerRef is unmounted when showMap is false, this cleanup for the marker is good.
+        if (markerInstanceRef.current) {
+            markerInstanceRef.current.map = null;
+        }
     };
   }, [isMapsLoaded, mapsLoadError, watchedLocationCoordinates, showMap]);
 
@@ -311,7 +317,7 @@ export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, 
   useEffect(() => {
     if (watchLocationName === '' && form.getValues('locationCoordinates')) {
       form.setValue('locationCoordinates', undefined, { shouldValidate: true });
-      setShowMap(false); // Hide map if location name is cleared
+      // setShowMap(false); // No longer automatically hide map, user controls with button
     }
   }, [watchLocationName, form]);
 
@@ -388,32 +394,43 @@ export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, 
 
   const selectedParticipants = friends.filter(friend => watchParticipantIds?.includes(friend.id));
 
-  const handleLocationSelected = (coords: { lat: number; lng: number } | undefined) => {
-    if (!coords) {
-      setShowMap(false);
+  const handleLocationSelected = (coords: { lat: number; lng: number } | undefined, name: string) => {
+    if (!coords && !name) { // If both coords and name are cleared
+        setShowMap(false);
     }
-    // If coords are selected, we don't automatically show map here. User clicks button.
+    // If coords are selected, or name is present, user can decide to show map.
+    // If only name is present (no coords), map can't be shown based on coords.
+  };
+  
+  const handleToggleMap = () => {
+    if (watchedLocationCoordinates) {
+        setShowMap(prev => !prev);
+    } else {
+        toast({title: "알림", description: "지도를 표시할 장소 좌표가 없습니다. 장소를 먼저 선택해주세요.", variant: "default"});
+        setShowMap(false);
+    }
   };
 
   return (
     <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
       <div>
-        <Label htmlFor="name">모임 이름 <span className="text-destructive">*</span></Label>
-        <Input id="name" {...form.register('name')} disabled={isPending} />
+        <Label htmlFor="name" className={cn((isEditMode && initialData?.isSettled) && "text-muted-foreground")}>모임 이름 <span className="text-destructive">*</span></Label>
+        <Input id="name" {...form.register('name')} disabled={isPending || (isEditMode && initialData?.isSettled)} />
         {form.formState.errors.name && <p className="text-sm text-destructive mt-1">{form.formState.errors.name.message}</p>}
       </div>
 
       <div>
-        <Label htmlFor="dateTime">시작 날짜 및 시간 <span className="text-destructive">*</span></Label>
+        <Label htmlFor="dateTime" className={cn((isEditMode && initialData?.isSettled) && "text-muted-foreground")}>시작 날짜 및 시간 <span className="text-destructive">*</span></Label>
         <Popover open={startDateOpen} onOpenChange={setStartDateOpen}>
           <PopoverTrigger asChild>
             <Button
               variant="outline"
               className={cn(
                 'w-full justify-start text-left font-normal',
-                !form.watch('dateTime') && 'text-muted-foreground'
+                !form.watch('dateTime') && 'text-muted-foreground',
+                (isEditMode && initialData?.isSettled) && "bg-muted/50 cursor-not-allowed"
               )}
-              disabled={isPending}
+              disabled={isPending || (isEditMode && initialData?.isSettled)}
             >
               <CalendarIcon className="mr-2 h-4 w-4" />
               {form.watch('dateTime') ? format(form.watch('dateTime'), 'PPP HH:mm', { locale: ko }) : <span>날짜 및 시간 선택</span>}
@@ -432,7 +449,7 @@ export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, 
                 }
               }}
               initialFocus
-              disabled={isPending}
+              disabled={isPending || (isEditMode && initialData?.isSettled)}
             />
             <div className="p-3 border-t border-border space-y-2">
               <Label htmlFor="startTime">시작 시간</Label>
@@ -448,9 +465,9 @@ export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, 
                   form.setValue('dateTime', new Date(currentDateTime), { shouldValidate: true });
                 }}
                 className="w-full"
-                disabled={isPending}
+                disabled={isPending || (isEditMode && initialData?.isSettled)}
               />
-              <Button size="sm" onClick={() => setStartDateOpen(false)} className="w-full" type="button">확인</Button>
+              <Button size="sm" onClick={() => setStartDateOpen(false)} className="w-full" type="button" disabled={(isEditMode && initialData?.isSettled)}>확인</Button>
             </div>
           </PopoverContent>
         </Popover>
@@ -458,16 +475,17 @@ export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, 
       </div>
 
       <div>
-        <Label htmlFor="endTime">종료 날짜 및 시간 (선택)</Label>
+        <Label htmlFor="endTime" className={cn((isEditMode && initialData?.isSettled) && "text-muted-foreground")}>종료 날짜 및 시간 (선택)</Label>
         <Popover open={endDateOpen} onOpenChange={setEndDateOpen}>
           <PopoverTrigger asChild>
             <Button
               variant="outline"
               className={cn(
                 'w-full justify-start text-left font-normal',
-                !form.watch('endTime') && 'text-muted-foreground'
+                !form.watch('endTime') && 'text-muted-foreground',
+                (isEditMode && initialData?.isSettled) && "bg-muted/50 cursor-not-allowed"
               )}
-              disabled={isPending}
+              disabled={isPending || (isEditMode && initialData?.isSettled)}
             >
               <CalendarIcon className="mr-2 h-4 w-4" />
               {form.watch('endTime') ? format(form.watch('endTime'), 'PPP HH:mm', { locale: ko }) : <span>날짜 및 시간 선택</span>}
@@ -488,7 +506,7 @@ export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, 
                 }
               }}
               initialFocus
-              disabled={isPending}
+              disabled={isPending || (isEditMode && initialData?.isSettled)}
               fromDate={form.watch('dateTime') ? new Date(form.watch('dateTime')) : undefined}
             />
             <div className="p-3 border-t border-border space-y-2">
@@ -505,9 +523,9 @@ export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, 
                   form.setValue('endTime', new Date(currentDateTime), { shouldValidate: true });
                 }}
                 className="w-full"
-                disabled={isPending}
+                disabled={isPending || (isEditMode && initialData?.isSettled)}
               />
-              <Button size="sm" onClick={() => setEndDateOpen(false)} className="w-full" type="button">확인</Button>
+              <Button size="sm" onClick={() => setEndDateOpen(false)} className="w-full" type="button" disabled={(isEditMode && initialData?.isSettled)}>확인</Button>
             </div>
           </PopoverContent>
         </Popover>
@@ -515,61 +533,81 @@ export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, 
       </div>
 
       <div className="space-y-2">
-        <Label htmlFor="locationNameInput">장소 <span className="text-destructive">*</span></Label>
-        {!isMapsLoaded && !mapsLoadError && (
-            <div className="relative flex items-center">
-                <MapPinIcon className="absolute left-2 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                <Input
-                    id="locationNameFallbackInput"
-                    value={form.watch('locationName')}
-                    onChange={(e) => form.setValue('locationName', e.target.value, {shouldValidate: true})}
-                    disabled={true}
-                    className="pl-8"
-                    placeholder={
-                        !process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY ? "Google Maps API 키가 설정되지 않았습니다." :
-                        !isMapsLoaded && !mapsLoadError ? "지도 API 로딩 중..." : 
-                        mapsLoadError ? `지도 API 로드 실패: ${mapsLoadError.message.substring(0,50)}...` : "장소 검색..."
-                    }
-                />
-            </div>
+        <Label htmlFor="locationNameInput" className={cn((isEditMode && initialData?.isSettled) && "text-muted-foreground")}>장소 <span className="text-destructive">*</span></Label>
+        {(!isMapsLoaded || mapsLoadError) && (
+          <div className="relative flex items-center">
+              <MapPinIcon className="absolute left-2 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                  id="locationNameFallbackInput"
+                  value={form.watch('locationName')}
+                  onChange={(e) => form.setValue('locationName', e.target.value, {shouldValidate: true})}
+                  disabled={isPending || (isEditMode && initialData?.isSettled)}
+                  className={cn("pl-8", (isEditMode && initialData?.isSettled) && "bg-muted/50 cursor-not-allowed")}
+                  placeholder={
+                      !process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY ? "Google Maps API 키가 설정되지 않았습니다." :
+                      !isMapsLoaded && !mapsLoadError ? "지도 API 로딩 중..." :
+                      mapsLoadError ? `지도 API 로드 실패: ${mapsLoadError.message.substring(0,50)}...` : "장소 검색..."
+                  }
+              />
+          </div>
         )}
         {isMapsLoaded && !mapsLoadError && (
           <LocationSearchInput
             form={form}
-            isPending={isPending}
-            isMapsLoaded={isMapsLoaded}
-            mapsLoadError={mapsLoadError}
+            isPending={isPending || (isEditMode && initialData?.isSettled)}
             initialLocationName={initialData?.locationName}
             onLocationSelected={handleLocationSelected}
           />
         )}
         {mapsLoadError && !isMapsLoaded && <p className="text-sm text-destructive mt-1">지도 API 로드에 실패했습니다. API 키와 설정을 확인해주세요.</p>}
         {form.formState.errors.locationName && <p className="text-sm text-destructive mt-1">{form.formState.errors.locationName.message}</p>}
-      
-        {watchedLocationCoordinates && (
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={() => setShowMap(prev => !prev)}
-            className="mt-2 w-full sm:w-auto"
-            disabled={!watchedLocationCoordinates}
-          >
-            <Eye className="mr-2 h-4 w-4" />
-            {showMap ? '지도 숨기기' : '지도 보기'}
-          </Button>
-        )}
+        
+        <div className="flex flex-wrap gap-2 mt-2">
+            <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={handleToggleMap}
+                className="sm:w-auto"
+                disabled={isPending || (isEditMode && initialData?.isSettled) || !watchedLocationCoordinates}
+            >
+                <Eye className="mr-2 h-4 w-4" />
+                {showMap ? '지도 숨기기' : '지도 보기'}
+            </Button>
+            {watchedLocationCoordinates && (
+                <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                    const url = `https://www.google.com/maps/search/?api=1&query=${watchedLocationCoordinates.lat},${watchedLocationCoordinates.lng}`;
+                    window.open(url, '_blank', 'noopener,noreferrer');
+                    }}
+                    className="sm:w-auto"
+                    disabled={isPending || (isEditMode && initialData?.isSettled)}
+                >
+                    <ExternalLink className="mr-2 h-4 w-4" />
+                    외부 지도에서 보기
+                </Button>
+            )}
+        </div>
       </div>
 
-      {showMap && isMapsLoaded && !mapsLoadError && (
-        <div className="mt-1">
-           <div ref={mapContainerRef} className="h-64 w-full rounded-md border">
-             {(!watchedLocationCoordinates && !isPending) && <p className="flex items-center justify-center h-full text-muted-foreground">장소를 선택하면 여기에 지도가 표시됩니다.</p>}
-             {isPending && <p className="flex items-center justify-center h-full text-muted-foreground">로딩 중...</p>}
-           </div>
+      <div 
+        className={cn(
+            "mt-1",
+            (showMap && isMapsLoaded && !mapsLoadError && watchedLocationCoordinates) ? 'block' : 'hidden'
+        )}
+      >
+        <div ref={mapContainerRef} className="h-64 w-full rounded-md border">
+            {(!watchedLocationCoordinates && !isPending) && <p className="flex items-center justify-center h-full text-muted-foreground">장소를 선택하면 여기에 지도가 표시됩니다.</p>}
+            {(isMapsLoaded && !watchedLocationCoordinates && showMap) && <p className="flex items-center justify-center h-full text-muted-foreground">표시할 좌표가 없습니다. 장소를 선택해주세요.</p>}
+            {isPending && <p className="flex items-center justify-center h-full text-muted-foreground">로딩 중...</p>}
+            {!isMapsLoaded && showMap && <p className="flex items-center justify-center h-full text-muted-foreground">지도 API 로딩 중...</p>}
+            {mapsLoadError && showMap && <p className="flex items-center justify-center h-full text-muted-foreground">지도 API 로드 실패.</p>}
         </div>
-      )}
-
+      </div>
+      
       <div className="space-y-2">
         <div className="flex items-center space-x-2">
           <Controller
@@ -618,7 +656,7 @@ export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, 
                     }}
                     onBlur={field.onBlur}
                     disabled={isPending || (isEditMode && initialData?.isSettled)}
-                    className="mt-1"
+                    className={cn("mt-1", (isEditMode && initialData?.isSettled) && "bg-muted/50 cursor-not-allowed")}
                     placeholder="예: 10000"
                   />
                 )}
@@ -649,14 +687,14 @@ export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, 
                                   : currentNonParticipants.filter(id => id !== participant.id);
                                 field.onChange(newNonParticipants);
                               }}
-                              disabled={isPending || (isEditMode && initialData?.isSettled) || (participant.id === currentUserId && selectedParticipants.length === 1 && field.value?.includes(currentUserId) && checked === false )}
+                              disabled={isPending || (isEditMode && initialData?.isSettled)}
                             />
                            )}
                         />
                         <Label
                           htmlFor={`nonReserveFund-${participant.id}`}
                           className={cn(
-                            "cursor-pointer",
+                            "font-normal", // Make checkbox labels normal weight
                             (isEditMode && initialData?.isSettled) && "text-muted-foreground cursor-not-allowed"
                           )}
                         >
@@ -675,14 +713,14 @@ export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, 
       </div>
 
       <div>
-        <Label>참여자 <span className="text-destructive">*</span></Label>
+        <Label className={cn((isEditMode && initialData?.isSettled) && "text-muted-foreground")}>참여자 <span className="text-destructive">*</span></Label>
          <Popover open={participantSearchOpen} onOpenChange={setParticipantSearchOpen}>
           <PopoverTrigger asChild>
             <Button
               variant="outline"
               role="combobox"
               aria-expanded={participantSearchOpen}
-              className="w-full justify-between"
+              className={cn("w-full justify-between", (isEditMode && initialData?.isSettled) && "bg-muted/50 cursor-not-allowed")}
               disabled={isPending || (isEditMode && initialData?.isSettled)}
             >
               {selectedParticipants.length > 0
@@ -708,14 +746,13 @@ export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, 
                           ? currentParticipantIds.filter(id => id !== friend.id)
                           : [...currentParticipantIds, friend.id];
 
-                        if (friend.id === currentUserId && newParticipantIds.length === 0 && currentParticipantIds.length === 1 && !currentParticipantIds.includes(currentUserId)) {
-                           newParticipantIds = [currentUserId];
-                        } else if (friend.id === currentUserId && !newParticipantIds.includes(currentUserId) && currentParticipantIds.includes(currentUserId)){
-                            if (currentParticipantIds.length === 1) {
-                                newParticipantIds = [currentUserId]; 
-                            }
-                        } else if (newParticipantIds.length === 0) {
-                           newParticipantIds = [currentUserId];
+                        // Ensure current user (creator) cannot be deselected if they are the only one, or becomes the only one
+                        if (newParticipantIds.length === 0) {
+                           newParticipantIds = [currentUserId]; // Always keep at least the creator if all are deselected
+                        } else if (friend.id === currentUserId && !newParticipantIds.includes(currentUserId) && currentParticipantIds.length === newParticipantIds.length) {
+                            // This case means current user was unchecked, making the list empty if they were the only one.
+                            // This is handled by newParticipantIds.length === 0 check above.
+                            // If others exist, allow unchecking self, unless it makes it empty.
                         }
 
 
@@ -756,5 +793,3 @@ export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, 
     </form>
   );
 }
-
-    
