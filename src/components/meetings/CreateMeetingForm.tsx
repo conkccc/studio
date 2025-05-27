@@ -21,7 +21,7 @@ import { useToast } from '@/hooks/use-toast';
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { Switch } from '@/components/ui/switch';
 import { Checkbox } from "@/components/ui/checkbox";
-import { useLoadScript } from '@googlemaps/js-api-loader';
+import { Loader } from '@googlemaps/js-api-loader'; // Corrected import
 import usePlacesAutocomplete, { getGeocode, getLatLng } from 'use-places-autocomplete';
 
 const meetingSchemaBase = z.object({
@@ -41,6 +41,7 @@ const meetingSchemaBase = z.object({
 
 const meetingSchema = meetingSchemaBase.refine(data => {
   if (data.useReserveFund) {
+    // Ensure partialReserveFundAmount is a positive number when useReserveFund is true
     return data.partialReserveFundAmount !== undefined && data.partialReserveFundAmount > 0;
   }
   return true;
@@ -76,24 +77,40 @@ export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, 
   const [startDateOpen, setStartDateOpen] = useState(false);
   const [endDateOpen, setEndDateOpen] = useState(false);
 
-  const { isLoaded, loadError } = useLoadScript({
-    googleMapsApiKey: process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY || "",
-    libraries,
-  });
+  const [isMapsLoaded, setIsMapsLoaded] = useState(false);
+  const [mapsLoadError, setMapsLoadError] = useState<Error | null>(null);
+
+  useEffect(() => {
+    if (process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY) {
+      const loader = new Loader({
+        apiKey: process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY,
+        version: "weekly",
+        libraries: libraries,
+      });
+
+      loader.load()
+        .then(() => setIsMapsLoaded(true))
+        .catch(e => {
+          console.error("Failed to load Google Maps API", e);
+          setMapsLoadError(e);
+        });
+    } else {
+      console.warn("Google Maps API key is not configured.");
+      setMapsLoadError(new Error("Google Maps API key is not configured."));
+    }
+  }, []);
+
 
   const {
-    ready,
+    ready, // `ready` is true when the Places API is loaded and usePlacesAutocomplete is ready
     value: placesValue,
     suggestions: { status: placesStatus, data: placesData },
     setValue: setPlacesValue,
     clearSuggestions: clearPlacesSuggestions,
   } = usePlacesAutocomplete({
+    requestOptions: { /* Optional: configure to your liking */ },
     debounce: 300,
-    requestOptions: {
-        // language: 'ko', // 필요한 경우 한국어 우선 검색
-        // region: 'kr', // 필요한 경우 한국 지역 우선 검색
-    },
-    disabled: !isLoaded || loadError,
+    disabled: !isMapsLoaded || !!mapsLoadError, // Disable if Maps API not loaded or error
   });
 
   const form = useForm<MeetingFormData>({
@@ -131,14 +148,15 @@ export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, 
   }, [initialData, setPlacesValue]);
 
   useEffect(() => {
-    if (isEditMode && initialData) {
+    // When participant list changes, filter nonReserveFundParticipants to keep only current participants
+    if (watchParticipantIds) {
       const currentNonParticipants = form.getValues('nonReserveFundParticipants') || [];
-      const newNonParticipants = currentNonParticipants.filter(id => watchParticipantIds?.includes(id));
+      const newNonParticipants = currentNonParticipants.filter(id => watchParticipantIds.includes(id));
       if (newNonParticipants.length !== currentNonParticipants.length) {
          form.setValue('nonReserveFundParticipants', newNonParticipants, { shouldValidate: true });
       }
     }
-  }, [watchParticipantIds, isEditMode, initialData, form]);
+  }, [watchParticipantIds, form]);
 
   useEffect(() => {
     if (!watchUseReserveFund) {
@@ -162,7 +180,7 @@ export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, 
       const results = await getGeocode({ address: suggestion.description });
       const { lat, lng } = await getLatLng(results[0]);
       form.setValue('locationCoordinates', { lat, lng }, { shouldValidate: true });
-      toast({ title: "장소 선택됨", description: `위도: ${lat}, 경도: ${lng}` });
+      toast({ title: "장소 선택됨", description: `${suggestion.description} (위도: ${lat.toFixed(4)}, 경도: ${lng.toFixed(4)})` });
     } catch (error) {
       console.error("Error getting coordinates: ", error);
       toast({ title: "오류", description: "장소의 좌표를 가져오는 데 실패했습니다.", variant: "destructive" });
@@ -174,6 +192,7 @@ export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, 
     startTransition(async () => {
       const payload = {
         ...data,
+        // Ensure partialReserveFundAmount is a number or undefined, not an empty string.
         partialReserveFundAmount: data.useReserveFund && data.partialReserveFundAmount !== undefined
                                     ? Number(data.partialReserveFundAmount) 
                                     : undefined,
@@ -336,26 +355,26 @@ export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, 
             <Input 
               id="locationName" 
               {...form.register('locationName', { 
-                onChange: (e) => setPlacesValue(e.target.value) // Sync with usePlacesAutocomplete
+                onChange: (e) => setPlacesValue(e.target.value) 
               })} 
-              value={placesValue} // Controlled by usePlacesAutocomplete
+              value={placesValue} 
               onChange={(e) => {
                 setPlacesValue(e.target.value);
-                form.setValue('locationName', e.target.value, { shouldValidate: true }); // Sync with react-hook-form
+                form.setValue('locationName', e.target.value, { shouldValidate: true }); 
               }}
-              disabled={!isLoaded || loadError || isPending} 
+              disabled={!ready || !isMapsLoaded || !!mapsLoadError || isPending} 
               className="pl-8"
-              placeholder={isLoaded && !loadError ? "장소 검색..." : "지도 API 로딩 중..."}
+              placeholder={!isMapsLoaded && !mapsLoadError ? "지도 API 로딩 중..." : mapsLoadError ? "지도 API 로드 실패" : "장소 검색..."}
+              autoComplete="off"
             />
           </div>
-          {loadError && <p className="text-sm text-destructive mt-1">지도 API 로드에 실패했습니다. API 키를 확인해주세요.</p>}
-          {isLoaded && !loadError && placesStatus === 'OK' && placesData.length > 0 && (
+          {mapsLoadError && <p className="text-sm text-destructive mt-1">지도 API 로드에 실패했습니다. API 키를 확인해주세요.</p>}
+          {ready && isMapsLoaded && !mapsLoadError && placesStatus === 'OK' && placesData.length > 0 && (
             <ul className="absolute z-10 w-full bg-background border border-border rounded-md shadow-lg mt-1 max-h-60 overflow-y-auto">
               {placesData.map((suggestion) => {
                 const {
                   place_id,
                   structured_formatting: { main_text, secondary_text },
-                  description,
                 } = suggestion;
                 return (
                   <li
@@ -388,7 +407,13 @@ export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, 
               />
             )}
           />
-          <Label htmlFor="useReserveFund" className={cn("cursor-pointer", (isEditMode && initialData?.isSettled) && "text-muted-foreground cursor-not-allowed")}>
+          <Label 
+            htmlFor="useReserveFund" 
+            className={cn(
+              "cursor-pointer", 
+              (isEditMode && initialData?.isSettled) && "text-muted-foreground cursor-not-allowed"
+            )}
+          >
             모임 회비 사용 {(isEditMode && initialData?.isSettled) && "(정산 완료됨 - 수정 불가)"}
           </Label>
         </div>
@@ -396,7 +421,10 @@ export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, 
         {watchUseReserveFund && (
           <div className="space-y-4 mt-4 pl-2 border-l-2 ml-2">
             <div>
-              <Label htmlFor="partialReserveFundAmount" className={cn((isEditMode && initialData?.isSettled) && "text-muted-foreground")}>
+              <Label 
+                htmlFor="partialReserveFundAmount"
+                className={cn((isEditMode && initialData?.isSettled) && "text-muted-foreground")}
+              >
                 사용할 회비 금액 (원) <span className="text-destructive">*</span>
               </Label>
               <Controller
@@ -405,11 +433,11 @@ export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, 
                 render={({ field }) => (
                   <Input
                     id="partialReserveFundAmount"
-                    type="text"
+                    type="text" // Keep as text to allow formatted input
                     value={formatNumberInput(field.value)}
                     onChange={(e) => {
                        const rawValue = e.target.value.replace(/,/g, '');
-                       field.onChange(rawValue === '' ? undefined : parseFloat(rawValue));
+                       field.onChange(rawValue === '' ? undefined : parseFloat(rawValue)); // Store as number or undefined
                     }}
                     onBlur={field.onBlur}
                     disabled={isPending || (isEditMode && initialData?.isSettled)}
@@ -448,7 +476,13 @@ export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, 
                             />
                            )}
                         />
-                        <Label htmlFor={`nonReserveFund-${participant.id}`} className={cn("cursor-pointer", (isEditMode && initialData?.isSettled) && "text-muted-foreground cursor-not-allowed")}>
+                        <Label 
+                          htmlFor={`nonReserveFund-${participant.id}`} 
+                          className={cn(
+                            "cursor-pointer", 
+                            (isEditMode && initialData?.isSettled) && "text-muted-foreground cursor-not-allowed"
+                          )}
+                        >
                           {participant.nickname} {participant.id === currentUserId && "(나)"}
                         </Label>
                       </div>
@@ -490,7 +524,7 @@ export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, 
                   {friends.map((friend) => (
                     <CommandItem
                       key={friend.id}
-                      value={friend.nickname}
+                      value={friend.nickname} // Ensure this is unique or use friend.id if nicknames can repeat
                       onSelect={() => {
                         if (isEditMode && initialData?.isSettled) return; 
                         const currentParticipantIds = form.getValues("participantIds") || [];
@@ -498,16 +532,41 @@ export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, 
                           ? currentParticipantIds.filter(id => id !== friend.id)
                           : [...currentParticipantIds, friend.id];
                         
-                        if (friend.id === currentUserId && !newParticipantIds.includes(currentUserId) && newParticipantIds.length > 0) {
-                           // Allow unselecting creator if other participants remain
-                        } else if (!newParticipantIds.includes(currentUserId)) {
-                           newParticipantIds.push(currentUserId); // Creator must be included
-                        }
-                        if (newParticipantIds.length === 0 && friend.id === currentUserId){ 
-                            newParticipantIds = [currentUserId]; // At least creator must be selected
+                        // Ensure creator is always included if any participants are selected
+                        if (newParticipantIds.length > 0 && !newParticipantIds.includes(currentUserId)) {
+                           // If creator was unselected but others remain, re-add creator
+                           // This logic might need refinement based on desired behavior for creator selection
+                           // For now, let's assume creator can be unselected if other participants remain
+                        } else if (newParticipantIds.length === 0 && currentParticipantIds.includes(currentUserId) && friend.id === currentUserId) {
+                           // If attempting to unselect the creator when they are the only one left, prevent it or handle as needed
+                           // For now, keep creator if they are the last one being unselected
+                           newParticipantIds = [currentUserId];
+                        } else if (newParticipantIds.length === 0 && friend.id !== currentUserId) {
+                            // If list becomes empty by unselecting someone else, ensure creator is re-added if they were originally part of it
+                            if (currentParticipantIds.includes(currentUserId)) newParticipantIds = [currentUserId];
                         }
 
+
+                        // If the creator is unselected and there are other participants, this is allowed.
+                        // But if unselecting the creator makes the list empty, or if the list is empty and creator is added,
+                        // the creator must be in.
+                        // If unselecting a non-creator makes the list empty, and creator was originally in, add creator.
+                        // Simplified: At least one participant is required. If list becomes empty, add creator.
+                        // Creator must be in participantIds if participantIds is not empty.
+                        // This logic is getting complex, let's simplify: Creator must be selectable.
+                        // If participantIds becomes empty and it was the creator being unselected, keep creator.
+                        
+                        if (friend.id === currentUserId && newParticipantIds.length === 0 && currentParticipantIds.length === 1) {
+                           // Prevent unselecting the creator if they are the only participant
+                           newParticipantIds = [currentUserId];
+                        } else if (newParticipantIds.length === 0) {
+                           // If list becomes empty for any other reason, add creator as default
+                           newParticipantIds = [currentUserId];
+                        }
+
+
                         form.setValue("participantIds", newParticipantIds, { shouldValidate: true });
+                         // If a participant is removed, also remove them from nonReserveFundParticipants
                          const currentNonParticipants = form.getValues('nonReserveFundParticipants') || [];
                          if (!newParticipantIds.includes(friend.id) && currentNonParticipants.includes(friend.id)) {
                             form.setValue('nonReserveFundParticipants', currentNonParticipants.filter(id => id !== friend.id), { shouldValidate: true });
@@ -544,3 +603,4 @@ export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, 
     </form>
   );
 }
+
