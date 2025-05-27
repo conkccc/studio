@@ -41,7 +41,6 @@ const meetingSchemaBase = z.object({
 
 const meetingSchema = meetingSchemaBase.refine(data => {
   if (data.useReserveFund) {
-    // "일정 금액 사용" 시 금액이 0보다 커야 함
     return data.partialReserveFundAmount !== undefined && data.partialReserveFundAmount > 0;
   }
   return true;
@@ -67,15 +66,12 @@ interface MeetingFormProps {
   initialData?: Meeting;
 }
 
-// Define libraries required by Google Maps API
 const libraries: ("places" | "maps" | "marker")[] = ["places", "maps", "marker"];
 
 interface LocationSearchInputProps {
   form: ReturnType<typeof useForm<MeetingFormData>>;
   isPending: boolean;
   initialLocationName?: string;
-  // isMapsLoaded: boolean; // No longer needed here as this component is conditionally rendered
-  // mapsLoadError: Error | null; // No longer needed here
 }
 
 function LocationSearchInput({ form, isPending, initialLocationName }: LocationSearchInputProps) {
@@ -89,7 +85,6 @@ function LocationSearchInput({ form, isPending, initialLocationName }: LocationS
     requestOptions: { /* Optional: configure to your liking */ },
     debounce: 300,
     defaultValue: initialLocationName || "",
-    // disabled: !isMapsLoaded || !!mapsLoadError, // This component is now rendered conditionally
   });
 
   const { toast } = useToast();
@@ -121,14 +116,13 @@ function LocationSearchInput({ form, isPending, initialLocationName }: LocationS
       <div className="relative flex items-center">
         <MapPinIcon className="absolute left-2 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
         <Input
-          id="locationNameInput" // Changed ID to avoid conflict if form.register uses 'locationName'
+          id="locationNameInput"
           value={placesValue}
           onChange={(e) => {
             setPlacesValue(e.target.value);
-            // Also update the react-hook-form field if needed, though register should handle it
             form.setValue('locationName', e.target.value, { shouldValidate: true });
           }}
-          disabled={!ready || isPending} // Disable if Places API not ready or form is pending
+          disabled={!ready || isPending}
           className="pl-8"
           placeholder="장소 검색..."
           autoComplete="off"
@@ -219,13 +213,19 @@ export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, 
     const loader = new Loader({
       apiKey: apiKey,
       version: "weekly",
-      libraries: libraries, // Ensure 'marker' library is included for AdvancedMarkerElement
+      libraries: libraries,
     });
 
     console.log("Attempting to load Google Maps API...");
     loader.load()
       .then(() => {
-        console.log("Google Maps API loaded successfully.");
+        if (!window.google || !window.google.maps || !window.google.maps.Map || !window.google.maps.marker || !window.google.maps.marker.AdvancedMarkerElement) {
+          console.error("Google Maps API loaded, but AdvancedMarkerElement (or other core components) not found. Check 'marker' library inclusion and API version.");
+          setMapsLoadError(new Error("Google Maps API core components missing after load."));
+          setIsMapsLoaded(false); // Mark as not properly loaded
+          return;
+        }
+        console.log("Google Maps API and required libraries (places, maps, marker) loaded successfully.");
         setIsMapsLoaded(true);
         setMapsLoadError(null);
       })
@@ -238,8 +238,16 @@ export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, 
 
 
   useEffect(() => {
-    if (isMapsLoaded && !mapsLoadError && mapContainerRef.current && window.google && window.google.maps && window.google.maps.marker) {
-      const defaultCenter = { lat: 37.5665, lng: 126.9780 }; // Default to Seoul
+    if (isMapsLoaded && !mapsLoadError && mapContainerRef.current) {
+      // Double check for safety, though the loader .then() should ensure this
+      if (!window.google || !window.google.maps || !window.google.maps.Map || !window.google.maps.marker || !window.google.maps.marker.AdvancedMarkerElement) {
+        console.error(
+          "Attempting to initialize map, but Google Maps API or AdvancedMarkerElement not available. This should not happen if isMapsLoaded is true and no error."
+        );
+        return;
+      }
+
+      const defaultCenter = { lat: 37.5665, lng: 126.9780 };
       const currentCoords = watchedLocationCoordinates || defaultCenter;
       const zoomLevel = watchedLocationCoordinates ? 15 : 10;
 
@@ -249,7 +257,7 @@ export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, 
           zoom: zoomLevel,
           disableDefaultUI: true,
           zoomControl: true,
-          mapId: 'NBBANG_MAP_ID', // Optional: for Cloud-based map styling
+          mapId: 'NBBANG_MAP_ID',
         });
       } else {
         mapInstanceRef.current.setCenter(currentCoords);
@@ -258,20 +266,10 @@ export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, 
 
       if (watchedLocationCoordinates) {
         if (!markerInstanceRef.current) {
-           // Ensure AdvancedMarkerElement is available
-          if (window.google.maps.marker && window.google.maps.marker.AdvancedMarkerElement) {
-            markerInstanceRef.current = new window.google.maps.marker.AdvancedMarkerElement({
-              map: mapInstanceRef.current,
-              position: watchedLocationCoordinates,
-            });
-          } else {
-            console.warn("AdvancedMarkerElement not available. Falling back to standard marker or check API version/libraries.");
-            // Fallback to standard marker if AdvancedMarkerElement is not loaded
-             markerInstanceRef.current = new window.google.maps.Marker({
-               map: mapInstanceRef.current,
-               position: watchedLocationCoordinates,
-             }) as any; // Type assertion for simplicity, ideally handle properly
-          }
+          markerInstanceRef.current = new window.google.maps.marker.AdvancedMarkerElement({
+            map: mapInstanceRef.current,
+            position: watchedLocationCoordinates,
+          });
         } else {
           markerInstanceRef.current.position = watchedLocationCoordinates;
           if (!markerInstanceRef.current.map) {
@@ -284,24 +282,23 @@ export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, 
         }
       }
     }
-    // Cleanup function for the effect
+    // Cleanup function
     return () => {
       if (markerInstanceRef.current) {
-        markerInstanceRef.current.map = null; // Remove marker from map
+        markerInstanceRef.current.map = null;
         markerInstanceRef.current = null;
       }
-      // Note: Google Maps API doesn't have a formal destroy method for the map instance.
-      // Setting the ref to null and allowing React to unmount the container is typical.
-      // However, if map events are attached, they should be cleared here too.
       if (mapInstanceRef.current) {
-        // Potentially clear listeners if any were attached directly to mapInstanceRef.current
+        // Consider clearing map event listeners if any were attached directly
+        // For now, just nullifying the ref. Google Maps API handles its own internal cleanup mostly.
         mapInstanceRef.current = null;
       }
-      // console.log("Map effect cleanup run"); // For debugging
     };
   }, [isMapsLoaded, mapsLoadError, watchedLocationCoordinates]);
 
+
   useEffect(() => {
+    // Clear coordinates if location name is manually cleared
     if (watchLocationName === '' && form.getValues('locationCoordinates')) {
       form.setValue('locationCoordinates', undefined, { shouldValidate: true });
     }
@@ -309,6 +306,7 @@ export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, 
 
 
   useEffect(() => {
+    // Ensure nonReserveFundParticipants are a subset of current participants
     if (watchParticipantIds) {
       const currentNonParticipants = form.getValues('nonReserveFundParticipants') || [];
       const newNonParticipants = currentNonParticipants.filter(id => watchParticipantIds.includes(id));
@@ -335,11 +333,18 @@ export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, 
   const onSubmit = (data: MeetingFormData) => {
     startTransition(async () => {
       const payload: Omit<Meeting, 'id' | 'createdAt' | 'isSettled'> = {
-        ...data,
+        name: data.name,
+        dateTime: data.dateTime,
+        endTime: data.endTime,
+        locationName: data.locationName,
         locationCoordinates: data.locationCoordinates || undefined,
+        participantIds: data.participantIds,
+        creatorId: currentUserId, // Add creatorId here
+        useReserveFund: data.useReserveFund,
         partialReserveFundAmount: data.useReserveFund && data.partialReserveFundAmount !== undefined
                                     ? Number(data.partialReserveFundAmount)
                                     : undefined,
+        nonReserveFundParticipants: data.nonReserveFundParticipants || [],
       };
 
       if (isEditMode && initialData) {
@@ -356,7 +361,7 @@ export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, 
           });
         }
       } else {
-        const result = await createMeetingAction({ ...payload, creatorId: currentUserId });
+        const result = await createMeetingAction(payload);
         if (result.success && result.meeting) {
           toast({ title: '성공', description: '새로운 모임이 생성되었습니다.' });
           router.push(`/meetings/${result.meeting.id}`);
@@ -504,19 +509,20 @@ export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, 
           <div className="relative flex items-center">
             <MapPinIcon className="absolute left-2 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <Input
-              id="locationNameFallbackInput" // Different ID for the fallback
+              id="locationNameFallbackInput"
               value={form.watch('locationName')}
               onChange={(e) => form.setValue('locationName', e.target.value, {shouldValidate: true})}
               disabled={isPending || !isMapsLoaded}
               className="pl-8"
               placeholder={
-                !isMapsLoaded && !mapsLoadError ? "지도 API 로딩 중..." : mapsLoadError ? `지도 API 로드 실패: ${mapsLoadError.message}` : "장소 검색..."
+                !process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY ? "Google Maps API 키가 설정되지 않았습니다." :
+                !isMapsLoaded && !mapsLoadError ? "지도 API 로딩 중..." : 
+                mapsLoadError ? `지도 API 로드 실패: ${mapsLoadError.message.substring(0,50)}...` : "장소 검색..."
               }
             />
           </div>
         )}
-        {/* This error display might be redundant if placeholder shows it, but kept for explicitness */}
-        {mapsLoadError && !isMapsLoaded && <p className="text-sm text-destructive mt-1">지도 API 로드에 실패했습니다: {mapsLoadError.message}</p>}
+        {mapsLoadError && !isMapsLoaded && <p className="text-sm text-destructive mt-1">지도 API 로드에 실패했습니다. API 키와 설정을 확인해주세요.</p>}
         {form.formState.errors.locationName && <p className="text-sm text-destructive mt-1">{form.formState.errors.locationName.message}</p>}
       </div>
 
@@ -668,11 +674,22 @@ export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, 
                           ? currentParticipantIds.filter(id => id !== friend.id)
                           : [...currentParticipantIds, friend.id];
 
-                        if (friend.id === currentUserId && newParticipantIds.length === 0 && currentParticipantIds.length === 1) {
+                        if (friend.id === currentUserId && newParticipantIds.length === 0 && currentParticipantIds.length === 1 && !currentParticipantIds.includes(currentUserId)) {
+                           // This case should ideally not happen if currentUserId is always in participantIds initially
+                           // If it means unselecting the last person (who is the current user), prevent it.
                            newParticipantIds = [currentUserId];
+                        } else if (friend.id === currentUserId && !newParticipantIds.includes(currentUserId) && currentParticipantIds.includes(currentUserId)){
+                            // Prevent de-selecting current user if they are the only one selected
+                            if (currentParticipantIds.length === 1) {
+                                newParticipantIds = [currentUserId]; // Keep current user selected
+                            } else {
+                                // Allow de-selection if others are selected
+                            }
                         } else if (newParticipantIds.length === 0) {
+                             // If all are deselected, re-select current user automatically
                            newParticipantIds = [currentUserId];
                         }
+
 
                         form.setValue("participantIds", newParticipantIds, { shouldValidate: true });
                          const currentNonParticipants = form.getValues('nonReserveFundParticipants') || [];
@@ -711,5 +728,3 @@ export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, 
     </form>
   );
 }
-
-    
