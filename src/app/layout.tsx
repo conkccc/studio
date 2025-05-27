@@ -28,6 +28,10 @@ export default function RootLayout({
 }>) {
   const adminEmail = process.env.ADMIN_EMAIL;
 
+  if (!adminEmail) {
+    console.warn("WARNING: ADMIN_EMAIL environment variable is not set. Admin functionality will not work correctly.");
+  }
+
   return (
     <html lang="ko">
       <body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
