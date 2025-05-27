@@ -1,10 +1,12 @@
+
 'use client';
 import Link from 'next/link';
 import type { Meeting, Friend } from '@/lib/types';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { CalendarDays, MapPin, Users, ArrowRight } from 'lucide-react';
-import { format } from 'date-fns';
+import { format, differenceInCalendarDays } from 'date-fns';
+import { ko } from 'date-fns/locale';
 
 interface MeetingCardProps {
   meeting: Meeting;
@@ -18,6 +20,16 @@ export function MeetingCard({ meeting, allFriends }: MeetingCardProps) {
 
   const creator = allFriends.find(f => f.id === meeting.creatorId)?.nickname || '알 수 없음';
 
+  const formatDate = () => {
+    const startTime = new Date(meeting.dateTime);
+    if (meeting.endTime && meeting.endTime instanceof Date && !isNaN(meeting.endTime.getTime())) {
+      const endTime = new Date(meeting.endTime);
+      const duration = differenceInCalendarDays(endTime, startTime);
+        return `${format(startTime, 'yyyy년 M월 d일 HH:mm', { locale: ko })} (${duration + 1}일)`;
+    }
+    return format(startTime, 'yyyy년 M월 d일 HH:mm', { locale: ko });
+  };
+
   return (
     <Card className="flex flex-col h-full hover:shadow-lg transition-shadow duration-300">
       <CardHeader>
@@ -30,9 +42,7 @@ export function MeetingCard({ meeting, allFriends }: MeetingCardProps) {
         <div className="flex items-center gap-2 text-muted-foreground">
           <CalendarDays className="h-4 w-4" />
           <span>
-            {`${format(meeting.dateTime, 'yyyy년 M월 d일 HH:mm')}`}
-            {meeting.endTime && meeting.endTime instanceof Date && !isNaN(meeting.endTime.getTime())
-              ? ` - ${format(meeting.endTime, 'HH:mm')}` : ''}
+            {formatDate()}
           </span>
         </div>
         <div className="flex items-center gap-2 text-muted-foreground">
@@ -45,11 +55,11 @@ export function MeetingCard({ meeting, allFriends }: MeetingCardProps) {
         </div>
       </CardContent>
       <CardFooter>
-        <Link href={`/meetings/${meeting.id}`} passHref legacyBehavior>
-          <Button variant="outline" className="w-full">
+        <Button asChild variant="outline" className="w-full">
+          <Link href={`/meetings/${meeting.id}`}>
             상세보기 <ArrowRight className="ml-2 h-4 w-4" />
-          </Button>
-        </Link>
+          </Link>
+        </Button>
       </CardFooter>
     </Card>
   );

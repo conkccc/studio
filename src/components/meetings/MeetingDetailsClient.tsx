@@ -7,7 +7,7 @@ import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { format } from 'date-fns';
+import { format, differenceInCalendarDays } from 'date-fns';
 import { ko } from 'date-fns/locale';
 import { deleteMeetingAction, finalizeMeetingSettlementAction } from '@/lib/actions';
 import { useToast } from '@/hooks/use-toast';
@@ -67,9 +67,19 @@ export function MeetingDetailsClient({
 
   useEffect(() => {
     if (meeting?.dateTime) {
-      setFormattedMeetingDateTime(format(meeting.dateTime, 'yyyy년 M월 d일 (EEE) HH:mm', { locale: ko }));
+      const startTime = new Date(meeting.dateTime);
+      let formattedString = format(startTime, 'yyyy년 M월 d일 (EEE) HH:mm', { locale: ko });
+
+      if (meeting.endTime && meeting.endTime instanceof Date && !isNaN(meeting.endTime.getTime())) {
+        const endTime = new Date(meeting.endTime);
+        const duration = differenceInCalendarDays(endTime, startTime);
+        if (duration >= 0) { // Only add duration if endTime is same day or later
+          formattedString = `${format(startTime, 'yyyy년 M월 d일 HH:mm', { locale: ko })} (${duration + 1}일)`;
+        }
+      }
+      setFormattedMeetingDateTime(formattedString);
     }
-  }, [meeting?.dateTime]);
+  }, [meeting?.dateTime, meeting?.endTime]);
 
 
   const participants = useMemo(() =>
