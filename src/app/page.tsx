@@ -7,40 +7,43 @@ import { Button } from '@/components/ui/button';
 import { UsersRound, CalendarCheck, PiggyBank, Brain, ArrowRight, LineChart } from 'lucide-react';
 import Image from 'next/image';
 import { useAuth } from '@/contexts/AuthContext';
-import { useEffect, useState } from 'react'; // For client-side only rendering of balance
-import { getReserveFundBalance } from '@/lib/data-store'; // Now async
+import { useEffect, useState } from 'react'; 
+import { getReserveFundBalance } from '@/lib/data-store'; 
 
 export default function DashboardPage() {
   const { currentUser, isAdmin, loading } = useAuth();
   const [reserveBalance, setReserveBalance] = useState<number | null>(null);
 
   useEffect(() => {
-    if (currentUser && isAdmin) {
+    // Firestore를 사용하므로, 관리자일 때만 잔액을 가져오도록 수정
+    if (!loading && currentUser && isAdmin) {
       const fetchBalance = async () => {
         try {
           const balance = await getReserveFundBalance();
           setReserveBalance(balance);
         } catch (error) {
           console.error("Failed to fetch reserve fund balance:", error);
-          setReserveBalance(0); // Fallback or handle error appropriately
+          setReserveBalance(0); 
         }
       };
       fetchBalance();
+    } else if (!currentUser || !isAdmin) {
+      setReserveBalance(null); // 로그아웃되거나 관리자가 아니면 잔액 정보 초기화
     }
-  }, [currentUser, isAdmin]);
+  }, [currentUser, isAdmin, loading]);
 
 
   const quickLinks = [
     { href: '/friends', label: '친구 관리', icon: UsersRound, description: '친구 목록을 보고 새 친구를 추가하세요.', adminOnly: true },
-    { href: '/meetings', label: '모임 관리', icon: CalendarCheck, description: '모임을 만들고 지난 모임을 확인하세요.', adminOnly: false },
+    { href: '/meetings', label: '모임 관리', icon: CalendarCheck, description: '모임을 만들고 지난 모임을 확인하세요.', adminOnly: false }, // 모임 관리는 이제 공개
     { href: '/reserve-fund', label: '회비 현황', icon: PiggyBank, description: '회비 잔액과 사용 내역을 보세요.', adminOnly: true },
-    { href: '/ai-analysis', label: 'AI 비용 분석', icon: Brain, description: 'AI로 지출을 분석하고 절약법을 찾으세요.', adminOnly: false },
+    { href: '/ai-analysis', label: 'AI 비용 분석', icon: Brain, description: 'AI로 지출을 분석하고 절약법을 찾으세요.', adminOnly: false }, // AI 분석도 공개
   ];
 
   if (loading) {
     return (
-      <div className="flex justify-center items-center min-h-screen">
-        <p className="text-xl text-muted-foreground">로딩 중...</p>
+      <div className="flex justify-center items-center min-h-[calc(100vh-150px)]">
+        <p className="text-xl text-muted-foreground">대시보드 로딩 중...</p>
       </div>
     );
   }
@@ -62,11 +65,13 @@ export default function DashboardPage() {
       <div className="container mx-auto py-8 text-center">
         <h1 className="text-3xl font-bold mb-4">접근 권한 없음</h1>
         <p className="text-lg text-muted-foreground mb-6">
-          이 애플리케이션은 현재 관리자만 사용할 수 있습니다.
+          이 애플리케이션의 관리자 기능은 지정된 관리자만 사용할 수 있습니다.
+          <br />
+          모임 목록 및 AI 비용 분석 도구는 로그인 없이도 사용 가능합니다.
         </p>
          <Button onClick={async () => {
             const { signOut } = await import('firebase/auth');
-            const { auth } = await import('@/lib/firebase');
+            const { auth } = await import('@/lib/firebase'); // auth 임포트 확인
             await signOut(auth);
             // AuthContext will handle redirect via onAuthStateChanged
         }}>로그아웃</Button>
@@ -74,11 +79,12 @@ export default function DashboardPage() {
     );
   }
 
+  // 관리자로 로그인한 경우
   return (
     <div className="container mx-auto py-8">
       <header className="mb-12 text-center">
-        <h1 className="text-4xl font-bold tracking-tight text-primary mb-3">N빵친구</h1>
-        <p className="text-xl text-muted-foreground">친구들과의 정산을 스마트하게!</p>
+        <h1 className="text-4xl font-bold tracking-tight text-primary mb-3">N빵친구 (관리자 대시보드)</h1>
+        <p className="text-xl text-muted-foreground">친구들과의 정산을 스마트하게 관리하세요!</p>
       </header>
 
       <section className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-2 gap-6 mb-12">
@@ -92,11 +98,11 @@ export default function DashboardPage() {
               <CardDescription>{link.description}</CardDescription>
             </CardHeader>
             <CardFooter>
-              <Link href={link.href} passHref legacyBehavior={false}>
-                <Button variant="outline" className="w-full">
+              <Button asChild variant="outline" className="w-full">
+                <Link href={link.href}>
                   바로가기 <ArrowRight className="ml-2 h-4 w-4" />
-                </Button>
-              </Link>
+                </Link>
+              </Button>
             </CardFooter>
           </Card>
         ))}
@@ -133,9 +139,9 @@ export default function DashboardPage() {
               )}
               <p className="text-sm text-muted-foreground">다음 모임을 위해 충분한 잔액이 남아있습니다.</p>
               {isAdmin && (
-                <Link href="/reserve-fund" passHref legacyBehavior={false}>
-                  <Button variant="secondary" className="mt-4">회비 내역 보기</Button>
-                </Link>
+                <Button asChild variant="secondary" className="mt-4">
+                  <Link href="/reserve-fund">회비 내역 보기</Link>
+                </Button>
               )}
             </div>
           </CardContent>
