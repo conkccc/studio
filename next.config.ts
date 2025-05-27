@@ -3,10 +3,10 @@ import type {NextConfig} from 'next';
 const nextConfig: NextConfig = {
   /* config options here */
   typescript: {
-    ignoreBuildErrors: true,
+    // ignoreBuildErrors: true, // Removed for stricter Vercel builds
   },
   eslint: {
-    ignoreDuringBuilds: true,
+    // ignoreDuringBuilds: true, // Removed for stricter Vercel builds
   },
   images: {
     remotePatterns: [
