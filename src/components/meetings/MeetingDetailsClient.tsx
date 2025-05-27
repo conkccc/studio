@@ -11,7 +11,7 @@ import { format, differenceInCalendarDays, isValid } from 'date-fns';
 import { ko } from 'date-fns/locale';
 import { deleteMeetingAction, finalizeMeetingSettlementAction } from '@/lib/actions';
 import { useToast } from '@/hooks/use-toast';
-import { CalendarDays, MapPin, Users, Edit3, Trash2, PlusCircle, Loader2, ExternalLink, PiggyBank, CheckCircle2, AlertCircle } from 'lucide-react';
+import { CalendarDays, MapPin, Users, Edit3, Trash2, PlusCircle, Loader2, ExternalLink, PiggyBank, CheckCircle2, AlertCircle, Info } from 'lucide-react'; // Added Info
 import { AddExpenseDialog } from './AddExpenseDialog';
 import { ExpenseItem } from './ExpenseItem';
 import { PaymentSummary } from './PaymentSummary';
@@ -63,9 +63,9 @@ export function MeetingDetailsClient({
   useEffect(() => {
     if (meeting?.dateTime) {
       let localFormattedString;
-      const startTime = meeting.dateTime; // Already a Date object from Firestore conversion
-      if (meeting.endTime && isValid(meeting.endTime)) { // Ensure endTime is valid
-        const endTime = meeting.endTime; // Already a Date object
+      const startTime = meeting.dateTime; 
+      if (meeting.endTime && isValid(meeting.endTime)) { 
+        const endTime = meeting.endTime; 
         const duration = differenceInCalendarDays(endTime, startTime);
         localFormattedString = `${format(startTime, 'yyyy년 M월 d일 HH:mm', { locale: ko })} (${Math.max(0, duration) + 1}일)`;
       } else if (isValid(startTime)) {
@@ -97,25 +97,33 @@ export function MeetingDetailsClient({
   const handleExpenseAdded = (newExpense: Expense) => {
     setExpenses(prev => [newExpense, ...prev].sort((a,b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime() ));
     if (meeting.useReserveFund && meeting.isSettled) {
-      setMeeting(prev => ({ ...prev, isSettled: false }));
+        const updatedMeeting = { ...meeting, isSettled: false };
+        setMeeting(updatedMeeting);
+        // Server action will handle reverting transaction and updating DB
     }
   };
 
   const handleExpenseUpdated = (updatedExpense: Expense) => {
     setExpenses(prev => prev.map(e => e.id === updatedExpense.id ? updatedExpense : e).sort((a,b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()));
      if (meeting.useReserveFund && meeting.isSettled) {
-      setMeeting(prev => ({ ...prev, isSettled: false }));
+        const updatedMeeting = { ...meeting, isSettled: false };
+        setMeeting(updatedMeeting);
     }
   };
 
   const handleExpenseDeleted = (deletedExpenseId: string) => {
     setExpenses(prev => prev.filter(e => e.id !== deletedExpenseId));
      if (meeting.useReserveFund && meeting.isSettled) {
-      setMeeting(prev => ({ ...prev, isSettled: false }));
+        const updatedMeeting = { ...meeting, isSettled: false };
+        setMeeting(updatedMeeting);
     }
   };
 
   const handleDeleteMeeting = async () => {
+    if (!isAdmin) {
+      toast({ title: '권한 없음', description: '모임 삭제는 관리자만 가능합니다.', variant: 'destructive'});
+      return;
+    }
     setIsDeleting(true);
     startTransition(async () => {
       const result = await deleteMeetingAction(meeting.id);
@@ -131,6 +139,10 @@ export function MeetingDetailsClient({
   };
 
   const handleFinalizeSettlement = () => {
+    if (!isAdmin) {
+      toast({ title: '권한 없음', description: '정산 확정은 관리자만 가능합니다.', variant: 'destructive'});
+      return;
+    }
     setIsFinalizing(true);
     startTransition(async () => {
       const result = await finalizeMeetingSettlementAction(meeting.id);
@@ -156,9 +168,6 @@ export function MeetingDetailsClient({
                                  !meeting.isSettled && 
                                  expenses.length > 0 &&
                                  isAdmin; 
-
-  const canManageMeeting = isAdmin && currentUser?.uid === meeting.creatorId;
-
 
   return (
     <div className="space-y-6">
@@ -188,7 +197,7 @@ export function MeetingDetailsClient({
                 만든이: {creatorName}
               </CardDescription>
             </div>
-            {canManageMeeting && (
+            {isAdmin && (
               <div className="flex space-x-2">
                 <Button variant="outline" size="sm" onClick={() => router.push(`/meetings/${meeting.id}/edit`)} disabled={isPending || isDeleting || isFinalizing || (meeting.isSettled && isAdmin)}>
                   <Edit3 className="mr-2 h-4 w-4" /> 수정
@@ -226,7 +235,7 @@ export function MeetingDetailsClient({
               <CalendarDays className="h-5 w-5 mt-0.5 text-primary flex-shrink-0" />
               <div>
                 <span className="font-medium">날짜 및 시간:</span>
-                <p className="text-muted-foreground">{formattedMeetingDateTime || '날짜 정보 없음'}</p>
+                <p className="text-muted-foreground">{formattedMeetingDateTime}</p>
               </div>
             </div>
             <div className="flex items-start gap-2">
@@ -255,7 +264,7 @@ export function MeetingDetailsClient({
                 <span className="font-medium">회비 사용 설정:</span>
               </div>
               <p className="text-muted-foreground pl-6">
-                {`회비에서 ${meeting.partialReserveFundAmount.toLocaleString()}원 사용 예정`}
+                {`회비에서 ${(meeting.partialReserveFundAmount || 0).toLocaleString()}원 사용`}
                 {meeting.isSettled && ` (정산 확정됨)`}
               </p>
               {meeting.nonReserveFundParticipants && meeting.nonReserveFundParticipants.length > 0 && (
@@ -363,3 +372,5 @@ export function MeetingDetailsClient({
     </div>
   );
 }
+
+    
