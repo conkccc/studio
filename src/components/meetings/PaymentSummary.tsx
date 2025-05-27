@@ -73,7 +73,7 @@ export function PaymentSummary({ meeting, expenses, participants, allFriends }: 
   
   const derivedDetails = useMemo(() => {
     const currentTotalSpent = expenses.reduce((sum, e) => sum + e.totalAmount, 0);
-    const currentPerPersonCost = participants.length > 0 ? currentTotalSpent / participants.length : 0;
+    const initialPerPersonCost = participants.length > 0 ? currentTotalSpent / participants.length : 0;
     
     let fundAmountForMeeting = 0;
     let fundDesc = "회비 사용 없음";
@@ -82,8 +82,9 @@ export function PaymentSummary({ meeting, expenses, participants, allFriends }: 
       if (meeting.reserveFundUsageType === 'all') {
         let totalInitialDebtOfBeneficiaries = 0;
         benefitingParticipantIds.forEach(id => {
-          if (initialPaymentLedger[id] < -0.01) { 
-            totalInitialDebtOfBeneficiaries += Math.abs(initialPaymentLedger[id]);
+          const debt = initialPaymentLedger[id];
+          if (debt < -0.01) { 
+            totalInitialDebtOfBeneficiaries += Math.abs(debt);
           }
         });
         fundAmountForMeeting = totalInitialDebtOfBeneficiaries;
@@ -104,15 +105,22 @@ export function PaymentSummary({ meeting, expenses, participants, allFriends }: 
         fundDesc = "총 지출이 없어 회비가 사용되지 않았습니다.";
     }
 
+    const perPersonFundBenefit = benefitingParticipantIds.size > 0 && fundAmountForMeeting > 0
+      ? fundAmountForMeeting / benefitingParticipantIds.size
+      : 0;
+
+    const finalNetCostAfterFundPerBenefitingParticipant = initialPerPersonCost - perPersonFundBenefit;
+
     return { 
       totalSpent: currentTotalSpent, 
-      perPersonCost: currentPerPersonCost,
+      initialPerPersonCost: initialPerPersonCost,
       fundApplicationDetails: {
         amount: fundAmountForMeeting,
         description: fundDesc
-      }
+      },
+      finalNetCostAfterFundPerBenefitingParticipant: finalNetCostAfterFundPerBenefitingParticipant,
     };
-  }, [expenses, initialPaymentLedger, meeting, benefitingParticipantIds, participants.length]);
+  }, [expenses, initialPaymentLedger, meeting, benefitingParticipantIds, participants]);
 
   const { payoutsList: fundPayoutsToPayersList, finalLedgerForDisplay } = useMemo(() => {
     const calculatedFinalLedger = { ...initialPaymentLedger };
@@ -143,12 +151,6 @@ export function PaymentSummary({ meeting, expenses, participants, allFriends }: 
                 fundRemainingToPayout -= reimbursementAmount;
             }
         }
-         // If there's still fund left after reimbursing payers (e.g. payers' initial credit was less than fund amount)
-         // This scenario is less common if fundAmountForMeeting is capped by totalInitialDebtOfBeneficiaries for 'all' type.
-         // For 'partial' type, if partial_amount > total_initial_credit, this could happen.
-         // The current logic ensures fundApplicationDetails.amount (for 'all' type) doesn't exceed total debt of beneficiaries,
-         // and for 'partial' type, it's a fixed amount. The distribution to payers is capped by what they are owed.
-         // The effect on finalLedgerForDisplay by adding discountPerBeneficiary already accounts for reducing individuals' debts.
     }
     
     return { payoutsList, finalLedgerForDisplay: calculatedFinalLedger };
@@ -217,13 +219,18 @@ export function PaymentSummary({ meeting, expenses, participants, allFriends }: 
             </div>
             {participants.length > 0 && (
                 <div>
-                    1인당 사용 비용: {derivedDetails.perPersonCost.toLocaleString(undefined, {maximumFractionDigits: 0})}원
+                    참여자 1인당 부담액 (회비 적용 전): {derivedDetails.initialPerPersonCost.toLocaleString(undefined, {maximumFractionDigits: 0})}원
                 </div>
             )}
             <div className={`text-sm ${derivedDetails.fundApplicationDetails.amount > 0.01 ? 'text-primary' : 'text-muted-foreground'}`}>
                 <PiggyBank className="inline-block h-4 w-4 mr-1 align-middle" />
                 {derivedDetails.fundApplicationDetails.description}
             </div>
+            {derivedDetails.fundApplicationDetails.amount > 0.01 && benefitingParticipantIds.size > 0 && participants.length > 0 && (
+              <div>
+                혜택 참여자 1인당 최종 부담액 (회비 적용 후): {derivedDetails.finalNetCostAfterFundPerBenefitingParticipant.toLocaleString(undefined, {maximumFractionDigits: 0})}원
+              </div>
+            )}
         </CardDescription>
       </CardHeader>
       <CardContent>
