@@ -2,7 +2,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { getMeetingById, getExpensesByMeetingId, getFriends, getSpendingDataForMeeting } from '@/lib/data-store'; // Now async
+import { getMeetingById, getExpensesByMeetingId, getFriends } from '@/lib/data-store'; // Now async
 import { MeetingDetailsClient } from '@/components/meetings/MeetingDetailsClient';
 import { Button } from '@/components/ui/button';
 import { ArrowLeft } from 'lucide-react';
@@ -21,7 +21,7 @@ export default function MeetingDetailPage() {
   const [meeting, setMeeting] = useState<Meeting | null | undefined>(undefined); // undefined for loading, null for not found
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [allFriends, setAllFriends] = useState<Friend[]>([]);
-  const [spendingDataForAI, setSpendingDataForAI] = useState<string>("");
+  // spendingDataForAI state removed
   const [dataLoading, setDataLoading] = useState(true);
 
   useEffect(() => {
@@ -37,14 +37,14 @@ export default function MeetingDetailPage() {
           }
           setMeeting(fetchedMeeting);
 
-          const [fetchedExpenses, fetchedFriends, fetchedSpendingData] = await Promise.all([
+          // getSpendingDataForMeeting call removed
+          const [fetchedExpenses, fetchedFriends] = await Promise.all([
             getExpensesByMeetingId(meetingId),
             getFriends(),
-            getSpendingDataForMeeting(meetingId)
           ]);
           setExpenses(fetchedExpenses);
           setAllFriends(fetchedFriends);
-          setSpendingDataForAI(fetchedSpendingData);
+          // setSpendingDataForAI removed
 
         } catch (error) {
           console.error("Failed to fetch meeting details:", error);
@@ -85,8 +85,8 @@ export default function MeetingDetailPage() {
     return <div className="text-center py-10">로딩 중...</div>;
   }
 
-
-  const currentUserId = currentUser?.uid || (allFriends.length > 0 ? allFriends[0].id : 'mock-user-id'); 
+  // currentUserId is now derived from useAuth in MeetingDetailsClient
+  // const currentUserId = currentUser?.uid || (allFriends.length > 0 ? allFriends[0].id : 'mock-user-id'); 
 
   return (
     <div className="space-y-6">
@@ -102,8 +102,7 @@ export default function MeetingDetailPage() {
         initialMeeting={meeting}
         initialExpenses={expenses}
         allFriends={allFriends}
-        currentUserId={currentUserId} // This should ideally come from auth context
-        spendingDataForAI={spendingDataForAI}
+        // spendingDataForAI prop removed
       />
     </div>
   );
