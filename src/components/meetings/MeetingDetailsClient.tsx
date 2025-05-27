@@ -67,7 +67,6 @@ export function MeetingDetailsClient({
 
   useEffect(() => {
     if (meeting?.dateTime) {
-      // Client-side formatting to avoid hydration issues
       setFormattedMeetingDateTime(format(meeting.dateTime, 'yyyy년 M월 d일 (EEE) HH:mm', { locale: ko }));
     }
   }, [meeting?.dateTime]);
@@ -85,7 +84,7 @@ export function MeetingDetailsClient({
     [meeting.creatorId, allFriends]
   );
 
-  // const isCreator = meeting.creatorId === currentUserId; // Temporarily removed for easier testing
+  const isCreator = meeting.creatorId === currentUserId;
 
   const handleExpenseAdded = (newExpense: Expense) => {
     setExpenses(prev => [newExpense, ...prev].sort((a,b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime() ));
@@ -179,35 +178,36 @@ export function MeetingDetailsClient({
                 만든이: {creator?.nickname || '알 수 없음'}
               </CardDescription>
             </div>
-            {/* Temporarily removed isCreator condition for easier testing */}
-            <div className="flex space-x-2">
-              <Button variant="outline" size="sm" onClick={() => router.push(`/meetings/${meeting.id}/edit`)} disabled={isPending || isDeleting || isFinalizing || meeting.isSettled}>
-                <Edit3 className="mr-2 h-4 w-4" /> 수정
-              </Button>
-              <AlertDialog>
-                <AlertDialogTrigger asChild>
-                  <Button variant="destructive" size="sm" disabled={isDeleting || isPending || isFinalizing}>
-                    {(isDeleting || isPending) ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Trash2 className="mr-2 h-4 w-4" />}
-                     삭제
-                  </Button>
-                </AlertDialogTrigger>
-                <AlertDialogContent>
-                  <AlertDialogHeader>
-                    <AlertDialogTitle>정말로 이 모임을 삭제하시겠습니까?</AlertDialogTitle>
-                    <AlertDialogDescription>
-                      이 작업은 되돌릴 수 없습니다. 모임과 관련된 모든 지출 내역도 함께 삭제됩니다.
-                    </AlertDialogDescription>
-                  </AlertDialogHeader>
-                  <AlertDialogFooter>
-                    <AlertDialogCancel disabled={isDeleting || isPending || isFinalizing}>취소</AlertDialogCancel>
-                    <AlertDialogAction onClick={handleDeleteMeeting} disabled={isDeleting || isPending || isFinalizing} className="bg-destructive hover:bg-destructive/90">
-                      {(isDeleting || isPending) ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                      삭제 확인
-                    </AlertDialogAction>
-                  </AlertDialogFooter>
-                </AlertDialogContent>
-              </AlertDialog>
-            </div>
+            {isCreator && (
+              <div className="flex space-x-2">
+                <Button variant="outline" size="sm" onClick={() => router.push(`/meetings/${meeting.id}/edit`)} disabled={isPending || isDeleting || isFinalizing || meeting.isSettled}>
+                  <Edit3 className="mr-2 h-4 w-4" /> 수정
+                </Button>
+                <AlertDialog>
+                  <AlertDialogTrigger asChild>
+                    <Button variant="destructive" size="sm" disabled={isDeleting || isPending || isFinalizing}>
+                      {(isDeleting || isPending) ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Trash2 className="mr-2 h-4 w-4" />}
+                      삭제
+                    </Button>
+                  </AlertDialogTrigger>
+                  <AlertDialogContent>
+                    <AlertDialogHeader>
+                      <AlertDialogTitle>정말로 이 모임을 삭제하시겠습니까?</AlertDialogTitle>
+                      <AlertDialogDescription>
+                        이 작업은 되돌릴 수 없습니다. 모임과 관련된 모든 지출 내역도 함께 삭제됩니다.
+                      </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                      <AlertDialogCancel disabled={isDeleting || isPending || isFinalizing}>취소</AlertDialogCancel>
+                      <AlertDialogAction onClick={handleDeleteMeeting} disabled={isDeleting || isPending || isFinalizing} className="bg-destructive hover:bg-destructive/90">
+                        {(isDeleting || isPending) ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                        삭제 확인
+                      </AlertDialogAction>
+                    </AlertDialogFooter>
+                  </AlertDialogContent>
+                </AlertDialog>
+              </div>
+            )}
           </div>
         </CardHeader>
         <CardContent className="p-6 space-y-4">
