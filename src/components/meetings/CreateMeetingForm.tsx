@@ -1,7 +1,7 @@
 
 'use client';
 
-import React, { useState, useTransition, useEffect, useCallback } from 'react';
+import React, { useState, useTransition, useEffect, useCallback, useRef } from 'react';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useForm, Controller } from 'react-hook-form';
 import * as z from 'zod';
@@ -10,7 +10,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { CalendarIcon, Check, ChevronsUpDown, Loader2, MapPinIcon } from 'lucide-react';
+import { CalendarIcon, Check, ChevronsUpDown, Loader2, MapPinIcon, Search } from 'lucide-react';
 import { Calendar } from '@/components/ui/calendar';
 import { cn } from '@/lib/utils';
 import { format } from 'date-fns';
@@ -48,7 +48,7 @@ const meetingSchema = meetingSchemaBase.refine(data => {
   message: '회비 사용 시, 사용할 회비 금액을 0보다 크게 입력해야 합니다.',
   path: ['partialReserveFundAmount'],
 }).refine(data => {
-  if (data.endTime && data.dateTime && data.dateTime >= data.endTime) { // Use >= to ensure end is strictly after start
+  if (data.endTime && data.dateTime && data.dateTime >= data.endTime) {
     return false;
   }
   return true;
@@ -66,26 +66,28 @@ interface MeetingFormProps {
   initialData?: Meeting;
 }
 
-const libraries: ("places")[] = ["places"];
+const libraries: ("places" | "maps" | "marker")[] = ["places", "maps", "marker"];
 
-// LocationSearchInput Sub-Component
 interface LocationSearchInputProps {
   form: ReturnType<typeof useForm<MeetingFormData>>;
   isPending: boolean;
+  isMapsLoaded: boolean;
+  mapsLoadError: Error | null;
   initialLocationName?: string;
 }
 
-function LocationSearchInput({ form, isPending, initialLocationName }: LocationSearchInputProps) {
+function LocationSearchInput({ form, isPending, isMapsLoaded, mapsLoadError, initialLocationName }: LocationSearchInputProps) {
   const {
     ready,
     value: placesValue,
     suggestions: { status: placesStatus, data: placesData },
-    setValue: setPlacesValue, // Renamed to avoid conflict with react-hook-form's setValue
+    setValue: setPlacesValue,
     clearSuggestions: clearPlacesSuggestions,
   } = usePlacesAutocomplete({
     requestOptions: { /* Optional: configure to your liking */ },
     debounce: 300,
     defaultValue: initialLocationName || "",
+    disabled: !isMapsLoaded || !!mapsLoadError,
   });
 
   const { toast } = useToast();
@@ -95,9 +97,9 @@ function LocationSearchInput({ form, isPending, initialLocationName }: LocationS
   }, [ready]);
 
   const handlePlaceSelect = async (suggestion: google.maps.places.AutocompletePrediction) => {
-    setPlacesValue(suggestion.description, false); // Update input field text via usePlacesAutocomplete
+    setPlacesValue(suggestion.description, false);
     clearPlacesSuggestions();
-    form.setValue('locationName', suggestion.description, { shouldValidate: true }); // Update react-hook-form state
+    form.setValue('locationName', suggestion.description, { shouldValidate: true });
 
     try {
       const results = await getGeocode({ address: suggestion.description });
@@ -118,21 +120,28 @@ function LocationSearchInput({ form, isPending, initialLocationName }: LocationS
         <MapPinIcon className="absolute left-2 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
         <Input
           id="locationName"
+          {...form.register('locationName', {
+             onChange: (e) => setPlacesValue(e.target.value) // Keep form state in sync with places input
+          })}
           value={placesValue} // Controlled by usePlacesAutocomplete
           onChange={(e) => {
             setPlacesValue(e.target.value); // Update usePlacesAutocomplete's internal state
             form.setValue('locationName', e.target.value, { shouldValidate: true }); // And react-hook-form's state
           }}
-          disabled={!ready || isPending}
+          disabled={!isMapsLoaded || !!mapsLoadError || !ready || isPending}
           className="pl-8"
-          placeholder={!ready ? "지도 API 로딩 중 또는 오류..." : "장소 검색..."}
+          placeholder={
+            !isMapsLoaded && !mapsLoadError ? "지도 API 로딩 중..." : 
+            mapsLoadError ? "지도 API 로드 실패" : 
+            !ready ? "장소 검색 준비 중..." : "장소 검색..."
+          }
           autoComplete="off"
         />
       </div>
       {form.formState.errors.locationName && <p className="text-sm text-destructive mt-1">{form.formState.errors.locationName.message}</p>}
       {form.formState.errors.locationCoordinates && <p className="text-sm text-destructive mt-1">{form.formState.errors.locationCoordinates.message}</p>}
 
-      {ready && placesStatus === 'OK' && placesData.length > 0 && (
+      {ready && isMapsLoaded && !mapsLoadError && placesStatus === 'OK' && placesData.length > 0 && (
         <ul className="absolute z-10 w-full bg-background border border-border rounded-md shadow-lg mt-1 max-h-60 overflow-y-auto">
           {placesData.map((suggestion) => {
             const {
@@ -167,34 +176,9 @@ export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, 
   const [isMapsLoaded, setIsMapsLoaded] = useState(false);
   const [mapsLoadError, setMapsLoadError] = useState<Error | null>(null);
 
-  useEffect(() => {
-    const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
-    if (!apiKey) {
-      console.error("Google Maps API key is not configured. Please set NEXT_PUBLIC_GOOGLE_MAPS_API_KEY.");
-      setMapsLoadError(new Error("Google Maps API key is not configured."));
-      setIsMapsLoaded(false); // Ensure maps is not considered loaded
-      return;
-    }
-
-    const loader = new Loader({
-      apiKey: apiKey,
-      version: "weekly",
-      libraries: libraries,
-    });
-
-    console.log("Attempting to load Google Maps API...");
-    loader.load()
-      .then(() => {
-        console.log("Google Maps API loaded successfully.");
-        setIsMapsLoaded(true);
-        setMapsLoadError(null);
-      })
-      .catch(e => {
-        console.error("Failed to load Google Maps API. Error details:", e);
-        setMapsLoadError(e);
-        setIsMapsLoaded(false);
-      });
-  }, []);
+  const mapContainerRef = useRef<HTMLDivElement>(null);
+  const mapInstanceRef = useRef<google.maps.Map | null>(null);
+  const markerInstanceRef = useRef<google.maps.Marker | null>(null);
 
 
   const form = useForm<MeetingFormData>({
@@ -224,14 +208,82 @@ export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, 
 
   const watchUseReserveFund = form.watch('useReserveFund');
   const watchParticipantIds = form.watch('participantIds');
+  const watchedLocationCoordinates = form.watch('locationCoordinates');
+
+  useEffect(() => {
+    const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
+    if (!apiKey) {
+      console.error("Google Maps API key is not configured. Please set NEXT_PUBLIC_GOOGLE_MAPS_API_KEY in .env file.");
+      setMapsLoadError(new Error("Google Maps API key is not configured."));
+      setIsMapsLoaded(false);
+      return;
+    }
+
+    const loader = new Loader({
+      apiKey: apiKey,
+      version: "weekly",
+      libraries: libraries,
+    });
+
+    console.log("Attempting to load Google Maps API...");
+    loader.load()
+      .then(() => {
+        console.log("Google Maps API loaded successfully.");
+        setIsMapsLoaded(true);
+        setMapsLoadError(null);
+      })
+      .catch(e => {
+        console.error("Failed to load Google Maps API. Error details:", e);
+        setMapsLoadError(e);
+        setIsMapsLoaded(false);
+      });
+  }, []);
 
 
   useEffect(() => {
-    // When participant list changes, filter nonReserveFundParticipants to keep only current participants
+    if (isMapsLoaded && !mapsLoadError && mapContainerRef.current && window.google) {
+      const defaultCenter = { lat: 37.5665, lng: 126.9780 }; // Default to Seoul
+      const currentCoords = watchedLocationCoordinates || defaultCenter;
+      const zoomLevel = watchedLocationCoordinates ? 15 : 10;
+
+      if (!mapInstanceRef.current) {
+        mapInstanceRef.current = new window.google.maps.Map(mapContainerRef.current, {
+          center: currentCoords,
+          zoom: zoomLevel,
+          disableDefaultUI: true,
+          zoomControl: true,
+        });
+      } else {
+        mapInstanceRef.current.setCenter(currentCoords);
+        mapInstanceRef.current.setZoom(zoomLevel);
+      }
+
+      if (watchedLocationCoordinates) {
+        if (!markerInstanceRef.current) {
+          markerInstanceRef.current = new window.google.maps.marker.AdvancedMarkerElement({
+            map: mapInstanceRef.current,
+            position: watchedLocationCoordinates,
+          });
+        } else {
+          markerInstanceRef.current.position = watchedLocationCoordinates;
+          if (!markerInstanceRef.current.map) { // Ensure marker is on map if it was removed
+             markerInstanceRef.current.map = mapInstanceRef.current;
+          }
+        }
+      } else {
+        if (markerInstanceRef.current) {
+          markerInstanceRef.current.map = null; // Remove marker if no coordinates
+        }
+      }
+    }
+  }, [isMapsLoaded, mapsLoadError, watchedLocationCoordinates]);
+
+
+  useEffect(() => {
     if (watchParticipantIds) {
       const currentNonParticipants = form.getValues('nonReserveFundParticipants') || [];
       const newNonParticipants = currentNonParticipants.filter(id => watchParticipantIds.includes(id));
-      if (newNonParticipants.length !== currentNonParticipants.length) {
+      if (JSON.stringify(newNonParticipants.sort()) !== JSON.stringify(currentNonParticipants.sort())) {
          form.setValue('nonReserveFundParticipants', newNonParticipants, { shouldValidate: true });
       }
     }
@@ -239,11 +291,8 @@ export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, 
 
   useEffect(() => {
     if (!watchUseReserveFund) {
-      form.setValue('partialReserveFundAmount', undefined);
-      form.setValue('nonReserveFundParticipants', []);
-    } else {
-        // If switching to useReserveFund, and no amount is set, it might be good to clear or set a default.
-        // Current zod schema handles validation for positive amount if useReserveFund is true.
+      form.setValue('partialReserveFundAmount', undefined, { shouldValidate: true });
+      form.setValue('nonReserveFundParticipants', [], { shouldValidate: true });
     }
   }, [watchUseReserveFund, form]);
   
@@ -256,8 +305,9 @@ export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, 
 
   const onSubmit = (data: MeetingFormData) => {
     startTransition(async () => {
-      const payload = {
+      const payload: Omit<Meeting, 'id' | 'createdAt' | 'isSettled'> = {
         ...data,
+        locationCoordinates: data.locationCoordinates || undefined, // Ensure it's undefined if not set
         partialReserveFundAmount: data.useReserveFund && data.partialReserveFundAmount !== undefined
                                     ? Number(data.partialReserveFundAmount) 
                                     : undefined,
@@ -388,7 +438,7 @@ export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, 
               }}
               initialFocus
               disabled={isPending}
-              fromDate={form.watch('dateTime') ? new Date(form.watch('dateTime')) : undefined} // Prevent selecting end date before start date
+              fromDate={form.watch('dateTime') ? new Date(form.watch('dateTime')) : undefined}
             />
             <div className="p-3 border-t border-border space-y-2">
               <Label htmlFor="endTimeInput">종료 시간</Label>
@@ -415,26 +465,24 @@ export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, 
       
       <div>
         <Label htmlFor="locationName">장소 <span className="text-destructive">*</span></Label>
-        {isMapsLoaded && !mapsLoadError ? (
-          <LocationSearchInput form={form} isPending={isPending} initialLocationName={initialData?.locationName} />
-        ) : (
-          <div className="relative flex items-center">
-             <MapPinIcon className="absolute left-2 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-             <Input
-                id="locationNameFallback"
-                {...form.register('locationName')}
-                disabled={isPending}
-                className="pl-8"
-                placeholder={mapsLoadError ? "지도 API 로드 실패" : "지도 API 로딩 중..."}
-              />
-          </div>
-        )}
+        <LocationSearchInput 
+          form={form} 
+          isPending={isPending} 
+          isMapsLoaded={isMapsLoaded} 
+          mapsLoadError={mapsLoadError}
+          initialLocationName={initialData?.locationName}
+        />
         {mapsLoadError && <p className="text-sm text-destructive mt-1">지도 API 로드에 실패했습니다. API 키와 설정을 확인해주세요.</p>}
-        {/* Errors for locationName and locationCoordinates are handled within LocationSearchInput or shown if it doesn't render */}
-        {(!isMapsLoaded || mapsLoadError) && form.formState.errors.locationName && (
-            <p className="text-sm text-destructive mt-1">{form.formState.errors.locationName.message}</p>
-        )}
       </div>
+
+      {isMapsLoaded && !mapsLoadError && watchedLocationCoordinates && (
+        <div className="mt-4">
+           <Label>선택된 장소 지도</Label>
+           <div ref={mapContainerRef} className="h-64 w-full rounded-md border mt-1">
+             {!watchedLocationCoordinates && <p className="flex items-center justify-center h-full text-muted-foreground">장소를 선택하면 여기에 지도가 표시됩니다.</p>}
+           </div>
+        </div>
+      )}
       
       <div className="space-y-2">
         <div className="flex items-center space-x-2">
