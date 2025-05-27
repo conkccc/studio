@@ -61,7 +61,7 @@ export function PaymentSummary({ meeting, expenses, participants, allFriends }: 
   }, [expenses, participants, participantIdsInMeeting]);
 
   const benefitingParticipantIds = useMemo(() => {
-    if (!meeting.useReserveFund) {
+    if (!meeting.useReserveFund || !meeting.partialReserveFundAmount || meeting.partialReserveFundAmount <= 0) {
       return new Set<string>();
     }
     return new Set(
@@ -69,7 +69,7 @@ export function PaymentSummary({ meeting, expenses, participants, allFriends }: 
         .map(p => p.id)
         .filter(id => !meeting.nonReserveFundParticipants.includes(id))
     );
-  }, [meeting.useReserveFund, meeting.nonReserveFundParticipants, participants]);
+  }, [meeting.useReserveFund, meeting.partialReserveFundAmount, meeting.nonReserveFundParticipants, participants]);
   
   const derivedDetails = useMemo(() => {
     const totalSpent = expenses.reduce((sum, e) => sum + e.totalAmount, 0);
@@ -79,15 +79,16 @@ export function PaymentSummary({ meeting, expenses, participants, allFriends }: 
     let description = "회비 사용 설정 안됨";
 
     if (meeting.useReserveFund && totalSpent > 0 && meeting.partialReserveFundAmount && meeting.partialReserveFundAmount > 0) {
-        // "일정 금액 사용"의 경우, 설정된 금액을 사용
         fundAmountForMeeting = meeting.partialReserveFundAmount;
-        description = `모임 회비 사용 총액: ${fundAmountForMeeting.toLocaleString(undefined, {maximumFractionDigits: 0})}원`;
-    } else if (meeting.useReserveFund && totalSpent === 0) {
-        description = "총 지출이 없어 회비가 사용되지 않았습니다.";
-    } else if (!meeting.useReserveFund) {
-        description = "회비 사용 설정 안됨";
+        description = `모임 회비 부분 사용 총액: ${fundAmountForMeeting.toLocaleString(undefined, {maximumFractionDigits: 0})}원`;
+         if (fundAmountForMeeting > totalSpent) {
+            fundAmountForMeeting = totalSpent;
+            description = `모임 회비 부분 사용 총액: ${fundAmountForMeeting.toLocaleString(undefined, {maximumFractionDigits: 0})}원 (총 지출액으로 제한됨)`;
+        }
     } else if (meeting.useReserveFund && (!meeting.partialReserveFundAmount || meeting.partialReserveFundAmount <= 0)) {
         description = "회비 사용하도록 설정되었으나, 사용할 금액이 지정되지 않았거나 0원입니다.";
+    } else if (meeting.useReserveFund && totalSpent === 0) {
+        description = "총 지출이 없어 회비가 사용되지 않았습니다.";
     }
 
 
@@ -115,6 +116,8 @@ export function PaymentSummary({ meeting, expenses, participants, allFriends }: 
     if (meeting.useReserveFund && totalFundContributionForMeeting > 0.01 && benefitingParticipantIds.size > 0) {
         const discountPerBeneficiary = totalFundContributionForMeeting / benefitingParticipantIds.size;
         benefitingParticipantIds.forEach(id => {
+             // Ensure this addition doesn't make them receive money if they didn't pay anything initially
+            // This logic is more about reducing what they owe.
             calculatedFinalLedger[id] = (calculatedFinalLedger[id] || 0) + discountPerBeneficiary;
         });
     }
@@ -122,19 +125,24 @@ export function PaymentSummary({ meeting, expenses, participants, allFriends }: 
     const payoutsList: FundPayoutToPayer[] = [];
     if (totalFundContributionForMeeting > 0.01) {
         let fundRemainingToPayout = totalFundContributionForMeeting;
+        // Payers are those who initially have a positive balance in initialPaymentLedger (they are owed money by the group)
         const sortedInitialPayers = Object.entries(initialPaymentLedger)
             .filter(([_, amount]) => amount > 0.01) 
-            .sort(([, aAmount], [, bAmount]) => bAmount - aAmount)
+            .sort(([, aAmount], [, bAmount]) => bAmount - aAmount) // Pay largest creditors first
             .map(([id]) => id);
 
         for (const payerId of sortedInitialPayers) {
             if (fundRemainingToPayout <= 0.01) break;
+            // Amount owed to this specific payer by the group *before* fund distribution to beneficiaries
             const amountOwedToPayerByGroupInitially = initialPaymentLedger[payerId] || 0;
+            // The fund can reimburse this payer up to what they initially paid out or what's left in the fund
             const reimbursementAmount = Math.min(amountOwedToPayerByGroupInitially, fundRemainingToPayout);
 
             if (reimbursementAmount > 0.01) {
                 payoutsList.push({ to: payerId, amount: reimbursementAmount });
                 fundRemainingToPayout -= reimbursementAmount;
+                // This reimbursement is from the fund, so it reduces what the group effectively owes the payer.
+                // But finalLedgerForDisplay already accounts for benefit to owers. This payout list is for info.
             }
         }
     }
@@ -146,22 +154,23 @@ export function PaymentSummary({ meeting, expenses, participants, allFriends }: 
   const simplifiedDebts = useMemo(() => {
     const balances: LedgerEntry[] = Object.entries(finalLedgerForDisplay)
       .map(([friendId, amount]) => ({ friendId, amount: parseFloat(amount.toFixed(2)) }))
-      .sort((a, b) => a.amount - b.amount); 
+      .sort((a, b) => a.amount - b.amount); // Owers first, then Payers
 
     const transactions: { from: string; to: string; amount: number }[] = [];
-    let payersIdx = balances.length -1; 
-    let owersIdx = 0; 
+    let payersIdx = balances.length -1; // Start with largest creditor
+    let owersIdx = 0; // Start with largest debtor
 
     while (owersIdx < payersIdx) {
-        const payer = balances[payersIdx]; 
-        const ower = balances[owersIdx];  
+        const payer = balances[payersIdx]; // Person who should receive money
+        const ower = balances[owersIdx];  // Person who should pay money
         
+        // Skip if payer doesn't need to receive or ower doesn't need to pay (or tiny amounts)
         if (payer.amount < 0.01) { payersIdx--; continue; }
         if (ower.amount > -0.01) { owersIdx++; continue; }
 
         const amountToTransfer = Math.min(payer.amount, -ower.amount);
 
-        if (amountToTransfer > 0.01) { 
+        if (amountToTransfer > 0.01) { // Ensure meaningful transfer
             transactions.push({
                 from: ower.friendId,
                 to: payer.friendId,
@@ -171,7 +180,9 @@ export function PaymentSummary({ meeting, expenses, participants, allFriends }: 
             ower.amount += amountToTransfer;
         }
         
+        // If payer is fully paid, move to next payer
         if (Math.abs(payer.amount) < 0.01) payersIdx--;
+        // If ower has paid all dues, move to next ower
         if (Math.abs(ower.amount) < 0.01) owersIdx++;
     }
     return transactions;
@@ -232,7 +243,7 @@ export function PaymentSummary({ meeting, expenses, participants, allFriends }: 
                     개인별 최종 정산 현황
                 </h3>
                 <CardDescription>회비 지원이 모두 반영된 후의 개인별 최종 정산액입니다.</CardDescription>
-                <ScrollArea className="h-auto max-h-[200px] pr-3 mt-2">
+                <ScrollArea className="pr-3 mt-2"> {/* Removed max-h */}
                 <Table>
                     <TableHeader>
                     <TableRow>
@@ -247,7 +258,7 @@ export function PaymentSummary({ meeting, expenses, participants, allFriends }: 
                         <TableCell className="font-medium flex items-center">
                             <UserCircle className="h-4 w-4 mr-2 opacity-70"/>
                             {getFriendNickname(friendId)}
-                            {meeting.useReserveFund && !benefitingParticipantIds.has(friendId) && (
+                            {meeting.useReserveFund && meeting.partialReserveFundAmount && meeting.partialReserveFundAmount > 0 && !benefitingParticipantIds.has(friendId) && (
                                 <Badge variant="outline" className="ml-2 text-xs">회비 미적용</Badge>
                             )}
                         </TableCell>
@@ -276,33 +287,33 @@ export function PaymentSummary({ meeting, expenses, participants, allFriends }: 
 
             {simplifiedDebts.length > 0 && (
                 <div>
-                <h3 className="text-md font-semibold mb-2 flex items-center gap-1.5">
-                    <FileText className="h-4 w-4" />
-                    최종 송금 제안
-                </h3>
-                 <CardDescription>개인 간 필요한 최종 송금 내역입니다. (회비 지원 모두 반영 후)</CardDescription>
-                <ScrollArea className="h-auto max-h-[150px] pr-3 mt-2">
-                    <Table>
-                    <TableHeader>
-                        <TableRow>
-                        <TableHead>보내는 사람</TableHead>
-                        <TableHead>받는 사람</TableHead>
-                        <TableHead className="text-right">금액</TableHead>
-                        </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                        {simplifiedDebts.map((debt, index) => (
-                        <TableRow key={`simplified-${index}`}>
-                            <TableCell>{getFriendNickname(debt.from)}</TableCell>
-                            <TableCell>{getFriendNickname(debt.to)}</TableCell>
-                            <TableCell className="text-right font-medium">
-                            {debt.amount.toLocaleString(undefined, {maximumFractionDigits: 0})}원
-                            </TableCell>
-                        </TableRow>
-                        ))}
-                    </TableBody>
-                    </Table>
-                </ScrollArea>
+                    <h3 className="text-md font-semibold mb-2 flex items-center gap-1.5">
+                        <FileText className="h-4 w-4" />
+                        최종 송금 제안
+                    </h3>
+                    <CardDescription>개인 간 필요한 최종 송금 내역입니다. (회비 지원 모두 반영 후)</CardDescription>
+                    <ScrollArea className="pr-3 mt-2"> {/* Removed max-h */}
+                        <Table>
+                        <TableHeader>
+                            <TableRow>
+                            <TableHead>보내는 사람</TableHead>
+                            <TableHead>받는 사람</TableHead>
+                            <TableHead className="text-right">금액</TableHead>
+                            </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                            {simplifiedDebts.map((debt, index) => (
+                            <TableRow key={`simplified-${index}`}>
+                                <TableCell>{getFriendNickname(debt.from)}</TableCell>
+                                <TableCell>{getFriendNickname(debt.to)}</TableCell>
+                                <TableCell className="text-right font-medium">
+                                {debt.amount.toLocaleString(undefined, {maximumFractionDigits: 0})}원
+                                </TableCell>
+                            </TableRow>
+                            ))}
+                        </TableBody>
+                        </Table>
+                    </ScrollArea>
                 </div>
             )}
             {simplifiedDebts.length === 0 && expenses.length > 0 && derivedDetails.fundApplicationDetails.amount === 0 && ( 
@@ -316,7 +327,7 @@ export function PaymentSummary({ meeting, expenses, participants, allFriends }: 
                   회비 지원 상세 (초기 결제자에게)
                 </h3>
                 <CardDescription>회비에서 각 초기 결제자에게 지원된 금액입니다. 이 내역은 위 개인별 정산 및 최종 송금 제안에 이미 반영되어 있습니다.</CardDescription>
-                <ScrollArea className="h-auto max-h-[150px] pr-3 mt-2">
+                <ScrollArea className="pr-3 mt-2"> {/* Removed max-h */}
                   <Table>
                     <TableHeader>
                       <TableRow>

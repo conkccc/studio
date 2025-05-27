@@ -4,9 +4,11 @@ import Link from 'next/link';
 import type { Meeting, Friend } from '@/lib/types';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { CalendarDays, MapPin, Users, ArrowRight } from 'lucide-react';
+import { CalendarDays, MapPin, Users, ArrowRight, Info } from 'lucide-react';
 import { format, differenceInCalendarDays, isValid } from 'date-fns';
 import { ko } from 'date-fns/locale';
+import { useAuth } from '@/contexts/AuthContext';
+import { useMemo } from 'react';
 
 interface MeetingCardProps {
   meeting: Meeting;
@@ -14,29 +16,29 @@ interface MeetingCardProps {
 }
 
 export function MeetingCard({ meeting, allFriends }: MeetingCardProps) {
+  const { currentUser, isAdmin } = useAuth();
+
   const participants = meeting.participantIds
     .map(id => allFriends.find(f => f.id === id)?.nickname)
-    .filter(Boolean); // Filter out undefined if a friend was deleted
+    .filter(Boolean); 
 
-  const creator = allFriends.find(f => f.id === meeting.creatorId)?.nickname || '알 수 없음';
+  const creatorName = useMemo(() => {
+    if (currentUser && meeting.creatorId === currentUser.uid && isAdmin) {
+      return '관리자 (나)';
+    }
+    const creatorFriend = allFriends.find(f => f.id === meeting.creatorId);
+    return creatorFriend?.nickname || '알 수 없음';
+  }, [meeting.creatorId, allFriends, currentUser, isAdmin]);
+
 
   const formatDate = () => {
-    // Assuming meeting.dateTime is already a Date object from data-store
-    const startTime = meeting.dateTime;
-
-    // Check if meeting.endTime is a valid Date object
-    if (meeting.endTime && meeting.endTime instanceof Date && isValid(meeting.endTime)) {
-      const endTime = meeting.endTime;
-      // Ensure startTime is also valid before calculating duration
-      if (startTime instanceof Date && isValid(startTime)) {
-        const duration = differenceInCalendarDays(endTime, startTime);
-        // Ensure duration is not negative if endTime is somehow before startTime, though schema should prevent this.
-        // If duration is 0, it's a 1-day event. If 1, it's a 2-day event.
-        return `${format(startTime, 'yyyy년 M월 d일 HH:mm', { locale: ko })} (${Math.max(0, duration) + 1}일)`;
-      }
+    const startTime = meeting.dateTime; // Already a Date object
+    if (meeting.endTime && isValid(meeting.endTime)) { // Ensure endTime is valid
+      const endTime = meeting.endTime; // Already a Date object
+      const duration = differenceInCalendarDays(endTime, startTime);
+      return `${format(startTime, 'yyyy년 M월 d일 HH:mm', { locale: ko })} (${Math.max(0, duration) + 1}일)`;
     }
-    // Fallback for invalid startTime or if endTime is not present/valid
-    if (startTime instanceof Date && isValid(startTime)) {
+    if (isValid(startTime)) {
       return format(startTime, 'yyyy년 M월 d일 HH:mm', { locale: ko });
     }
     return '날짜 정보 없음';
@@ -47,7 +49,7 @@ export function MeetingCard({ meeting, allFriends }: MeetingCardProps) {
       <CardHeader>
         <CardTitle className="text-lg">{meeting.name}</CardTitle>
         <CardDescription>
-          만든이: {creator}
+          만든이: {creatorName}
         </CardDescription>
       </CardHeader>
       <CardContent className="flex-grow space-y-3 text-sm">

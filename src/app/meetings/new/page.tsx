@@ -65,7 +65,8 @@ export default function NewMeetingPage() {
     );
   }
 
-  const currentUserId = currentUser?.uid || (friends.length > 0 ? friends[0].id : 'mock-user-id-if-no-auth-or-friends');
+  // currentUser and isAdmin are guaranteed to be true here, so currentUser.uid is safe
+  const currentUserId = currentUser.uid;
 
 
   return (

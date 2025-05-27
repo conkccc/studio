@@ -17,7 +17,7 @@ const googleMapsApiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
 
 const missingVars: string[] = [];
 if (!apiKey) missingVars.push('NEXT_PUBLIC_FIREBASE_API_KEY');
-if (!authDomain) missingVars.push('NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN');
+if (!authDomain) missingVars.push('NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN'); // Added this check
 if (!projectId) missingVars.push('NEXT_PUBLIC_FIREBASE_PROJECT_ID');
 if (!storageBucket) missingVars.push('NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET');
 if (!messagingSenderId) missingVars.push('NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID');
@@ -58,6 +58,6 @@ if (getApps().length === 0) {
 
 const db: Firestore = getFirestore(app);
 const auth: Auth = getAuth(app);
-const googleAuthProvider = new GoogleAuthProvider();
+const googleAuthProvider = new GoogleAuthProvider(); // Exporting this for use in LoginForm
 
 export { db, app, auth, googleAuthProvider };
