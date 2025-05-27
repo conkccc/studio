@@ -9,7 +9,6 @@ import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Textarea } from '@/components/ui/textarea';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { CalendarIcon, Check, ChevronsUpDown, Loader2, MapPinIcon, Search } from 'lucide-react';
 import { Calendar } from '@/components/ui/calendar';
@@ -20,7 +19,6 @@ import type { Friend, Meeting } from '@/lib/types';
 import { createMeetingAction, updateMeetingAction } from '@/lib/actions';
 import { useToast } from '@/hooks/use-toast';
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Switch } from '@/components/ui/switch';
 import { Checkbox } from "@/components/ui/checkbox";
 
@@ -31,7 +29,6 @@ const meetingSchemaBase = z.object({
   locationName: z.string().min(1, '장소를 입력해주세요.').max(100, '장소 이름은 100자 이내여야 합니다.'),
   participantIds: z.array(z.string()).min(1, '참여자를 최소 1명 선택해주세요.'),
   useReserveFund: z.boolean(),
-  reserveFundUsageType: z.enum(['all', 'partial']),
   partialReserveFundAmount: z.preprocess(
     (val) => (val === '' || val === undefined || val === null ? undefined : Number(String(val).replace(/,/g, ''))),
     z.number().min(0, '금액은 0 이상이어야 합니다.').optional()
@@ -40,12 +37,12 @@ const meetingSchemaBase = z.object({
 });
 
 const meetingSchema = meetingSchemaBase.refine(data => {
-  if (data.useReserveFund && data.reserveFundUsageType === 'partial') {
+  if (data.useReserveFund) {
     return data.partialReserveFundAmount !== undefined && data.partialReserveFundAmount > 0;
   }
   return true;
 }, {
-  message: '부분 사용 시 회비 사용 금액을 0보다 크게 입력해야 합니다.',
+  message: '회비 사용 시, 사용할 회비 금액을 0보다 크게 입력해야 합니다.',
   path: ['partialReserveFundAmount'],
 }).refine(data => {
   if (data.endTime && data.dateTime && data.dateTime > data.endTime) {
@@ -83,7 +80,6 @@ export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, 
       locationName: initialData.locationName,
       participantIds: initialData.participantIds,
       useReserveFund: initialData.useReserveFund,
-      reserveFundUsageType: initialData.reserveFundUsageType,
       partialReserveFundAmount: initialData.partialReserveFundAmount === undefined ? undefined : Number(initialData.partialReserveFundAmount),
       nonReserveFundParticipants: initialData.nonReserveFundParticipants || [],
     } : {
@@ -93,14 +89,12 @@ export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, 
       locationName: '',
       participantIds: [currentUserId],
       useReserveFund: false,
-      reserveFundUsageType: 'all',
       partialReserveFundAmount: undefined,
       nonReserveFundParticipants: [],
     },
   });
 
   const watchUseReserveFund = form.watch('useReserveFund');
-  const watchReserveFundUsageType = form.watch('reserveFundUsageType');
   const watchParticipantIds = form.watch('participantIds');
 
   useEffect(() => {
@@ -114,10 +108,11 @@ export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, 
   }, [watchParticipantIds, isEditMode, initialData, form]);
 
   useEffect(() => {
-    if (!watchUseReserveFund || watchReserveFundUsageType === 'all') {
+    if (!watchUseReserveFund) {
       form.setValue('partialReserveFundAmount', undefined, { shouldValidate: true });
+      form.setValue('nonReserveFundParticipants', [], {shouldValidate: true}); // 회비 사용 안하면 제외 멤버도 초기화
     }
-  }, [watchUseReserveFund, watchReserveFundUsageType, form]);
+  }, [watchUseReserveFund, form]);
   
   const formatNumberInput = (value: number | string | undefined) => {
     if (value === undefined || value === '' || value === null) return '';
@@ -129,7 +124,7 @@ export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, 
     startTransition(async () => {
       const payload = {
         ...data,
-        partialReserveFundAmount: data.useReserveFund && data.reserveFundUsageType === 'partial' 
+        partialReserveFundAmount: data.useReserveFund 
                                     ? Number(data.partialReserveFundAmount) 
                                     : undefined,
       };
@@ -139,7 +134,7 @@ export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, 
         if (result.success && result.meeting) {
           toast({ title: '성공', description: '모임 정보가 수정되었습니다.' });
           router.push(`/meetings/${result.meeting.id}`);
-          router.refresh(); // Ensure details page re-fetches
+          router.refresh();
         } else {
            toast({
             title: '오류',
@@ -180,7 +175,6 @@ export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, 
         {form.formState.errors.name && <p className="text-sm text-destructive mt-1">{form.formState.errors.name.message}</p>}
       </div>
 
-      {/* Start Date/Time Picker */}
       <div>
         <Label htmlFor="dateTime">시작 날짜 및 시간 <span className="text-destructive">*</span></Label>
         <Popover open={startDateOpen} onOpenChange={setStartDateOpen}>
@@ -235,7 +229,6 @@ export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, 
         {form.formState.errors.dateTime && <p className="text-sm text-destructive mt-1">{form.formState.errors.dateTime.message}</p>}
       </div>
 
-      {/* End Date/Time Picker */}
       <div>
         <Label htmlFor="endTime">종료 날짜 및 시간 (선택)</Label>
         <Popover open={endDateOpen} onOpenChange={setEndDateOpen}>
@@ -292,7 +285,6 @@ export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, 
         {form.formState.errors.endTime && <p className="text-sm text-destructive mt-1">{form.formState.errors.endTime.message}</p>}
       </div>
 
-
       <div>
         <Label htmlFor="locationName">장소 <span className="text-destructive">*</span></Label>
         <div className="flex items-center gap-2">
@@ -321,7 +313,7 @@ export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, 
               />
             )}
           />
-          <Label htmlFor="useReserveFund" className={cn((isEditMode && initialData?.isSettled) && "text-muted-foreground")}>
+          <Label htmlFor="useReserveFund" className={cn("cursor-pointer", (isEditMode && initialData?.isSettled) && "text-muted-foreground cursor-not-allowed")}>
             모임 회비 사용 {(isEditMode && initialData?.isSettled) && "(정산 완료됨 - 수정 불가)"}
           </Label>
         </div>
@@ -329,62 +321,36 @@ export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, 
         {watchUseReserveFund && (
           <div className="space-y-4 mt-4 pl-2 border-l-2 ml-2">
             <div>
-              <Label className={cn((isEditMode && initialData?.isSettled) && "text-muted-foreground")}>회비 사용 방식</Label>
+              <Label htmlFor="partialReserveFundAmount" className={cn((isEditMode && initialData?.isSettled) && "text-muted-foreground")}>
+                사용할 회비 금액 (원) <span className="text-destructive">*</span>
+              </Label>
               <Controller
+                name="partialReserveFundAmount"
                 control={form.control}
-                name="reserveFundUsageType"
                 render={({ field }) => (
-                  <RadioGroup
-                    onValueChange={field.onChange}
-                    value={field.value}
-                    className="flex space-x-4 mt-2"
+                  <Input
+                    id="partialReserveFundAmount"
+                    type="text"
+                    value={formatNumberInput(field.value)}
+                    onChange={(e) => {
+                       const rawValue = e.target.value.replace(/,/g, '');
+                       field.onChange(rawValue === '' ? undefined : parseFloat(rawValue));
+                    }}
+                    onBlur={field.onBlur}
                     disabled={isPending || (isEditMode && initialData?.isSettled)}
-                  >
-                    <div className="flex items-center space-x-2">
-                      <RadioGroupItem value="all" id="usage-all" disabled={isPending || (isEditMode && initialData?.isSettled)} />
-                      <Label htmlFor="usage-all" className={cn((isEditMode && initialData?.isSettled) && "text-muted-foreground")}>모두 사용 (정산 시 계산)</Label>
-                    </div>
-                    <div className="flex items-center space-x-2">
-                      <RadioGroupItem value="partial" id="usage-partial" disabled={isPending || (isEditMode && initialData?.isSettled)} />
-                      <Label htmlFor="usage-partial" className={cn((isEditMode && initialData?.isSettled) && "text-muted-foreground")}>일정 금액 사용</Label>
-                    </div>
-                  </RadioGroup>
+                    className="mt-1"
+                    placeholder="예: 10000"
+                  />
                 )}
               />
-               {form.formState.errors.reserveFundUsageType && <p className="text-sm text-destructive mt-1">{form.formState.errors.reserveFundUsageType.message}</p>}
+              {form.formState.errors.partialReserveFundAmount && <p className="text-sm text-destructive mt-1">{form.formState.errors.partialReserveFundAmount.message}</p>}
             </div>
-
-            {watchReserveFundUsageType === 'partial' && (
-              <div>
-                <Label htmlFor="partialReserveFundAmount" className={cn((isEditMode && initialData?.isSettled) && "text-muted-foreground")}>
-                  사용할 회비 금액 <span className="text-destructive">*</span>
-                </Label>
-                 <Controller
-                    name="partialReserveFundAmount"
-                    control={form.control}
-                    render={({ field }) => (
-                      <Input
-                        id="partialReserveFundAmount"
-                        type="text"
-                        value={formatNumberInput(field.value)}
-                        onChange={(e) => {
-                           const rawValue = e.target.value.replace(/,/g, '');
-                           field.onChange(rawValue === '' ? undefined : parseFloat(rawValue));
-                        }}
-                        onBlur={field.onBlur}
-                        disabled={isPending || (isEditMode && initialData?.isSettled)}
-                        className="mt-1"
-                        placeholder="예: 10000"
-                      />
-                    )}
-                  />
-                {form.formState.errors.partialReserveFundAmount && <p className="text-sm text-destructive mt-1">{form.formState.errors.partialReserveFundAmount.message}</p>}
-              </div>
-            )}
 
             <div>
               <Label className={cn((isEditMode && initialData?.isSettled) && "text-muted-foreground")}>회비 사용 제외 멤버</Label>
-              <p className={cn("text-xs", (isEditMode && initialData?.isSettled) ? "text-muted-foreground/70" : "text-muted-foreground")}>선택된 멤버는 이 모임에서 회비 사용 혜택을 받지 않습니다.</p>
+              <p className={cn("text-xs", (isEditMode && initialData?.isSettled) ? "text-muted-foreground/70" : "text-muted-foreground")}>
+                선택된 멤버는 이 모임에서 회비 사용 혜택을 받지 않습니다.
+              </p>
               <div className="grid gap-2 mt-2">
                  {selectedParticipants.length > 0 ? (
                     selectedParticipants.map(participant => (
@@ -407,7 +373,7 @@ export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, 
                             />
                            )}
                         />
-                        <Label htmlFor={`nonReserveFund-${participant.id}`} className={cn((isEditMode && initialData?.isSettled) && "text-muted-foreground")}>
+                        <Label htmlFor={`nonReserveFund-${participant.id}`} className={cn("cursor-pointer", (isEditMode && initialData?.isSettled) && "text-muted-foreground cursor-not-allowed")}>
                           {participant.nickname} {participant.id === currentUserId && "(나)"}
                         </Label>
                       </div>
@@ -450,19 +416,19 @@ export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, 
                       key={friend.id}
                       value={friend.nickname}
                       onSelect={() => {
-                        if (isEditMode && initialData?.isSettled) return; // 정산 완료 시 참여자 변경 불가
+                        if (isEditMode && initialData?.isSettled) return; 
                         const currentParticipantIds = form.getValues("participantIds") || [];
                         let newParticipantIds = currentParticipantIds.includes(friend.id)
                           ? currentParticipantIds.filter(id => id !== friend.id)
                           : [...currentParticipantIds, friend.id];
                         
                         if (friend.id === currentUserId && !newParticipantIds.includes(currentUserId) && newParticipantIds.length > 0) {
-                            // If unselecting creator and there are other participants, allow it.
+                           // Allow unselecting creator if other participants remain
                         } else if (!newParticipantIds.includes(currentUserId)) {
-                           newParticipantIds.push(currentUserId); 
+                           newParticipantIds.push(currentUserId); // Creator must be included
                         }
                         if (newParticipantIds.length === 0 && friend.id === currentUserId){ 
-                            newParticipantIds = [currentUserId]; 
+                            newParticipantIds = [currentUserId]; // At least creator must be selected
                         }
 
                         form.setValue("participantIds", newParticipantIds, { shouldValidate: true });
@@ -502,4 +468,3 @@ export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, 
     </form>
   );
 }
-    
