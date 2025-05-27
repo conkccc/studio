@@ -72,36 +72,36 @@ export function PaymentSummary({ meeting, expenses, participants, allFriends }: 
   }, [meeting.useReserveFund, meeting.nonReserveFundParticipants, participants]);
   
   const derivedDetails = useMemo(() => {
-    const currentTotalSpent = expenses.reduce((sum, e) => sum + e.totalAmount, 0);
-    const initialPerPersonCost = participants.length > 0 ? currentTotalSpent / participants.length : 0;
+    const totalSpent = expenses.reduce((sum, e) => sum + e.totalAmount, 0);
+    const initialPerPersonCost = participants.length > 0 ? totalSpent / participants.length : 0;
     
     let fundAmountForMeeting = 0;
-    let fundDesc = "회비 사용 없음";
+    let fundDesc = "회비 사용 설정 안됨";
 
-    if (meeting.useReserveFund && currentTotalSpent > 0) {
+    if (meeting.useReserveFund && totalSpent > 0) {
       if (meeting.reserveFundUsageType === 'all') {
         let totalInitialDebtOfBeneficiaries = 0;
         benefitingParticipantIds.forEach(id => {
-          const debt = initialPaymentLedger[id];
+          const debt = initialPaymentLedger[id] || 0;
           if (debt < -0.01) { 
             totalInitialDebtOfBeneficiaries += Math.abs(debt);
           }
         });
-        fundAmountForMeeting = totalInitialDebtOfBeneficiaries;
+        fundAmountForMeeting = parseFloat(totalInitialDebtOfBeneficiaries.toFixed(2));
         if (fundAmountForMeeting > 0.01) {
-          fundDesc = `회비에서 총 ${fundAmountForMeeting.toLocaleString(undefined, {maximumFractionDigits: 0})}원 사용`;
+          fundDesc = `모임 전체에 대한 회비 지원 총액: ${fundAmountForMeeting.toLocaleString(undefined, {maximumFractionDigits: 0})}원`;
         } else {
           fundDesc = "회비 사용 대상자의 부담금이 없어 회비가 사용되지 않았습니다.";
         }
       } else if (meeting.reserveFundUsageType === 'partial') {
         fundAmountForMeeting = meeting.partialReserveFundAmount || 0;
         if (fundAmountForMeeting > 0.01) {
-          fundDesc = `회비에서 ${fundAmountForMeeting.toLocaleString(undefined, {maximumFractionDigits: 0})}원 부분 사용`;
+          fundDesc = `모임 회비 부분 사용 총액: ${fundAmountForMeeting.toLocaleString(undefined, {maximumFractionDigits: 0})}원`;
         } else {
           fundDesc = "회비 부분 사용액이 설정되지 않았거나 0원입니다.";
         }
       }
-    } else if (meeting.useReserveFund && currentTotalSpent === 0) {
+    } else if (meeting.useReserveFund && totalSpent === 0) {
         fundDesc = "총 지출이 없어 회비가 사용되지 않았습니다.";
     }
 
@@ -112,13 +112,13 @@ export function PaymentSummary({ meeting, expenses, participants, allFriends }: 
     const finalNetCostAfterFundPerBenefitingParticipant = initialPerPersonCost - perPersonFundBenefit;
 
     return { 
-      totalSpent: currentTotalSpent, 
+      totalSpent: totalSpent, 
       initialPerPersonCost: initialPerPersonCost,
       fundApplicationDetails: {
         amount: fundAmountForMeeting,
         description: fundDesc
       },
-      finalNetCostAfterFundPerBenefitingParticipant: finalNetCostAfterFundPerBenefitingParticipant,
+      finalNetCostAfterFundPerBenefitingParticipant: parseFloat(finalNetCostAfterFundPerBenefitingParticipant.toFixed(2)),
     };
   }, [expenses, initialPaymentLedger, meeting, benefitingParticipantIds, participants]);
 
