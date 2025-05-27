@@ -1,3 +1,4 @@
+
 import type { Metadata } from 'next';
 import { Geist, Geist_Mono } from 'next/font/google';
 import './globals.css';
@@ -29,6 +30,7 @@ export default function RootLayout({
   const adminEmail = process.env.ADMIN_EMAIL;
 
   if (!adminEmail) {
+    // This console.warn will only appear in the server logs (Vercel function logs)
     console.warn("WARNING: ADMIN_EMAIL environment variable is not set. Admin functionality will not work correctly.");
   }
 
