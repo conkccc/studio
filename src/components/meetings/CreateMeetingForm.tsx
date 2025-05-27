@@ -139,6 +139,7 @@ export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, 
         if (result.success && result.meeting) {
           toast({ title: '성공', description: '모임 정보가 수정되었습니다.' });
           router.push(`/meetings/${result.meeting.id}`);
+          router.refresh(); // Ensure details page re-fetches
         } else {
            toast({
             title: '오류',
@@ -227,7 +228,7 @@ export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, 
                 className="w-full"
                 disabled={isPending}
               />
-              <Button size="sm" onClick={() => setStartDateOpen(false)} className="w-full">확인</Button>
+              <Button size="sm" onClick={() => setStartDateOpen(false)} className="w-full" type="button">확인</Button>
             </div>
           </PopoverContent>
         </Popover>
@@ -262,7 +263,7 @@ export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, 
                   newDateTime.setHours(currentTime.getHours(), currentTime.getMinutes(), 0, 0);
                   form.setValue('endTime', newDateTime, { shouldValidate: true });
                 } else {
-                  form.setValue('endTime', undefined, { shouldValidate: true }); // Allow clearing the end date
+                  form.setValue('endTime', undefined, { shouldValidate: true }); 
                 }
               }}
               initialFocus
@@ -284,7 +285,7 @@ export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, 
                 className="w-full"
                 disabled={isPending}
               />
-              <Button size="sm" onClick={() => setEndDateOpen(false)} className="w-full">확인</Button>
+              <Button size="sm" onClick={() => setEndDateOpen(false)} className="w-full" type="button">확인</Button>
             </div>
           </PopoverContent>
         </Popover>
@@ -316,17 +317,19 @@ export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, 
                 id="useReserveFund"
                 checked={field.value}
                 onCheckedChange={field.onChange}
-                disabled={isPending}
+                disabled={isPending || (isEditMode && initialData?.isSettled)}
               />
             )}
           />
-          <Label htmlFor="useReserveFund">모임 회비 사용</Label>
+          <Label htmlFor="useReserveFund" className={cn((isEditMode && initialData?.isSettled) && "text-muted-foreground")}>
+            모임 회비 사용 {(isEditMode && initialData?.isSettled) && "(정산 완료됨 - 수정 불가)"}
+          </Label>
         </div>
 
         {watchUseReserveFund && (
           <div className="space-y-4 mt-4 pl-2 border-l-2 ml-2">
             <div>
-              <Label>회비 사용 방식</Label>
+              <Label className={cn((isEditMode && initialData?.isSettled) && "text-muted-foreground")}>회비 사용 방식</Label>
               <Controller
                 control={form.control}
                 name="reserveFundUsageType"
@@ -335,15 +338,15 @@ export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, 
                     onValueChange={field.onChange}
                     value={field.value}
                     className="flex space-x-4 mt-2"
-                    disabled={isPending}
+                    disabled={isPending || (isEditMode && initialData?.isSettled)}
                   >
                     <div className="flex items-center space-x-2">
-                      <RadioGroupItem value="all" id="usage-all" />
-                      <Label htmlFor="usage-all">모두 사용 (정산 시 계산)</Label>
+                      <RadioGroupItem value="all" id="usage-all" disabled={isPending || (isEditMode && initialData?.isSettled)} />
+                      <Label htmlFor="usage-all" className={cn((isEditMode && initialData?.isSettled) && "text-muted-foreground")}>모두 사용 (정산 시 계산)</Label>
                     </div>
                     <div className="flex items-center space-x-2">
-                      <RadioGroupItem value="partial" id="usage-partial" />
-                      <Label htmlFor="usage-partial">일정 금액 사용</Label>
+                      <RadioGroupItem value="partial" id="usage-partial" disabled={isPending || (isEditMode && initialData?.isSettled)} />
+                      <Label htmlFor="usage-partial" className={cn((isEditMode && initialData?.isSettled) && "text-muted-foreground")}>일정 금액 사용</Label>
                     </div>
                   </RadioGroup>
                 )}
@@ -353,7 +356,9 @@ export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, 
 
             {watchReserveFundUsageType === 'partial' && (
               <div>
-                <Label htmlFor="partialReserveFundAmount">사용할 회비 금액 <span className="text-destructive">*</span></Label>
+                <Label htmlFor="partialReserveFundAmount" className={cn((isEditMode && initialData?.isSettled) && "text-muted-foreground")}>
+                  사용할 회비 금액 <span className="text-destructive">*</span>
+                </Label>
                  <Controller
                     name="partialReserveFundAmount"
                     control={form.control}
@@ -367,7 +372,7 @@ export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, 
                            field.onChange(rawValue === '' ? undefined : parseFloat(rawValue));
                         }}
                         onBlur={field.onBlur}
-                        disabled={isPending}
+                        disabled={isPending || (isEditMode && initialData?.isSettled)}
                         className="mt-1"
                         placeholder="예: 10000"
                       />
@@ -378,8 +383,8 @@ export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, 
             )}
 
             <div>
-              <Label>회비 사용 제외 멤버</Label>
-              <p className="text-xs text-muted-foreground">선택된 멤버는 이 모임에서 회비 사용 혜택을 받지 않습니다.</p>
+              <Label className={cn((isEditMode && initialData?.isSettled) && "text-muted-foreground")}>회비 사용 제외 멤버</Label>
+              <p className={cn("text-xs", (isEditMode && initialData?.isSettled) ? "text-muted-foreground/70" : "text-muted-foreground")}>선택된 멤버는 이 모임에서 회비 사용 혜택을 받지 않습니다.</p>
               <div className="grid gap-2 mt-2">
                  {selectedParticipants.length > 0 ? (
                     selectedParticipants.map(participant => (
@@ -398,17 +403,17 @@ export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, 
                                   : currentNonParticipants.filter(id => id !== participant.id);
                                 field.onChange(newNonParticipants);
                               }}
-                              disabled={isPending || (participant.id === currentUserId && selectedParticipants.length === 1 && field.value?.includes(currentUserId) && checked === false )}
+                              disabled={isPending || (isEditMode && initialData?.isSettled) || (participant.id === currentUserId && selectedParticipants.length === 1 && field.value?.includes(currentUserId) && checked === false )}
                             />
                            )}
                         />
-                        <Label htmlFor={`nonReserveFund-${participant.id}`}>
+                        <Label htmlFor={`nonReserveFund-${participant.id}`} className={cn((isEditMode && initialData?.isSettled) && "text-muted-foreground")}>
                           {participant.nickname} {participant.id === currentUserId && "(나)"}
                         </Label>
                       </div>
                     ))
                  ) : (
-                   <p className="text-sm text-muted-foreground">참여자를 먼저 선택해주세요.</p>
+                   <p className={cn("text-sm", (isEditMode && initialData?.isSettled) ? "text-muted-foreground/70" : "text-muted-foreground")}>참여자를 먼저 선택해주세요.</p>
                  )}
               </div>
                {form.formState.errors.nonReserveFundParticipants && <p className="text-sm text-destructive mt-1">{form.formState.errors.nonReserveFundParticipants.message}</p>}
@@ -426,7 +431,7 @@ export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, 
               role="combobox"
               aria-expanded={participantSearchOpen}
               className="w-full justify-between"
-              disabled={isPending}
+              disabled={isPending || (isEditMode && initialData?.isSettled)}
             >
               {selectedParticipants.length > 0
                 ? selectedParticipants.map(f => f.nickname).join(', ')
@@ -445,6 +450,7 @@ export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, 
                       key={friend.id}
                       value={friend.nickname}
                       onSelect={() => {
+                        if (isEditMode && initialData?.isSettled) return; // 정산 완료 시 참여자 변경 불가
                         const currentParticipantIds = form.getValues("participantIds") || [];
                         let newParticipantIds = currentParticipantIds.includes(friend.id)
                           ? currentParticipantIds.filter(id => id !== friend.id)
@@ -465,6 +471,7 @@ export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, 
                             form.setValue('nonReserveFundParticipants', currentNonParticipants.filter(id => id !== friend.id), { shouldValidate: true });
                          }
                       }}
+                      className={cn((isEditMode && initialData?.isSettled) && "cursor-not-allowed opacity-50")}
                     >
                       <Check
                         className={cn(
@@ -487,14 +494,12 @@ export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, 
         <Button type="button" variant="outline" onClick={() => router.back()} disabled={isPending}>
           취소
         </Button>
-        <Button type="submit" disabled={isPending}>
+        <Button type="submit" disabled={isPending || (isEditMode && initialData?.isSettled)}>
           {isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-          {isEditMode ? '모임 수정' : '모임 만들기'}
+          {isEditMode ? (initialData?.isSettled ? '정산 완료됨' : '모임 수정') : '모임 만들기'}
         </Button>
       </div>
     </form>
   );
 }
-    
-
     
