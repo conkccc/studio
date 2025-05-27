@@ -10,7 +10,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { CalendarIcon, Check, ChevronsUpDown, Loader2, MapPinIcon, Search } from 'lucide-react';
+import { CalendarIcon, Check, ChevronsUpDown, Loader2, MapPinIcon } from 'lucide-react';
 import { Calendar } from '@/components/ui/calendar';
 import { cn } from '@/lib/utils';
 import { format } from 'date-fns';
@@ -21,12 +21,15 @@ import { useToast } from '@/hooks/use-toast';
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { Switch } from '@/components/ui/switch';
 import { Checkbox } from "@/components/ui/checkbox";
+import { useLoadScript } from '@googlemaps/js-api-loader';
+import usePlacesAutocomplete, { getGeocode, getLatLng } from 'use-places-autocomplete';
 
 const meetingSchemaBase = z.object({
   name: z.string().min(1, '모임 이름을 입력해주세요.').max(100, '모임 이름은 100자 이내여야 합니다.'),
   dateTime: z.date({ required_error: '시작 날짜와 시간을 선택해주세요.' }),
   endTime: z.date().optional(),
   locationName: z.string().min(1, '장소를 입력해주세요.').max(100, '장소 이름은 100자 이내여야 합니다.'),
+  locationCoordinates: z.object({ lat: z.number(), lng: z.number() }).optional(),
   participantIds: z.array(z.string()).min(1, '참여자를 최소 1명 선택해주세요.'),
   useReserveFund: z.boolean(),
   partialReserveFundAmount: z.preprocess(
@@ -63,6 +66,8 @@ interface MeetingFormProps {
   initialData?: Meeting;
 }
 
+const libraries: ("places")[] = ["places"];
+
 export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, initialData }: MeetingFormProps) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
@@ -71,6 +76,26 @@ export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, 
   const [startDateOpen, setStartDateOpen] = useState(false);
   const [endDateOpen, setEndDateOpen] = useState(false);
 
+  const { isLoaded, loadError } = useLoadScript({
+    googleMapsApiKey: process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY || "",
+    libraries,
+  });
+
+  const {
+    ready,
+    value: placesValue,
+    suggestions: { status: placesStatus, data: placesData },
+    setValue: setPlacesValue,
+    clearSuggestions: clearPlacesSuggestions,
+  } = usePlacesAutocomplete({
+    debounce: 300,
+    requestOptions: {
+        // language: 'ko', // 필요한 경우 한국어 우선 검색
+        // region: 'kr', // 필요한 경우 한국 지역 우선 검색
+    },
+    disabled: !isLoaded || loadError,
+  });
+
   const form = useForm<MeetingFormData>({
     resolver: zodResolver(meetingSchema),
     defaultValues: initialData ? {
@@ -78,6 +103,7 @@ export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, 
       dateTime: new Date(initialData.dateTime),
       endTime: initialData.endTime ? new Date(initialData.endTime) : undefined,
       locationName: initialData.locationName,
+      locationCoordinates: initialData.locationCoordinates,
       participantIds: initialData.participantIds,
       useReserveFund: initialData.useReserveFund,
       partialReserveFundAmount: initialData.partialReserveFundAmount === undefined ? undefined : Number(initialData.partialReserveFundAmount),
@@ -87,6 +113,7 @@ export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, 
       dateTime: undefined,
       endTime: undefined,
       locationName: '',
+      locationCoordinates: undefined,
       participantIds: [currentUserId],
       useReserveFund: false,
       partialReserveFundAmount: undefined,
@@ -96,6 +123,12 @@ export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, 
 
   const watchUseReserveFund = form.watch('useReserveFund');
   const watchParticipantIds = form.watch('participantIds');
+
+  useEffect(() => {
+    if (initialData?.locationName) {
+      setPlacesValue(initialData.locationName, false);
+    }
+  }, [initialData, setPlacesValue]);
 
   useEffect(() => {
     if (isEditMode && initialData) {
@@ -110,7 +143,7 @@ export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, 
   useEffect(() => {
     if (!watchUseReserveFund) {
       form.setValue('partialReserveFundAmount', undefined, { shouldValidate: true });
-      form.setValue('nonReserveFundParticipants', [], {shouldValidate: true}); // 회비 사용 안하면 제외 멤버도 초기화
+      form.setValue('nonReserveFundParticipants', [], {shouldValidate: true});
     }
   }, [watchUseReserveFund, form]);
   
@@ -120,11 +153,28 @@ export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, 
     return isNaN(num) ? '' : num.toLocaleString();
   };
 
+  const handlePlaceSelect = async (suggestion: google.maps.places.AutocompletePrediction) => {
+    setPlacesValue(suggestion.description, false); // Update input field text
+    clearPlacesSuggestions();
+    form.setValue('locationName', suggestion.description, { shouldValidate: true });
+
+    try {
+      const results = await getGeocode({ address: suggestion.description });
+      const { lat, lng } = await getLatLng(results[0]);
+      form.setValue('locationCoordinates', { lat, lng }, { shouldValidate: true });
+      toast({ title: "장소 선택됨", description: `위도: ${lat}, 경도: ${lng}` });
+    } catch (error) {
+      console.error("Error getting coordinates: ", error);
+      toast({ title: "오류", description: "장소의 좌표를 가져오는 데 실패했습니다.", variant: "destructive" });
+      form.setValue('locationCoordinates', undefined, { shouldValidate: true }); // Clear coordinates on error
+    }
+  };
+
   const onSubmit = (data: MeetingFormData) => {
     startTransition(async () => {
       const payload = {
         ...data,
-        partialReserveFundAmount: data.useReserveFund 
+        partialReserveFundAmount: data.useReserveFund && data.partialReserveFundAmount !== undefined
                                     ? Number(data.partialReserveFundAmount) 
                                     : undefined,
       };
@@ -159,13 +209,6 @@ export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, 
   };
 
   const selectedParticipants = friends.filter(friend => watchParticipantIds?.includes(friend.id));
-
-  const handleAddressSearch = () => {
-    toast({
-      title: "주소 검색",
-      description: "주소 검색 기능이 여기에 연동될 예정입니다.",
-    });
-  };
 
   return (
     <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
@@ -287,19 +330,51 @@ export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, 
 
       <div>
         <Label htmlFor="locationName">장소 <span className="text-destructive">*</span></Label>
-        <div className="flex items-center gap-2">
-          <div className="relative flex-grow">
-            <Input id="locationName" {...form.register('locationName')} disabled={isPending} className="pl-8" />
+        <div className="relative">
+           <div className="relative flex items-center">
             <MapPinIcon className="absolute left-2 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Input 
+              id="locationName" 
+              {...form.register('locationName', { 
+                onChange: (e) => setPlacesValue(e.target.value) // Sync with usePlacesAutocomplete
+              })} 
+              value={placesValue} // Controlled by usePlacesAutocomplete
+              onChange={(e) => {
+                setPlacesValue(e.target.value);
+                form.setValue('locationName', e.target.value, { shouldValidate: true }); // Sync with react-hook-form
+              }}
+              disabled={!isLoaded || loadError || isPending} 
+              className="pl-8"
+              placeholder={isLoaded && !loadError ? "장소 검색..." : "지도 API 로딩 중..."}
+            />
           </div>
-          <Button type="button" variant="outline" size="icon" onClick={handleAddressSearch} disabled={isPending} aria-label="주소 검색">
-            <Search className="h-4 w-4" />
-          </Button>
+          {loadError && <p className="text-sm text-destructive mt-1">지도 API 로드에 실패했습니다. API 키를 확인해주세요.</p>}
+          {isLoaded && !loadError && placesStatus === 'OK' && placesData.length > 0 && (
+            <ul className="absolute z-10 w-full bg-background border border-border rounded-md shadow-lg mt-1 max-h-60 overflow-y-auto">
+              {placesData.map((suggestion) => {
+                const {
+                  place_id,
+                  structured_formatting: { main_text, secondary_text },
+                  description,
+                } = suggestion;
+                return (
+                  <li
+                    key={place_id}
+                    onClick={() => handlePlaceSelect(suggestion)}
+                    className="p-2 hover:bg-accent cursor-pointer"
+                  >
+                    <strong>{main_text}</strong> <small>{secondary_text}</small>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
         </div>
         {form.formState.errors.locationName && <p className="text-sm text-destructive mt-1">{form.formState.errors.locationName.message}</p>}
+         {form.formState.errors.locationCoordinates && <p className="text-sm text-destructive mt-1">{form.formState.errors.locationCoordinates.message}</p>}
       </div>
-
-      <div>
+      
+      <div className="space-y-2">
         <div className="flex items-center space-x-2">
           <Controller
             control={form.control}
@@ -387,6 +462,7 @@ export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, 
           </div>
         )}
       </div>
+
 
       <div>
         <Label>참여자 <span className="text-destructive">*</span></Label>
