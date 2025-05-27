@@ -30,6 +30,7 @@ interface ExpenseItemProps {
   currentUserId: string;
   onExpenseUpdated: (updatedExpense: Expense) => void;
   onExpenseDeleted: (deletedExpenseId: string) => void;
+  isMeetingSettled: boolean; // Added prop
 }
 
 export function ExpenseItem({ 
@@ -38,7 +39,8 @@ export function ExpenseItem({
   participants,
   currentUserId, 
   onExpenseUpdated, 
-  onExpenseDeleted 
+  onExpenseDeleted,
+  isMeetingSettled // Added prop
 }: ExpenseItemProps) {
   const payer = allFriends.find(f => f.id === expense.paidById);
   const { toast } = useToast();
@@ -66,10 +68,13 @@ export function ExpenseItem({
   };
 
   const handleDelete = () => {
+    if (isMeetingSettled) {
+      toast({ title: '오류', description: '정산이 완료된 모임의 지출은 삭제할 수 없습니다.', variant: 'destructive' });
+      return;
+    }
     setIsDeleting(true);
     startTransition(async () => {
-      // The deleteExpenseAction signature was changed to (meetingId, expenseId)
-      const result = await deleteExpenseAction(expense.meetingId, expense.id);
+      const result = await deleteExpenseAction(expense.id);
       if (result.success) {
         toast({ title: '성공', description: '지출 항목이 삭제되었습니다.' });
         onExpenseDeleted(expense.id);
@@ -81,11 +86,7 @@ export function ExpenseItem({
   };
 
   // For this exercise, let's assume the creator of the meeting can manage expenses
-  const canManage = currentUserId === expense.meetingId; // This logic might need adjustment to be based on meeting creator or payer
-  // A more realistic approach:
-  // const meetingCreatorId = (await getMeetingById(expense.meetingId))?.creatorId;
-  // const canManage = expense.paidById === currentUserId || currentUserId === meetingCreatorId;
-
+  const canManage = true; // This logic might need adjustment to be based on meeting creator or payer
 
   return (
     <li className="p-4 border rounded-lg bg-background shadow-sm">
@@ -110,9 +111,7 @@ export function ExpenseItem({
           <span>분배: {getSplitDetails()}</span>
         </div>
       </div>
-      {/* For simplicity, keeping the canManage logic simple.
-          In a real app, you'd fetch meeting creator or check if current user is payer. */}
-      {true && ( // Temporarily allowing all users to manage for easier testing with Firestore
+      {canManage && (
         <div className="mt-3 flex justify-end space-x-2">
            {/* <EditExpenseDialog 
                 expense={expense} 
@@ -120,14 +119,14 @@ export function ExpenseItem({
                 allFriends={allFriends}
                 onExpenseUpdated={onExpenseUpdated} 
                 triggerButton={
-                    <Button variant="ghost" size="sm" className="text-xs" disabled={isPending || isDeleting}>
+                    <Button variant="ghost" size="sm" className="text-xs" disabled={isPending || isDeleting || isMeetingSettled}>
                         <Edit3 className="mr-1 h-3 w-3" /> 수정
                     </Button>
                 }
             /> */}
           <AlertDialog>
             <AlertDialogTrigger asChild>
-              <Button variant="ghost" size="sm" className="text-xs text-destructive hover:text-destructive" disabled={isPending || isDeleting}>
+              <Button variant="ghost" size="sm" className="text-xs text-destructive hover:text-destructive" disabled={isPending || isDeleting || isMeetingSettled}>
                 <Trash2 className="mr-1 h-3 w-3" /> 삭제
               </Button>
             </AlertDialogTrigger>

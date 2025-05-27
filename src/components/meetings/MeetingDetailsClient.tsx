@@ -68,13 +68,13 @@ export function MeetingDetailsClient({
   useEffect(() => {
     if (meeting?.dateTime) {
       let localFormattedString;
-      const startTime = new Date(meeting.dateTime); // Ensure it's a Date object
+      const startTime = meeting.dateTime; 
       if (meeting.endTime && meeting.endTime instanceof Date && !isNaN(meeting.endTime.getTime())) {
-        const endTime = new Date(meeting.endTime); // Ensure it's a Date object
+        const endTime = meeting.endTime; 
         const duration = differenceInCalendarDays(endTime, startTime);
         if (duration >= 0) {
           localFormattedString = `${format(startTime, 'yyyy년 M월 d일 HH:mm', { locale: ko })} (${duration + 1}일)`;
-        } else { // endTime is before startTime, invalid, just show start
+        } else { 
           localFormattedString = format(startTime, 'yyyy년 M월 d일 (EEE) HH:mm', { locale: ko });
         }
       } else {
@@ -150,11 +150,6 @@ export function MeetingDetailsClient({
   };
 
   const handleFinalizeSettlement = () => {
-    if (!meeting.useReserveFund || !meeting.partialReserveFundAmount || meeting.partialReserveFundAmount <= 0) {
-      // If no fund to use or amount is zero, just mark as settled if desired by some other logic,
-      // but this button is primarily for fund-using settlements.
-      // We can simply call the action, which will handle the "no fund" case internally.
-    }
     setIsFinalizing(true);
     startTransition(async () => {
       const result = await finalizeMeetingSettlementAction(meeting.id);
@@ -238,7 +233,7 @@ export function MeetingDetailsClient({
               <CalendarDays className="h-5 w-5 mt-0.5 text-primary flex-shrink-0" />
               <div>
                 <span className="font-medium">날짜 및 시간:</span>
-                <p className="text-muted-foreground">{formattedMeetingDateTime || (meeting.dateTime ? format(new Date(meeting.dateTime), 'yyyy년 M월 d일 (EEE) HH:mm', { locale: ko }) : '날짜 정보 없음')}</p>
+                <p className="text-muted-foreground">{formattedMeetingDateTime || (meeting.dateTime ? format(meeting.dateTime, 'yyyy년 M월 d일 (EEE) HH:mm', { locale: ko }) : '날짜 정보 없음')}</p>
               </div>
             </div>
             <div className="flex items-start gap-2">
@@ -334,6 +329,7 @@ export function MeetingDetailsClient({
                         currentUserId={currentUserId}
                         onExpenseUpdated={handleExpenseUpdated}
                         onExpenseDeleted={handleExpenseDeleted}
+                        isMeetingSettled={meeting.isSettled || false} // Pass settlement status
                       />
                     ))}
                   </ul>
