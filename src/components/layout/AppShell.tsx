@@ -4,7 +4,7 @@
 import type { ReactNode } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import React, { useRef, useEffect } from 'react'; // Added useRef and useEffect
+import React, { useRef, useEffect } from 'react';
 import {
   Home,
   UsersRound,
@@ -47,11 +47,19 @@ const navItems: NavItem[] = [
 
 export function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
-  // Ensure all necessary values are destructured from useSidebar
-  const { isMobile, setOpen, openMobile, setOpenMobile, state } = useSidebar();
+  const { isMobile, setOpen, open, openMobile, setOpenMobile, toggleSidebar, state } = useSidebar();
 
   const sheetTriggerRef = useRef<HTMLButtonElement>(null);
   const sheetContentRef = useRef<HTMLDivElement>(null);
+
+  const handleClose = () => {
+    if (isMobile) {
+      setOpenMobile(false);
+    }
+    // For desktop, we might not want to close an expanded sidebar on nav click
+    // but if it's 'icon' (collapsed), this won't affect it.
+    // If `open` is managed by `collapsible="icon"`, then `setOpen` might not be needed here for desktop.
+  };
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -84,14 +92,11 @@ export function AppShell({ children }: { children: ReactNode }) {
           <SidebarMenuItem key={item.href}>
             <Link href={item.href} passHref legacyBehavior={false}>
               <SidebarMenuButton
-                asChild={!isSheetContext}
+                asChild={!isSheetContext} 
                 isActive={isActive}
                 className="w-full"
-                tooltip={isMobile || state === 'expanded' ? undefined : item.label}
-                onClick={() => {
-                  if (isMobile) setOpenMobile(false);
-                  // For desktop, nav clicks shouldn't close an expanded sidebar by default
-                }}
+                tooltip={isMobile || (state === 'expanded' && !isSheetContext) ? undefined : item.label}
+                onClick={handleClose}
               >
                 <span> {/* This span is crucial for asChild with multiple children */}
                   <item.icon aria-hidden="true" />
@@ -106,17 +111,19 @@ export function AppShell({ children }: { children: ReactNode }) {
   );
 
   return (
-    <div className={cn(
-        "flex min-h-screen w-full flex-col bg-muted/40 transition-[padding-left] duration-300 ease-in-out",
-        !isMobile && state === 'expanded' && "sm:pl-[calc(var(--sidebar-width)_+_1rem)]",
-        !isMobile && state === 'collapsed' && "sm:pl-[calc(var(--sidebar-width-icon)_+_1rem)]",
-        isMobile && "sm:pl-0"
-      )}>
+    <div 
+        className={cn(
+            "flex min-h-screen w-full flex-col bg-muted/40 transition-[padding-left] duration-300 ease-in-out",
+            !isMobile && state === 'expanded' && "sm:pl-[calc(var(--sidebar-width)_+_1rem)]",
+            !isMobile && state === 'collapsed' && "sm:pl-[calc(var(--sidebar-width-icon)_+_1rem)]",
+            isMobile && "pl-0" // Ensure no padding-left on mobile
+        )}
+    >
         {/* Desktop Sidebar */}
         {!isMobile && (
           <Sidebar collapsible="icon" variant="sidebar" side="left" className="border-r group/sidebar">
             <SidebarHeader className="p-4">
-              <Link href="/" className="flex items-center gap-2 font-semibold group-data-[collapsible=icon]:justify-center" onClick={() => { if (isMobile) setOpenMobile(false); }}>
+              <Link href="/" className="flex items-center gap-2 font-semibold group-data-[collapsible=icon]:justify-center" onClick={handleClose}>
                 <Briefcase className="h-6 w-6 text-primary group-data-[collapsible=icon]:h-7 group-data-[collapsible=icon]:w-7" />
                 <span className="group-data-[collapsible=icon]:hidden">N빵친구</span>
               </Link>
@@ -130,8 +137,10 @@ export function AppShell({ children }: { children: ReactNode }) {
                   <SidebarMenuButton
                     tooltip={isMobile || state === 'expanded' ? undefined : "Settings"}
                     onClick={() => {
+                      // For settings, always close mobile if open
                       if (isMobile) setOpenMobile(false);
                       // Potentially open settings modal or navigate
+                      console.log("Settings clicked");
                     }}
                   >
                     <span>
@@ -145,7 +154,13 @@ export function AppShell({ children }: { children: ReactNode }) {
           </Sidebar>
         )}
 
-       <header className="sticky top-0 z-30 flex h-14 items-center gap-4 border-b bg-background px-4 sm:static sm:h-auto sm:border-0 sm:bg-transparent sm:px-6 mb-4">
+       <header 
+        className={cn(
+            "sticky top-0 z-30 flex h-14 items-center gap-4 border-b bg-background px-4",
+            "sm:static sm:h-auto sm:border-0 sm:bg-transparent sm:px-6",
+            isMobile ? "mb-0" : "mb-6" // No bottom margin for mobile header, margin for desktop
+        )}
+       >
           {isMobile && (
             <Sheet open={openMobile} onOpenChange={setOpenMobile}>
               <SheetTrigger asChild>
@@ -158,7 +173,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                   <Link
                     href="/"
                     className="group flex h-16 items-center justify-center gap-2 border-b px-6 text-lg font-semibold text-primary"
-                    onClick={() => setOpenMobile(false)}
+                    onClick={handleClose}
                   >
                     <Briefcase className="h-7 w-7" />
                     <span>N빵친구</span>
@@ -171,11 +186,11 @@ export function AppShell({ children }: { children: ReactNode }) {
             </Sheet>
           )}
            <div className="flex-1">
-             {/* Optional: Breadcrumbs or Page Title */}
+             {/* Optional: Breadcrumbs or Page Title for desktop header */}
            </div>
-           {/* Optional: User Menu */}
+           {/* Optional: User Menu for desktop header */}
         </header>
-        <main className="flex-1 p-4 sm:px-6 sm:py-0">
+        <main className="flex-1 p-4 sm:px-6 sm:pb-6 sm:pt-0"> {/* Adjusted padding for main content */}
           {children}
         </main>
     </div>
