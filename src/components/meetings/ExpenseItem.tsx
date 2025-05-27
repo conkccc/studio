@@ -52,7 +52,7 @@ export function ExpenseItem({
       const involved = expense.splitAmongIds
         ?.map(id => allFriends.find(f => f.id === id)?.nickname)
         .filter(Boolean) || [];
-      if (involved.length === 0 || involved.length === participants.length) return "모든 참여자";
+      if (involved.length === 0 || (participants.length > 0 && involved.length === participants.length)) return "모든 참여자";
       return `균등 분배 (${involved.join(', ')})`;
     }
     if (expense.splitType === 'custom' && expense.customSplits) {
@@ -74,7 +74,8 @@ export function ExpenseItem({
     }
     setIsDeleting(true);
     startTransition(async () => {
-      const result = await deleteExpenseAction(expense.id);
+      // For Firestore, deleteExpenseAction now needs meetingId as well.
+      const result = await deleteExpenseAction(expense.meetingId, expense.id);
       if (result.success) {
         toast({ title: '성공', description: '지출 항목이 삭제되었습니다.' });
         onExpenseDeleted(expense.id);
@@ -86,7 +87,8 @@ export function ExpenseItem({
   };
 
   // For this exercise, let's assume the creator of the meeting can manage expenses
-  const canManage = true; // This logic might need adjustment to be based on meeting creator or payer
+  // This logic might need to be tied to AuthContext's isAdmin status for production
+  const canManage = true; 
 
   return (
     <li className="p-4 border rounded-lg bg-background shadow-sm">
@@ -94,7 +96,7 @@ export function ExpenseItem({
         <div>
           <h4 className="font-semibold text-md">{expense.description}</h4>
           <p className="text-xs text-muted-foreground">
-            {expense.createdAt ? format(new Date(expense.createdAt), 'yyyy.MM.dd HH:mm', { locale: ko }) : '날짜 정보 없음'}
+            {expense.createdAt ? format(expense.createdAt, 'yyyy.MM.dd HH:mm', { locale: ko }) : '날짜 정보 없음'}
           </p>
         </div>
         <div className="text-right">
@@ -113,7 +115,9 @@ export function ExpenseItem({
       </div>
       {canManage && (
         <div className="mt-3 flex justify-end space-x-2">
-           {/* <EditExpenseDialog 
+           {/* 
+            // EditExpenseDialog would also need to be adapted for Firestore, passing meetingId.
+            <EditExpenseDialog 
                 expense={expense} 
                 participants={participants} 
                 allFriends={allFriends}
@@ -123,7 +127,9 @@ export function ExpenseItem({
                         <Edit3 className="mr-1 h-3 w-3" /> 수정
                     </Button>
                 }
-            /> */}
+                meetingId={expense.meetingId} // Pass meetingId if EditExpenseDialog needs it
+            /> 
+            */}
           <AlertDialog>
             <AlertDialogTrigger asChild>
               <Button variant="ghost" size="sm" className="text-xs text-destructive hover:text-destructive" disabled={isPending || isDeleting || isMeetingSettled}>

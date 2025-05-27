@@ -1,36 +1,106 @@
 
-import { getMeetingById, getFriends } from '@/lib/data-store';
-import { notFound } from 'next/navigation';
+'use client';
+
+import { useEffect, useState } from 'react';
+import { getMeetingById, getFriends } from '@/lib/data-store'; // Now async
 import { CreateMeetingForm } from '@/components/meetings/CreateMeetingForm';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
+import { useAuth } from '@/contexts/AuthContext';
+import Link from 'next/link';
+import { Button } from '@/components/ui/button';
+import type { Meeting, Friend } from '@/lib/types';
+import { useParams, useRouter } from 'next/navigation';
 
-interface EditMeetingPageProps {
-  params: {
-    meetingId: string;
-  };
-}
+export default function EditMeetingPage() {
+  const params = useParams();
+  const router = useRouter();
+  const { currentUser, isAdmin, loading: authLoading } = useAuth();
+  const meetingId = typeof params.meetingId === 'string' ? params.meetingId : undefined;
 
-export default async function EditMeetingPage({ params }: EditMeetingPageProps) {
-  const { meetingId } = params; // Explicitly destructure meetingId
+  const [meeting, setMeeting] = useState<Meeting | null | undefined>(undefined);
+  const [friends, setFriends] = useState<Friend[]>([]);
+  const [dataLoading, setDataLoading] = useState(true);
 
-  // meetingId가 유효한 문자열인지 기본적인 확인을 합니다.
-  // Next.js 라우팅은 보통 이 부분을 보장하지만, 추가적인 방어 코드입니다.
-  if (typeof meetingId !== 'string' || !meetingId.trim()) {
-    notFound();
+  useEffect(() => {
+    if (!authLoading && currentUser && isAdmin && meetingId) {
+      const fetchData = async () => {
+        try {
+          const [fetchedMeeting, fetchedFriends] = await Promise.all([
+            getMeetingById(meetingId),
+            getFriends()
+          ]);
+          
+          if (!fetchedMeeting) {
+            setMeeting(null); // Not found
+          } else {
+            setMeeting(fetchedMeeting);
+          }
+          setFriends(fetchedFriends);
+        } catch (error) {
+          console.error("Failed to fetch data for edit meeting:", error);
+          setMeeting(null); // Error case
+        } finally {
+          setDataLoading(false);
+        }
+      };
+      fetchData();
+    } else if (!authLoading && (!currentUser || !isAdmin)) {
+      setDataLoading(false);
+    } else if (!meetingId) {
+        setMeeting(null); // No meetingId
+        setDataLoading(false);
+    }
+  }, [currentUser, isAdmin, authLoading, meetingId]);
+
+  if (authLoading || dataLoading) {
+    return (
+      <div className="flex justify-center items-center min-h-[calc(100vh-150px)]">
+        <p className="text-xl text-muted-foreground">페이지 로딩 중...</p>
+      </div>
+    );
   }
 
-  const meeting = await getMeetingById(meetingId);
-  const friends = await getFriends();
-
-  // For simplicity, assume current user is the first friend or a mock ID.
-  // In a real app, this would come from auth.
-  const currentUserId = friends.length > 0 ? friends[0].id : 'mock-user-id';
-
-  if (!meeting) {
-    // 이 부분이 404 에러의 가장 일반적인 원인입니다:
-    // 제공된 meetingId로 데이터 저장소에서 모임을 찾을 수 없습니다.
-    notFound();
+  if (!currentUser) {
+    return (
+      <div className="container mx-auto py-8 text-center">
+        <h1 className="text-2xl font-bold mb-4">로그인 필요</h1>
+        <p className="text-muted-foreground mb-6">모임을 수정하려면 로그인이 필요합니다.</p>
+        <Button asChild>
+          <Link href="/login">로그인 페이지로 이동</Link>
+        </Button>
+      </div>
+    );
   }
+
+  if (!isAdmin) {
+    return (
+      <div className="container mx-auto py-8 text-center">
+        <h1 className="text-2xl font-bold mb-4">접근 권한 없음</h1>
+        <p className="text-muted-foreground">모임 수정은 관리자만 가능합니다.</p>
+         <Button asChild className="mt-4">
+          <Link href="/">대시보드로 돌아가기</Link>
+        </Button>
+      </div>
+    );
+  }
+
+  if (meeting === null) { // Explicitly null for not found
+    return (
+      <div className="container mx-auto py-8 text-center">
+        <h1 className="text-2xl font-bold mb-4">모임을 찾을 수 없습니다.</h1>
+        <p className="text-muted-foreground mb-6">수정하려는 모임이 존재하지 않거나 삭제되었을 수 있습니다.</p>
+        <Button asChild>
+          <Link href="/meetings">모임 목록으로 돌아가기</Link>
+        </Button>
+      </div>
+    );
+  }
+  
+  if (!meeting) { // Still loading or error before meeting is set
+    return <div className="text-center py-10">로딩 중...</div>;
+  }
+  
+  const currentUserId = currentUser?.uid || (friends.length > 0 ? friends[0].id : 'mock-user-id');
 
   return (
     <div className="max-w-2xl mx-auto">

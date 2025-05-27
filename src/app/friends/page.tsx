@@ -1,11 +1,71 @@
-import { getFriends } from '@/lib/data-store';
+
+'use client';
+import { useEffect, useState } from 'react';
+import { getFriends } from '@/lib/data-store'; // Now async
 import { AddFriendDialog } from '@/components/friends/AddFriendDialog';
 import { FriendListClient } from '@/components/friends/FriendListClient';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
 import { PlusCircle } from 'lucide-react';
+import { useAuth } from '@/contexts/AuthContext';
+import Link from 'next/link';
+import { Button } from '@/components/ui/button';
+import type { Friend } from '@/lib/types';
 
-export default async function FriendsPage() {
-  const friends = await getFriends();
+export default function FriendsPage() {
+  const { currentUser, isAdmin, loading } = useAuth();
+  const [friends, setFriends] = useState<Friend[]>([]);
+  const [dataLoading, setDataLoading] = useState(true);
+
+  useEffect(() => {
+    if (!loading && currentUser && isAdmin) {
+      const fetchFriends = async () => {
+        try {
+          const fetchedFriends = await getFriends();
+          setFriends(fetchedFriends);
+        } catch (error) {
+          console.error("Failed to fetch friends:", error);
+          // Optionally set an error state to display to the user
+        } finally {
+          setDataLoading(false);
+        }
+      };
+      fetchFriends();
+    } else if (!loading && (!currentUser || !isAdmin)) {
+      setDataLoading(false); // Not an admin or not logged in, stop loading
+    }
+  }, [currentUser, isAdmin, loading]);
+
+  if (loading || dataLoading) {
+    return (
+      <div className="flex justify-center items-center min-h-[calc(100vh-150px)]">
+        <p className="text-xl text-muted-foreground">친구 목록 로딩 중...</p>
+      </div>
+    );
+  }
+
+  if (!currentUser) { // Should be caught by middleware, but as a fallback
+    return (
+      <div className="container mx-auto py-8 text-center">
+        <h1 className="text-2xl font-bold mb-4">로그인 필요</h1>
+        <p className="text-muted-foreground mb-6">친구 목록을 보려면 로그인이 필요합니다.</p>
+        <Button asChild>
+          <Link href="/login">로그인 페이지로 이동</Link>
+        </Button>
+      </div>
+    );
+  }
+
+  if (!isAdmin) {
+    return (
+      <div className="container mx-auto py-8 text-center">
+        <h1 className="text-2xl font-bold mb-4">접근 권한 없음</h1>
+        <p className="text-muted-foreground">이 페이지는 관리자만 접근할 수 있습니다.</p>
+         <Button asChild className="mt-4">
+          <Link href="/">대시보드로 돌아가기</Link>
+        </Button>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
