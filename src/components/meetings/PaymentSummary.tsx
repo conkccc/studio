@@ -37,7 +37,6 @@ export function PaymentSummary({ meeting, expenses, participants, allFriends }: 
     });
 
     expenses.forEach(expense => {
-      // Add to payer's credit only if they are part of this meeting's participants
       if (participantIdsInMeeting.has(expense.paidById)) {
          ledger[expense.paidById] = (ledger[expense.paidById] || 0) + expense.totalAmount;
       }
@@ -47,13 +46,11 @@ export function PaymentSummary({ meeting, expenses, participants, allFriends }: 
         if (validSplitAmongIds.length > 0) {
           const share = expense.totalAmount / validSplitAmongIds.length;
           validSplitAmongIds.forEach(friendId => {
-            // Subtract from debtor's balance only if they are part of this meeting's participants
             ledger[friendId] = (ledger[friendId] || 0) - share;
           });
         }
       } else if (expense.splitType === 'custom' && expense.customSplits) {
         expense.customSplits.forEach(split => {
-          // Subtract from debtor's balance only if they are part of this meeting's participants
           if (participantIdsInMeeting.has(split.friendId)) {
             ledger[split.friendId] = (ledger[split.friendId] || 0) - split.amount;
           }
@@ -81,21 +78,19 @@ export function PaymentSummary({ meeting, expenses, participants, allFriends }: 
     let fundAmountForMeeting = 0;
     let fundDesc = "회비 사용 없음";
 
-    if (meeting.useReserveFund) {
+    if (meeting.useReserveFund && currentTotalSpent > 0) {
       if (meeting.reserveFundUsageType === 'all') {
         let totalInitialDebtOfBeneficiaries = 0;
         benefitingParticipantIds.forEach(id => {
-          if (initialPaymentLedger[id] < -0.01) { // If they owe money initially (negative ledger)
+          if (initialPaymentLedger[id] < -0.01) { 
             totalInitialDebtOfBeneficiaries += Math.abs(initialPaymentLedger[id]);
           }
         });
-        fundAmountForMeeting = totalInitialDebtOfBeneficiaries; // Fund covers up to this amount
+        fundAmountForMeeting = totalInitialDebtOfBeneficiaries;
         if (fundAmountForMeeting > 0.01) {
           fundDesc = `회비에서 총 ${fundAmountForMeeting.toLocaleString(undefined, {maximumFractionDigits: 0})}원 사용`;
-        } else if (currentTotalSpent > 0) {
-          fundDesc = "회비 사용 대상자의 부담금이 없어 회비가 사용되지 않았습니다.";
         } else {
-          fundDesc = "총 지출이 없어 회비가 사용되지 않았습니다.";
+          fundDesc = "회비 사용 대상자의 부담금이 없어 회비가 사용되지 않았습니다.";
         }
       } else if (meeting.reserveFundUsageType === 'partial') {
         fundAmountForMeeting = meeting.partialReserveFundAmount || 0;
@@ -105,12 +100,15 @@ export function PaymentSummary({ meeting, expenses, participants, allFriends }: 
           fundDesc = "회비 부분 사용액이 설정되지 않았거나 0원입니다.";
         }
       }
+    } else if (meeting.useReserveFund && currentTotalSpent === 0) {
+        fundDesc = "총 지출이 없어 회비가 사용되지 않았습니다.";
     }
+
     return { 
       totalSpent: currentTotalSpent, 
       perPersonCost: currentPerPersonCost,
       fundApplicationDetails: {
-        amount: fundAmountForMeeting, // This is the total fund amount decided for the meeting
+        amount: fundAmountForMeeting,
         description: fundDesc
       }
     };
@@ -120,7 +118,6 @@ export function PaymentSummary({ meeting, expenses, participants, allFriends }: 
     const calculatedFinalLedger = { ...initialPaymentLedger };
     const totalFundContributionForMeeting = derivedDetails.fundApplicationDetails.amount;
 
-    // Apply fund contribution as a discount to benefiting participants
     if (meeting.useReserveFund && totalFundContributionForMeeting > 0.01 && benefitingParticipantIds.size > 0) {
         const discountPerBeneficiary = totalFundContributionForMeeting / benefitingParticipantIds.size;
         benefitingParticipantIds.forEach(id => {
@@ -128,13 +125,12 @@ export function PaymentSummary({ meeting, expenses, participants, allFriends }: 
         });
     }
 
-    // Calculate how the total fund contribution is paid out to initial payers
     const payoutsList: FundPayoutToPayer[] = [];
     if (totalFundContributionForMeeting > 0.01) {
         let fundRemainingToPayout = totalFundContributionForMeeting;
         const sortedInitialPayers = Object.entries(initialPaymentLedger)
-            .filter(([_, amount]) => amount > 0.01) // Who were initially owed money by the group
-            .sort(([, aAmount], [, bAmount]) => bAmount - aAmount) // Pay larger creditors first (optional, but can be systematic)
+            .filter(([_, amount]) => amount > 0.01) 
+            .sort(([, aAmount], [, bAmount]) => bAmount - aAmount)
             .map(([id]) => id);
 
         for (const payerId of sortedInitialPayers) {
@@ -147,6 +143,12 @@ export function PaymentSummary({ meeting, expenses, participants, allFriends }: 
                 fundRemainingToPayout -= reimbursementAmount;
             }
         }
+         // If there's still fund left after reimbursing payers (e.g. payers' initial credit was less than fund amount)
+         // This scenario is less common if fundAmountForMeeting is capped by totalInitialDebtOfBeneficiaries for 'all' type.
+         // For 'partial' type, if partial_amount > total_initial_credit, this could happen.
+         // The current logic ensures fundApplicationDetails.amount (for 'all' type) doesn't exceed total debt of beneficiaries,
+         // and for 'partial' type, it's a fixed amount. The distribution to payers is capped by what they are owed.
+         // The effect on finalLedgerForDisplay by adding discountPerBeneficiary already accounts for reducing individuals' debts.
     }
     
     return { payoutsList, finalLedgerForDisplay: calculatedFinalLedger };
@@ -156,17 +158,16 @@ export function PaymentSummary({ meeting, expenses, participants, allFriends }: 
   const simplifiedDebts = useMemo(() => {
     const balances: LedgerEntry[] = Object.entries(finalLedgerForDisplay)
       .map(([friendId, amount]) => ({ friendId, amount: parseFloat(amount.toFixed(2)) }))
-      .sort((a, b) => a.amount - b.amount); // Sort by amount (debtors first)
+      .sort((a, b) => a.amount - b.amount); 
 
     const transactions: { from: string; to: string; amount: number }[] = [];
     let payersIdx = balances.length -1; 
     let owersIdx = 0; 
 
     while (owersIdx < payersIdx) {
-        const payer = balances[payersIdx]; // Person who is owed money (positive amount)
-        const ower = balances[owersIdx];  // Person who owes money (negative amount)
+        const payer = balances[payersIdx]; 
+        const ower = balances[owersIdx];  
         
-        // Skip if payer has no significant credit or ower has no significant debt
         if (payer.amount < 0.01) { payersIdx--; continue; }
         if (ower.amount > -0.01) { owersIdx++; continue; }
 
@@ -210,15 +211,19 @@ export function PaymentSummary({ meeting, expenses, participants, allFriends }: 
     <Card>
       <CardHeader>
         <CardTitle>정산 요약</CardTitle>
-        <CardDescription className="space-y-1">
+        <CardDescription className="space-y-1 mt-1">
             <div>
-                총 지출: {derivedDetails.totalSpent.toLocaleString(undefined, {maximumFractionDigits: 0})}원 
-                {participants.length > 0 && ` (1인당 ${derivedDetails.perPersonCost.toLocaleString(undefined, {maximumFractionDigits: 0})}원)`}
+                총 지출: {derivedDetails.totalSpent.toLocaleString(undefined, {maximumFractionDigits: 0})}원
             </div>
-            <span className={`block text-sm ${derivedDetails.fundApplicationDetails.amount > 0.01 ? 'text-primary' : 'text-muted-foreground'}`}>
-                <PiggyBank className="inline-block h-4 w-4 mr-1" />
+            {participants.length > 0 && (
+                <div>
+                    1인당 사용 비용: {derivedDetails.perPersonCost.toLocaleString(undefined, {maximumFractionDigits: 0})}원
+                </div>
+            )}
+            <div className={`text-sm ${derivedDetails.fundApplicationDetails.amount > 0.01 ? 'text-primary' : 'text-muted-foreground'}`}>
+                <PiggyBank className="inline-block h-4 w-4 mr-1 align-middle" />
                 {derivedDetails.fundApplicationDetails.description}
-            </span>
+            </div>
         </CardDescription>
       </CardHeader>
       <CardContent>
