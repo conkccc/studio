@@ -4,6 +4,7 @@ import './globals.css';
 import { SidebarProvider } from '@/components/ui/sidebar';
 import { AppShell } from '@/components/layout/AppShell';
 import { Toaster } from "@/components/ui/toaster";
+import { AuthProvider } from '@/contexts/AuthContext';
 
 const geistSans = Geist({
   variable: '--font-geist-sans',
@@ -25,14 +26,18 @@ export default function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const adminEmail = process.env.ADMIN_EMAIL;
+
   return (
     <html lang="ko">
       <body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
-        <SidebarProvider>
-          <AppShell>
-            {children}
-          </AppShell>
-        </SidebarProvider>
+        <AuthProvider adminEmail={adminEmail}>
+          <SidebarProvider>
+            <AppShell>
+              {children}
+            </AppShell>
+          </SidebarProvider>
+        </AuthProvider>
         <Toaster />
       </body>
     </html>
