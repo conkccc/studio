@@ -56,7 +56,7 @@ export default function DashboardPage() {
     return (
       <div className="container mx-auto py-8 text-center">
         <h1 className="text-3xl font-bold mb-4">N빵친구에 오신 것을 환영합니다!</h1>
-        <p className="text-lg text-muted-foreground mb-6">모임 정산을 관리하려면 로그인해주세요.</p>
+        <p className="text-lg text-muted-foreground mb-6">모임 정산을 관리하려면 로그인해주세요(관리자만 가능)</p>
         <Button asChild>
           <Link href="/login">로그인 페이지로 이동</Link>
         </Button>
