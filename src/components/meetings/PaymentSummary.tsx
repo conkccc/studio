@@ -291,7 +291,7 @@ export function PaymentSummary({ meeting, expenses, participants, allFriends }: 
                         <FileText className="h-4 w-4" />
                         최종 송금 제안
                     </h3>
-                    <CardDescription>개인 간 필요한 최종 송금 내역입니다. (회비 지원 모두 반영 후)</CardDescription>
+                    <CardDescription>개인 간 필요한 최종 송금 내역입니다.</CardDescription>
                     <ScrollArea className="pr-3 mt-2"> {/* Removed max-h */}
                         <Table>
                         <TableHeader>

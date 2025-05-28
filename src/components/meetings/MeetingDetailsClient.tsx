@@ -90,7 +90,7 @@ export function MeetingDetailsClient({
       return '관리자 (나)';
     }
     const creatorFriend = allFriends.find(f => f.id === meeting.creatorId);
-    return creatorFriend?.nickname || '알 수 없음';
+    return creatorFriend?.nickname || '관리자';
   }, [meeting.creatorId, allFriends, currentUser, isAdmin]);
 
 
