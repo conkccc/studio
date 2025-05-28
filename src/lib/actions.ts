@@ -25,7 +25,7 @@ import type { Friend, Meeting, Expense, ReserveFundTransaction } from './types';
 // Friend Actions
 export async function createFriendAction(nickname: string, name?: string) {
   try {
-    const newFriend = await dbAddFriend({ nickname, name, createdAt: new Date() });
+    const newFriend = await dbAddFriend({ nickname, name });
     revalidatePath('/friends');
     revalidatePath('/meetings/new'); // Revalidate new meeting page as friends list might change
     return { success: true, friend: newFriend };

@@ -29,10 +29,10 @@ export default function DashboardPage() {
           setReserveBalance(balance);
 
           // Fetch recent meeting summary
-          const recentMeetings = await getMeetings({ limit: 5 }); // Fetch only the 5 most recent meetings
-          if (recentMeetings.length > 0) {
-            const latestMeeting = recentMeetings[0];
-            const expenses = await getExpensesByMeetingId(latestMeeting.id); // Still need expenses for the latest meeting
+          const recentMeetingsResult = await getMeetings({ limitParam: 1 }); // Fetch only the 1 most recent meetings
+          if (recentMeetingsResult.meetings.length > 0) {
+            const latestMeeting = recentMeetingsResult.meetings[0];
+            const expenses = await getExpensesByMeetingId(latestMeeting.id);
             const totalSpent = expenses.reduce((sum, exp) => sum + exp.totalAmount, 0);
             const perPersonCost = latestMeeting.participantIds.length > 0 ? totalSpent / latestMeeting.participantIds.length : 0;
             
@@ -160,7 +160,7 @@ export default function DashboardPage() {
             </CardTitle>
             <CardDescription>최근 모임 및 회비 잔액에 대한 간략한 개요입니다.</CardDescription>
           </CardHeader>
-          <CardContent className="space-y-4"> {/* Changed from grid to space-y for vertical stacking */}
+          <CardContent className="space-y-4">
             <div>
               <h3 className="font-semibold mb-2 text-lg">지난 모임 정산 현황</h3>
               <p className="text-sm text-muted-foreground">

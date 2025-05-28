@@ -137,7 +137,7 @@ export const deleteFriend = async (id: string): Promise<void> => {
 // --- Meeting functions ---
 interface GetMeetingsParams {
   year?: number;
-  limitParam?: number; // Renamed from 'limit' to avoid clash with firestore 'limit'
+  limitParam?: number;
   page?: number;
 }
 
