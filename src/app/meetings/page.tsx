@@ -19,11 +19,12 @@ export default function MeetingsPage() {
   const yearParam = searchParams.get('year');
   const pageParam = searchParams.get('page');
 
-  const [allRawMeetings, setAllRawMeetings] = useState<Meeting[]>([]);
+  const [meetings, setMeetings] = useState<Meeting[]>([]);
   const [allFriends, setAllFriends] = useState<Friend[]>([]);
   const [availableYears, setAvailableYears] = useState<number[]>([]);
   const [selectedYear, setSelectedYear] = useState<number | undefined>(undefined);
-  const [dataLoading, setDataLoading] = useState(true);
+  const [meetingsLoading, setMeetingsLoading] = useState(true);
+  const [totalMeetingCount, setTotalMeetingCount] = useState(0);
 
   const currentPage = useMemo(() => {
     const page = parseInt(pageParam || '1', 10);
@@ -34,56 +35,73 @@ export default function MeetingsPage() {
     setSelectedYear(yearParam ? parseInt(yearParam) : undefined);
   }, [yearParam]);
 
-  useEffect(() => {
+ useEffect(() => {
     const fetchData = async () => {
-      setDataLoading(true);
+      if (authLoading && !currentUser) { // Wait for auth to load, but proceed if user is not logged in (for public view)
+        setMeetingsLoading(false); // Stop loading if auth hasn't determined user yet but we might show public content
+        return;
+      }
+      if(!authLoading && !currentUser && !isAdmin) {
+        // Non-admin, non-logged in users can see meetings, but no special fetching logic based on user role here yet
+        // This is more for a scenario where getMeetings might differ for admin vs public. For now, it's the same.
+      }
+
+
+      setMeetingsLoading(true);
       try {
-        const [fetchedMeetings, fetchedFriends] = await Promise.all([
-          getMeetings(), // Fetches all meetings
-          getFriends()
-        ]);
-        
-        setAllRawMeetings(fetchedMeetings);
-        setAllFriends(fetchedFriends);
+        // Firestore version of getMeetings returns an object { meetings, totalCount, availableYears }
+        const fetchedMeetingsData = await getMeetings({
+          page: currentPage,
+          limit: ITEMS_PER_PAGE,
+          year: selectedYear,
+        });
 
-        const years = Array.from(new Set(fetchedMeetings.map(m => new Date(m.dateTime).getFullYear()))).sort((a, b) => b - a);
-        setAvailableYears(years);
+        setMeetings(fetchedMeetingsData.meetings);
+        setTotalMeetingCount(fetchedMeetingsData.totalCount);
+        setAvailableYears(fetchedMeetingsData.availableYears);
 
+        if (allFriends.length === 0) { // Fetch friends only if not already fetched
+             const fetchedFriends = await getFriends();
+             setAllFriends(fetchedFriends);
+        }
       } catch (error) {
-        console.error("Failed to fetch meetings or friends:", error);
+        console.error("Failed to fetch meetings:", error);
+        // Optionally set an error state here
       } finally {
-        setDataLoading(false);
+        setMeetingsLoading(false);
       }
     };
 
-    if (!authLoading) {
-        fetchData();
-    }
-  }, [authLoading]);
+    fetchData();
 
-  const filteredMeetings = useMemo(() => {
-    return selectedYear
-      ? allRawMeetings.filter(m => new Date(m.dateTime).getFullYear() === selectedYear)
-      : allRawMeetings;
-  }, [allRawMeetings, selectedYear]);
-
-  const paginatedMeetings = useMemo(() => {
-    const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
-    return filteredMeetings.slice(startIndex, startIndex + ITEMS_PER_PAGE);
-  }, [filteredMeetings, currentPage]);
+  }, [authLoading, currentUser, isAdmin, currentPage, selectedYear, allFriends.length]); // Added isAdmin and currentUser as dependencies
 
   const totalPages = useMemo(() => {
-    return Math.ceil(filteredMeetings.length / ITEMS_PER_PAGE);
-  }, [filteredMeetings.length]);
+    return Math.ceil(totalMeetingCount / ITEMS_PER_PAGE);
+  }, [totalMeetingCount]);
 
+  const dataLoading = authLoading || meetingsLoading;
 
-  if (authLoading || dataLoading) {
+  if (dataLoading) {
     return (
       <div className="flex justify-center items-center min-h-[calc(100vh-150px)]">
         <p className="text-xl text-muted-foreground">모임 목록 로딩 중...</p>
       </div>
     );
   }
+  
+  // This check might be redundant if getMeetings always fetches friends or if friends are fetched once.
+  // However, keeping it as a safeguard if allFriends fetching is conditional.
+  if (meetings.length > 0 && allFriends.length === 0 && !authLoading && !meetingsLoading ) {
+      // This state implies meetings are loaded but friends are not, which is unusual if friends are needed for MeetingCard
+      // This might indicate a state where `getFriends` failed or hasn't completed for some reason
+       return (
+         <div className="flex justify-center items-center min-h-[calc(100vh-150px)]">
+           <p className="text-xl text-muted-foreground">친구 정보 로딩 중...</p>
+         </div>
+       );
+    }
+
 
   return (
     <div className="space-y-6">
@@ -105,7 +123,7 @@ export default function MeetingsPage() {
       </div>
       
       <MeetingListClient 
-        initialMeetings={paginatedMeetings} 
+        initialMeetings={meetings}
         allFriends={allFriends}
         availableYears={availableYears}
         selectedYear={selectedYear}

@@ -29,14 +29,14 @@ export default function DashboardPage() {
           setReserveBalance(balance);
 
           // Fetch recent meeting summary
-          const allMeetings = await getMeetings(); // Assuming this fetches all meetings sorted by date desc
-          if (allMeetings.length > 0) {
-            const latestMeeting = allMeetings[0];
-            const expenses = await getExpensesByMeetingId(latestMeeting.id);
+          const recentMeetings = await getMeetings({ limit: 5 }); // Fetch only the 5 most recent meetings
+          if (recentMeetings.length > 0) {
+            const latestMeeting = recentMeetings[0];
+            const expenses = await getExpensesByMeetingId(latestMeeting.id); // Still need expenses for the latest meeting
             const totalSpent = expenses.reduce((sum, exp) => sum + exp.totalAmount, 0);
             const perPersonCost = latestMeeting.participantIds.length > 0 ? totalSpent / latestMeeting.participantIds.length : 0;
             
-            let summary = `최근 모임 '${latestMeeting.name}'에서 총 ${totalSpent.toLocaleString()}원 지출, 1인당 ${perPersonCost.toLocaleString(undefined, {maximumFractionDigits: 0})}원`;
+            let summary = `최근 모임'${latestMeeting.name}'에서 ${latestMeeting.participantIds.length}명이 총 ${totalSpent.toLocaleString()}원 지출, 1인당 ${perPersonCost.toLocaleString(undefined, {maximumFractionDigits: 0})}원`;
             if (latestMeeting.isSettled) {
               summary += " 정산 완료.";
             } else if (expenses.length > 0) {
@@ -46,7 +46,7 @@ export default function DashboardPage() {
             }
             setRecentMeetingSummary(summary);
           } else {
-            setRecentMeetingSummary("최근 모임 내역이 없습니다.");
+            setRecentMeetingSummary("등록된 모임 내역이 없습니다.");
           }
         } catch (error) {
           console.error("Failed to fetch dashboard data:", error);

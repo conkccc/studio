@@ -13,8 +13,10 @@ import {
   Timestamp,
   writeBatch,
   arrayRemove,
-  increment,
+  increment, 
+  QuerySnapshot,
   setDoc,
+  startAfter,
   documentId
 } from 'firebase/firestore';
 import { db } from './firebase';
@@ -126,11 +128,53 @@ export const deleteFriend = async (id: string): Promise<void> => {
 };
 
 // --- Meeting functions ---
-export const getMeetings = async (): Promise<Meeting[]> => {
+interface GetMeetingsParams {
+  year?: number;
+  limit?: number;
+  startAfterDoc?: any; // Firestore DocumentSnapshot for pagination
+}
+
+interface GetMeetingsResult {
+  meetings: Meeting[];
+  lastVisible: any | null; // Return last document for next page
+}
+
+export const getMeetings = async ({
+  year,
+  limit,
+  startAfterDoc,
+}: GetMeetingsParams = {}): Promise<GetMeetingsResult> => {
   const meetingsCollectionRef = collection(db, MEETINGS_COLLECTION);
-  const q = query(meetingsCollectionRef, orderBy('dateTime', 'desc'));
+  let q = query(meetingsCollectionRef);
+
+  if (year) {
+    // Note: Filtering by year requires a compound index on dateTime and year if year is not part of dateTime field
+    // Assuming dateTime is indexed, we filter by year range. This might be inefficient for large datasets without an explicit year field.
+    // A better approach might be to store 'year' as a separate field on the meeting documents.
+    const startOfYear = new Date(year, 0, 1);
+    const endOfYear = new Date(year + 1, 0, 1);
+    q = query(q, where('dateTime', '>=', Timestamp.fromDate(startOfYear)), where('dateTime', '<', Timestamp.fromDate(endOfYear)));
+  }
+
+  q = query(q, orderBy('dateTime', 'desc'));
+
+  if (startAfterDoc) {
+    q = query(q, startAfter(startAfterDoc));
+  }
+
+  if (limit) {
+    q = query(q, limit(limit));
+  }
+
   const snapshot = await getDocs(q);
-  return arrayFromSnapshot<Meeting>(snapshot);
+  const meetings = arrayFromSnapshot<Meeting>(snapshot);
+
+  const lastVisible = snapshot.docs.length > 0 ? snapshot.docs[snapshot.docs.length - 1] : null;
+
+  return {
+    meetings,
+    lastVisible,
+  };
 };
 
 export const getMeetingById = async (id: string): Promise<Meeting | undefined> => {
