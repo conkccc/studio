@@ -10,9 +10,8 @@ import {
   UsersRound,
   CalendarCheck,
   PiggyBank,
-  Settings,
   Menu,
-  Briefcase,
+  Briefcase, // Briefcase for app icon
   LogOut,
 } from 'lucide-react';
 
@@ -94,22 +93,23 @@ export function AppShell({ children }: { children: ReactNode }) {
         return (
           <SidebarMenuItem key={item.href}>
             <SidebarMenuButton
-              asChild={!isSheetContext} // Desktop: asChild is true, Link is the child
+              asChild={!isSheetContext}
               isActive={isActive}
               className="w-full"
               tooltip={isMobile || (state === 'expanded' && !isSheetContext) ? undefined : item.label}
-              onClick={handleClose}
+              onClick={() => {
+                if (isSheetContext) setTimeout(handleClose, 200); // Delay for mobile close
+              }}
             >
               {isSheetContext ? (
-                // Mobile: asChild is false. Button is rendered. Children are icon and text.
-                // Ensure icon and text are on the same line with proper spacing.
+                // Mobile: asChild is false. Button is rendered by SidebarMenuButton.
                 <div className="flex items-center gap-2 w-full">
                   <item.icon aria-hidden="true" className="h-5 w-5 shrink-0" />
                   <span className="text-sm truncate">{item.label}</span>
                 </div>
               ) : (
                 // Desktop: Link is the child, and it contains icon and text.
-                <Link href={item.href} className="flex items-center gap-2">
+                <Link href={item.href} className="flex items-center gap-2" onClick={handleClose}>
                   <item.icon aria-hidden="true" />
                   <span>{item.label}</span>
                 </Link>
@@ -160,19 +160,18 @@ export function AppShell({ children }: { children: ReactNode }) {
                   <SidebarMenuButton
                     tooltip={isMobile || state === 'expanded' ? undefined : `로그아웃 (${currentUser.email?.split('@')[0]})`}
                     onClick={async () => {
-                      if (isMobile) setOpenMobile(false);
                       await signOut();
-                      handleClose(); // Ensure menu closes after action
+                      // handleClose will be called by Link's onClick in desktop, or directly in mobile
+                      if (isMobile) setTimeout(handleClose, 200);
                     }}
                   >
-                    <span className="flex items-center gap-2"> {/* Ensured flex container */}
+                    <span className="flex items-center gap-2">
                       <LogOut aria-hidden="true" />
                       <span>로그아웃</span>
                     </span>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
               )}
-              {/* Settings button can be added here if needed */}
             </SidebarMenu>
           </SidebarFooter>
         </Sidebar>
@@ -180,9 +179,9 @@ export function AppShell({ children }: { children: ReactNode }) {
 
       <header
         className={cn(
-          "sticky top-0 z-30 flex h-14 items-center gap-4 border-b bg-background px-4",
-          "sm:static sm:h-auto sm:border-0 sm:bg-transparent sm:px-6",
-          isMobile ? "mb-0" : "sm:mb-6" // Desktop has margin-bottom, mobile doesn't.
+          "sticky top-0 z-30 flex h-14 items-center gap-4 border-b bg-background px-4", // Base classes for mobile header
+          "sm:static sm:h-auto sm:border-0 sm:bg-transparent sm:px-6", // Desktop overrides
+          isMobile ? "mb-0" : "sm:mb-0" // Desktop header no longer has mb-6
         )}
       >
         {isMobile && (
@@ -197,7 +196,9 @@ export function AppShell({ children }: { children: ReactNode }) {
                 <Link
                   href="/"
                   className="group flex h-16 items-center justify-center gap-2 border-b px-6 text-lg font-semibold text-primary"
-                  onClick={handleClose}
+                  onClick={() => {
+                    setTimeout(handleClose, 200); 
+                  }}
                 >
                   <Briefcase className="h-7 w-7" />
                   <span>N빵친구</span>
@@ -211,8 +212,8 @@ export function AppShell({ children }: { children: ReactNode }) {
                       <SidebarMenuItem>
                         <SidebarMenuButton
                           onClick={async () => {
-                            await signOut();
-                            handleClose(); // Close sheet after sign out
+                            await signOut(); 
+                            setTimeout(handleClose, 200);
                           }}
                         >
                           <span className="flex w-full items-center gap-2 text-sm">
