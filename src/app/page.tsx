@@ -4,15 +4,16 @@
 import Link from 'next/link';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { UsersRound, CalendarCheck, PiggyBank, ArrowRight, LineChart } from 'lucide-react'; // Brain icon removed
-import Image from 'next/image';
+import { UsersRound, CalendarCheck, PiggyBank, ArrowRight, LineChart } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
-import { useEffect, useState } from 'react'; 
-import { getReserveFundBalance } from '@/lib/data-store'; 
+import { useEffect, useState } from 'react';
+import { getReserveFundBalance, getMeetings, getExpensesByMeetingId } from '@/lib/data-store'; // Now async
+import type { Meeting, Expense } from '@/lib/types';
 
 export default function DashboardPage() {
   const { currentUser, isAdmin, loading } = useAuth();
   const [reserveBalance, setReserveBalance] = useState<number | null>(null);
+  const [recentMeetingSummary, setRecentMeetingSummary] = useState<string | null>(null);
   const [isClient, setIsClient] = useState(false);
 
   useEffect(() => {
@@ -21,27 +22,50 @@ export default function DashboardPage() {
 
   useEffect(() => {
     if (isClient && !loading && currentUser && isAdmin) {
-      const fetchBalance = async () => {
+      const fetchDashboardData = async () => {
         try {
+          // Fetch reserve balance
           const balance = await getReserveFundBalance();
           setReserveBalance(balance);
+
+          // Fetch recent meeting summary
+          const allMeetings = await getMeetings(); // Assuming this fetches all meetings sorted by date desc
+          if (allMeetings.length > 0) {
+            const latestMeeting = allMeetings[0];
+            const expenses = await getExpensesByMeetingId(latestMeeting.id);
+            const totalSpent = expenses.reduce((sum, exp) => sum + exp.totalAmount, 0);
+            const perPersonCost = latestMeeting.participantIds.length > 0 ? totalSpent / latestMeeting.participantIds.length : 0;
+            
+            let summary = `최근 모임 '${latestMeeting.name}'에서 총 ${totalSpent.toLocaleString()}원 지출, 1인당 ${perPersonCost.toLocaleString(undefined, {maximumFractionDigits: 0})}원`;
+            if (latestMeeting.isSettled) {
+              summary += " 정산 완료.";
+            } else if (expenses.length > 0) {
+              summary += " 정산 필요.";
+            } else {
+              summary += " (지출 내역 없음).";
+            }
+            setRecentMeetingSummary(summary);
+          } else {
+            setRecentMeetingSummary("최근 모임 내역이 없습니다.");
+          }
         } catch (error) {
-          console.error("Failed to fetch reserve fund balance:", error);
-          setReserveBalance(0); 
+          console.error("Failed to fetch dashboard data:", error);
+          setReserveBalance(0);
+          setRecentMeetingSummary("요약 정보를 가져오는 데 실패했습니다.");
         }
       };
-      fetchBalance();
+      fetchDashboardData();
     } else if (isClient && (!currentUser || !isAdmin)) {
-      setReserveBalance(null); 
+      setReserveBalance(null);
+      setRecentMeetingSummary(null);
     }
   }, [currentUser, isAdmin, loading, isClient]);
 
 
   const quickLinks = [
     { href: '/friends', label: '친구 관리', icon: UsersRound, description: '친구 목록을 보고 새 친구를 추가하세요.', adminOnly: true },
-    { href: '/meetings', label: '모임 관리', icon: CalendarCheck, description: '모임을 만들고 지난 모임을 확인하세요.', adminOnly: false }, 
+    { href: '/meetings', label: '모임 관리', icon: CalendarCheck, description: '모임을 만들고 지난 모임을 확인하세요.', adminOnly: false },
     { href: '/reserve-fund', label: '회비 현황', icon: PiggyBank, description: '회비 잔액과 사용 내역을 보세요.', adminOnly: true },
-    // AI Analysis link removed
   ];
 
   if (loading || !isClient) {
@@ -56,7 +80,7 @@ export default function DashboardPage() {
     return (
       <div className="container mx-auto py-8 text-center">
         <h1 className="text-3xl font-bold mb-4">N빵친구에 오신 것을 환영합니다!</h1>
-        <p className="text-lg text-muted-foreground mb-6">모임 정산을 관리하려면 로그인해주세요(관리자만 가능)</p>
+        <p className="text-lg text-muted-foreground mb-6">모임 정산을 관리하려면 로그인해주세요(관리자만 가능).</p>
         <Button asChild>
           <Link href="/login">로그인 페이지로 이동</Link>
         </Button>
@@ -132,25 +156,19 @@ export default function DashboardPage() {
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <LineChart className="w-6 h-6 text-primary" />
-              최근 활동 요약 (예시)
+              최근 활동 요약
             </CardTitle>
-            <CardDescription>최근 모임 및 지출에 대한 간략한 개요입니다.</CardDescription>
+            <CardDescription>최근 모임 및 회비 잔액에 대한 간략한 개요입니다.</CardDescription>
           </CardHeader>
-          <CardContent className="grid md:grid-cols-2 gap-6">
+          <CardContent className="space-y-4"> {/* Changed from grid to space-y for vertical stacking */}
             <div>
-              <h3 className="font-semibold mb-2">지난 모임 정산 현황</h3>
-              <p className="text-sm text-muted-foreground">지난 주 모임 '한강 피크닉'에서 총 50,000원 지출, 1인당 12,500원 정산 완료.</p>
-               <Image 
-                src="https://placehold.co/600x300.png" 
-                alt="Sample Chart Placeholder" 
-                width={600} 
-                height={300} 
-                className="mt-4 rounded-lg shadow-sm"
-                data-ai-hint="bar chart finance"
-              />
+              <h3 className="font-semibold mb-2 text-lg">지난 모임 정산 현황</h3>
+              <p className="text-sm text-muted-foreground">
+                {recentMeetingSummary === null ? "요약 로딩 중..." : recentMeetingSummary}
+              </p>
             </div>
             <div>
-              <h3 className="font-semibold mb-2">회비 잔액</h3>
+              <h3 className="font-semibold mb-2 text-lg">회비 잔액</h3>
               {reserveBalance !== null ? (
                 <p className="text-3xl font-bold text-primary">₩{reserveBalance.toLocaleString()}</p>
               ) : (
