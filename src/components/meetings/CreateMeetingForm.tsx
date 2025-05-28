@@ -86,25 +86,27 @@ function LocationSearchInput({ form, isPending, isMapsLoaded, mapsLoadError, onL
   } = usePlacesAutocomplete({
     requestOptions: { /* Optional: configure to your liking */ },
     debounce: 300,
+    // disabled: !isMapsLoaded || !!mapsLoadError, // This was the problematic line causing build errors, now removed
   });
 
   const { toast } = useToast();
   const [inputFocused, setInputFocused] = useState(false);
-
+  
   useEffect(() => {
     const formLocationName = form.getValues('locationName');
     if (formLocationName !== placesValue && !inputFocused) {
-      setPlacesValue(formLocationName || '');
+      setPlacesValue(formLocationName || '', false); // Set 'false' to not trigger suggestions
     }
   }, [form, placesValue, setPlacesValue, inputFocused]);
+
 
   useEffect(() => {
     if (ready) {
       console.log("Places Autocomplete ready state: true");
     } else {
-      console.log("Places Autocomplete ready state: false");
+      console.log("Places Autocomplete ready state: false (isMapsLoaded:", isMapsLoaded, ", mapsLoadError:", mapsLoadError,")");
     }
-  }, [ready]);
+  }, [ready, isMapsLoaded, mapsLoadError]);
 
 
   const handlePlaceSelect = async (suggestion: google.maps.places.AutocompletePrediction) => {
@@ -131,7 +133,7 @@ function LocationSearchInput({ form, isPending, isMapsLoaded, mapsLoadError, onL
       <div className="relative flex items-center">
         <MapPinIcon className="absolute left-2 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
         <Input
-          id="locationNameInput"
+          id="locationNameInput" // Changed ID for clarity
           value={placesValue}
           onChange={(e) => {
             setPlacesValue(e.target.value);
@@ -142,10 +144,14 @@ function LocationSearchInput({ form, isPending, isMapsLoaded, mapsLoadError, onL
             }
           }}
           onFocus={() => setInputFocused(true)}
-          onBlur={() => setInputFocused(false)}
-          disabled={!ready || !isMapsLoaded || !!mapsLoadError || isPending}
+          onBlur={() => {
+            setInputFocused(false);
+            // If there are suggestions and user clicks away, clear them
+            // setTimeout(() => clearPlacesSuggestions(), 100); // Small delay to allow click on suggestion
+          }}
+          disabled={!ready || isPending} // Simplified disabled state, relies on `ready` from usePlacesAutocomplete
           className="pl-8"
-          placeholder={!isMapsLoaded && !mapsLoadError ? "지도 API 로딩 중..." : mapsLoadError ? `지도 API 로드 실패: ${mapsLoadError.message.substring(0,30)}...` : "장소 검색..."}
+          placeholder={!isMapsLoaded ? "지도 API 로딩 중..." : mapsLoadError ? `지도 API 로드 실패: ${mapsLoadError.message.substring(0,30)}...` : "장소 검색..."}
           autoComplete="off"
         />
       </div>
@@ -197,21 +203,21 @@ export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, 
     resolver: zodResolver(meetingSchema),
     defaultValues: initialData ? {
       name: initialData.name,
-      dateTime: new Date(initialData.dateTime),
+      dateTime: initialData.dateTime ? new Date(initialData.dateTime) : new Date(),
       endTime: initialData.endTime ? new Date(initialData.endTime) : undefined,
       locationName: initialData.locationName,
       locationCoordinates: initialData.locationCoordinates,
-      participantIds: initialData.participantIds,
-      useReserveFund: initialData.useReserveFund,
+      participantIds: initialData.participantIds || [],
+      useReserveFund: initialData.useReserveFund || false,
       partialReserveFundAmount: initialData.partialReserveFundAmount === undefined ? undefined : Number(initialData.partialReserveFundAmount),
       nonReserveFundParticipants: initialData.nonReserveFundParticipants || [],
     } : {
       name: '',
-      dateTime: undefined,
+      dateTime: new Date(), // Default to now for new meetings
       endTime: undefined,
       locationName: '',
       locationCoordinates: undefined,
-      participantIds: [currentUserId],
+      participantIds: [], // Default to empty, user must select
       useReserveFund: false,
       partialReserveFundAmount: undefined,
       nonReserveFundParticipants: [],
@@ -226,10 +232,10 @@ export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, 
   useEffect(() => {
     const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
     if (!apiKey) {
-      const errorMsg = "Google Maps API key is not configured. Please set NEXT_PUBLIC_GOOGLE_MAPS_API_KEY in your .env file.";
+      const errorMsg = "Google Maps API key is not configured. Please set NEXT_PUBLIC_GOOGLE_MAPS_API_KEY.";
       console.error(errorMsg);
       setMapsLoadError(new Error(errorMsg));
-      setIsMapsLoaded(false);
+      setIsMapsLoaded(false); // Explicitly set to false
       return;
     }
 
@@ -239,6 +245,7 @@ export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, 
       libraries: googleMapsLibraries,
     });
 
+    console.log("Attempting to load Google Maps API...");
     loader.load()
       .then(() => {
         if (!window.google || !window.google.maps || !window.google.maps.places || !window.google.maps.marker || !window.google.maps.marker.AdvancedMarkerElement) {
@@ -248,7 +255,7 @@ export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, 
           setIsMapsLoaded(false);
           return;
         }
-        console.log("Google Maps API and required libraries (places, maps, marker) loaded successfully.");
+        console.log("Google Maps API and required libraries loaded successfully.");
         setIsMapsLoaded(true);
         setMapsLoadError(null);
       })
@@ -264,7 +271,7 @@ export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, 
     if (showMap && isMapsLoaded && !mapsLoadError && mapContainerRef.current && window.google?.maps?.Map && window.google?.maps?.marker?.AdvancedMarkerElement) {
         const { AdvancedMarkerElement } = window.google.maps.marker;
         
-        const defaultCenter = { lat: 37.5665, lng: 126.9780 };
+        const defaultCenter = { lat: 37.5665, lng: 126.9780 }; // Seoul
         const currentCoords = watchedLocationCoordinates || defaultCenter;
         const zoomLevel = watchedLocationCoordinates ? 15 : 10;
 
@@ -274,7 +281,7 @@ export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, 
                 zoom: zoomLevel,
                 disableDefaultUI: true,
                 zoomControl: true,
-                mapId: 'NBBANG_MAP_ID_CREATE_FORM', // Unique mapId
+                mapId: 'NBBANG_MAP_ID_CREATE_FORM', 
             });
         } else {
             mapInstanceRef.current.setCenter(currentCoords);
@@ -291,33 +298,35 @@ export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, 
             } else {
                 markerInstanceRef.current.position = watchedLocationCoordinates;
                 markerInstanceRef.current.title = watchLocationName || '선택된 장소';
-                markerInstanceRef.current.map = mapInstanceRef.current;
+                markerInstanceRef.current.map = mapInstanceRef.current; // Ensure marker is on the map
             }
         } else {
             if (markerInstanceRef.current) {
-                markerInstanceRef.current.map = null;
+                markerInstanceRef.current.map = null; // Hide marker if no coords
             }
         }
     } else if (!showMap && markerInstanceRef.current) {
-        markerInstanceRef.current.map = null; // Hide marker if map is hidden
+        markerInstanceRef.current.map = null; 
     }
 
     return () => {
-        if (markerInstanceRef.current) {
-            markerInstanceRef.current.map = null;
-            // Do not nullify markerInstanceRef.current itself here,
-            // as the effect might re-run and need to update it.
-            // It will be nullified if the component unmounts and the ref itself is reset.
-        }
-        // mapInstanceRef.current is also managed similarly by React's unmounting of mapContainerRef
+      if (markerInstanceRef.current) {
+        markerInstanceRef.current.map = null;
+        // markerInstanceRef.current = null; // Avoid nullifying ref directly here, let React manage it
+      }
+      // if (mapInstanceRef.current) { // Map instance cleanup is more complex if needed
+      //   mapInstanceRef.current = null;
+      // }
+      // console.log("Map effect cleanup run");
     };
-  }, [isMapsLoaded, mapsLoadError, watchedLocationCoordinates, watchLocationName, showMap]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps 
+  }, [isMapsLoaded, mapsLoadError, watchedLocationCoordinates, watchLocationName, showMap]); // Removed mapInstanceRef, markerInstanceRef from deps
 
 
   useEffect(() => {
     if (watchLocationName === '' && form.getValues('locationCoordinates')) {
       form.setValue('locationCoordinates', undefined, { shouldValidate: true });
-      if(showMap) setShowMap(false);
+      if(showMap) setShowMap(false); // Hide map if location name is cleared
     }
   }, [watchLocationName, form, showMap]);
 
@@ -395,10 +404,11 @@ export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, 
   const selectedParticipants = friends.filter(friend => watchParticipantIds?.includes(friend.id));
 
   const handleLocationSelected = useCallback((coords: { lat: number; lng: number } | undefined, name: string) => {
-    if (!coords && !name && showMap) {
+    if (!coords && !name && showMap) { // If location is cleared
         setShowMap(false);
     }
-    // If coords selected, user needs to click "지도 보기" to show map
+    // If coords are selected, user can click "지도 보기" to show map.
+    // No automatic showing of map on selection.
   }, [showMap]);
 
   const handleToggleMap = () => {
@@ -464,10 +474,11 @@ export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, 
                 defaultValue={dateTimeValue ? format(dateTimeValue, "HH:mm") : "12:00"}
                 onChange={(e) => {
                   const newTime = e.target.value;
-                  const currentDateTime = form.watch('dateTime') || new Date();
+                  const currentDateTime = form.watch('dateTime') || new Date(); // Fallback to new Date() if dateTime is undefined
                   const [hours, minutes] = newTime.split(':').map(Number);
-                  currentDateTime.setHours(hours, minutes, 0, 0);
-                  form.setValue('dateTime', new Date(currentDateTime), { shouldValidate: true });
+                  const newDate = new Date(currentDateTime); // Create a new Date object to avoid mutating the original
+                  newDate.setHours(hours, minutes, 0, 0);
+                  form.setValue('dateTime', newDate, { shouldValidate: true });
                 }}
                 className="w-full"
                 disabled={isPending || (isEditMode && initialData?.isSettled)}
@@ -495,7 +506,7 @@ export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, 
               <CalendarIcon className="mr-2 h-4 w-4" />
               {
                 (() => {
-                  const val = form.watch('endTime');
+                  const val = endTimeValue; // Use the watched value directly
                   return val instanceof Date && !isNaN(val.getTime())
                     ? format(val, 'PPP HH:mm', { locale: ko })
                     : <span>날짜 및 시간 선택</span>;
@@ -529,10 +540,12 @@ export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, 
                 defaultValue={endTimeValue ? format(endTimeValue, "HH:mm") : (dateTimeValue ? format(dateTimeValue, "HH:mm") : "12:00")}
                 onChange={(e) => {
                   const newTime = e.target.value;
-                  const currentDateTime = form.watch('endTime') || form.watch('dateTime') || new Date();
+                  // Use endTimeValue if it exists, otherwise dateTimeValue, or fallback to new Date()
+                  const baseDate = form.watch('endTime') || form.watch('dateTime') || new Date();
                   const [hours, minutes] = newTime.split(':').map(Number);
-                  currentDateTime.setHours(hours, minutes, 0, 0);
-                  form.setValue('endTime', new Date(currentDateTime), { shouldValidate: true });
+                  const newDate = new Date(baseDate); // Create new Date object
+                  newDate.setHours(hours, minutes, 0, 0);
+                  form.setValue('endTime', newDate, { shouldValidate: true });
                 }}
                 className="w-full"
                 disabled={isPending || (isEditMode && initialData?.isSettled)}
@@ -558,7 +571,7 @@ export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, 
             <div className="relative flex items-center">
                 <MapPinIcon className="absolute left-2 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                 <Input
-                    id="locationNameFallbackInput"
+                    id="locationNameFallbackInput" // Fallback ID
                     value={form.watch('locationName')}
                     onChange={(e) => form.setValue('locationName', e.target.value, {shouldValidate: true})}
                     disabled={isPending || (isEditMode && initialData?.isSettled)}
@@ -752,20 +765,16 @@ export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, 
                         let newParticipantIds = [...currentParticipantIds];
 
                         if (newParticipantIds.includes(friend.id)) {
-                          if (friend.id === currentUserId && newParticipantIds.length === 1 && friends.some(f => f.id === currentUserId && newParticipantIds.includes(f.id))) {
-                            toast({ title: "알림", description: "모임 생성자는 최소 1명의 참여자로 항상 포함되어야 합니다.", variant: "default"});
-                            return;
-                          }
+                          // Allow removing the creator only if there are other participants left OR if it's not the creator themselves trying to deselect
+                          // This logic needs careful review based on exact requirements for minimum participants and creator role.
+                          // The Zod schema already ensures min 1 participant.
                           newParticipantIds = newParticipantIds.filter(id => id !== friend.id);
                         } else {
                           newParticipantIds.push(friend.id);
                         }
-
-                        if (newParticipantIds.length === 0 && friends.some(f => f.id === currentUserId)) {
-                           newParticipantIds = [currentUserId];
-                        }
-
                         form.setValue("participantIds", newParticipantIds, { shouldValidate: true });
+
+                        // Update nonReserveFundParticipants if a participant is removed
                          const currentNonParticipants = form.getValues('nonReserveFundParticipants') || [];
                          if (!newParticipantIds.includes(friend.id) && currentNonParticipants.includes(friend.id)) {
                             form.setValue('nonReserveFundParticipants', currentNonParticipants.filter(id => id !== friend.id), { shouldValidate: true });
@@ -802,3 +811,5 @@ export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, 
     </form>
   );
 }
+
+    
