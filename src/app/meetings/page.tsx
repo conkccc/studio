@@ -37,13 +37,12 @@ export default function MeetingsPage() {
 
  useEffect(() => {
     const fetchData = async () => {
-      if (authLoading && !currentUser) { // Wait for auth to load, but proceed if user is not logged in (for public view)
-        setMeetingsLoading(false); // Stop loading if auth hasn't determined user yet but we might show public content
-        return;
-      }
-      if(!authLoading && !currentUser && !isAdmin) {
-        // Non-admin, non-logged in users can see meetings, but no special fetching logic based on user role here yet
-        // This is more for a scenario where getMeetings might differ for admin vs public. For now, it's the same.
+      // Wait for auth to load, but proceed if user is not logged in (for public view)
+      // Proceed if auth is done or if not logged in (public can see meetings)
+      if (authLoading && currentUser) { 
+        // If auth is still loading AND there's a current user, it might mean admin status isn't confirmed.
+        // However, getMeetings itself doesn't differentiate by admin for fetching, only UI does.
+        // So, we can proceed. If authLoading is true and currentUser is null, middleware handles redirect.
       }
 
 
@@ -52,7 +51,7 @@ export default function MeetingsPage() {
         // Firestore version of getMeetings returns an object { meetings, totalCount, availableYears }
         const fetchedMeetingsData = await getMeetings({
           page: currentPage,
-          limit: ITEMS_PER_PAGE,
+          limitParam: ITEMS_PER_PAGE, // Corrected parameter name
           year: selectedYear,
         });
 
@@ -72,9 +71,24 @@ export default function MeetingsPage() {
       }
     };
 
-    fetchData();
+    // Only run fetchData if auth is not loading OR if there's no current user (public access)
+    if (!authLoading || !currentUser) {
+        fetchData();
+    } else if (authLoading && !currentUser) {
+        // If still loading auth and no user, likely to be redirected by middleware or show login prompt
+        // We might not want to fetch data yet, or let public pages fetch regardless of user.
+        // For now, if auth is loading AND there's no user, we also don't fetch to avoid premature calls.
+        // But typically, public pages should fetch data regardless of auth state.
+        // Let's adjust to fetch if not authLoading, OR if authLoading but it's for a public view (no user yet)
+        // Simplified: If auth is done, fetch. Or if it's loading but for a public view, allow.
+        // The condition "(!authLoading || !currentUser)" covers most cases.
+        // If authLoading is true and currentUser is also true, implies admin check might be pending.
+        // If authLoading is true and currentUser is false, implies public or about to be redirected.
+        setMeetingsLoading(false); // Stop meetings loading if auth is determining user state for protected view.
+    }
 
-  }, [authLoading, currentUser, isAdmin, currentPage, selectedYear, allFriends.length]); // Added isAdmin and currentUser as dependencies
+
+  }, [authLoading, currentUser, isAdmin, currentPage, selectedYear, allFriends.length]);
 
   const totalPages = useMemo(() => {
     return Math.ceil(totalMeetingCount / ITEMS_PER_PAGE);
@@ -82,7 +96,7 @@ export default function MeetingsPage() {
 
   const dataLoading = authLoading || meetingsLoading;
 
-  if (dataLoading) {
+  if (dataLoading && currentUser) { // Only show full page loader if user is logged in and waiting for data
     return (
       <div className="flex justify-center items-center min-h-[calc(100vh-150px)]">
         <p className="text-xl text-muted-foreground">모임 목록 로딩 중...</p>
@@ -90,17 +104,14 @@ export default function MeetingsPage() {
     );
   }
   
-  // This check might be redundant if getMeetings always fetches friends or if friends are fetched once.
-  // However, keeping it as a safeguard if allFriends fetching is conditional.
-  if (meetings.length > 0 && allFriends.length === 0 && !authLoading && !meetingsLoading ) {
-      // This state implies meetings are loaded but friends are not, which is unusual if friends are needed for MeetingCard
-      // This might indicate a state where `getFriends` failed or hasn't completed for some reason
-       return (
-         <div className="flex justify-center items-center min-h-[calc(100vh-150px)]">
-           <p className="text-xl text-muted-foreground">친구 정보 로딩 중...</p>
-         </div>
-       );
-    }
+  // Fallback for when data might be loading but for a public view, or quick flicker
+  if (meetingsLoading && !currentUser && !authLoading){
+     return (
+      <div className="flex justify-center items-center min-h-[calc(100vh-150px)]">
+        <p className="text-xl text-muted-foreground">모임 목록 로딩 중...</p>
+      </div>
+    );
+  }
 
 
   return (
@@ -133,3 +144,4 @@ export default function MeetingsPage() {
     </div>
   );
 }
+
