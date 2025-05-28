@@ -3,7 +3,7 @@
 
 import type { Expense, Friend, Meeting } from '@/lib/types';
 import React, { useMemo } from 'react';
-import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/card';
+import { Card, CardHeader, CardDescription, CardContent, CardFooter } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { TrendingUp, TrendingDown, UserCircle, PiggyBank, Info, Users, FileText } from 'lucide-react';
@@ -62,7 +62,7 @@ export function PaymentSummary({ meeting, expenses, participants, allFriends }: 
 
   const benefitingParticipantIds = useMemo(() => {
     if (!meeting.useReserveFund || !meeting.partialReserveFundAmount || meeting.partialReserveFundAmount <= 0) {
-      return new Set<string>();
+      return new Set<string>(participants.map(p => p.id)); 
     }
     return new Set(
       participants
@@ -78,12 +78,13 @@ export function PaymentSummary({ meeting, expenses, participants, allFriends }: 
     let fundAmountForMeeting = 0;
     let description = "회비 사용 설정 안됨";
 
-    if (meeting.useReserveFund && totalSpent > 0 && meeting.partialReserveFundAmount && meeting.partialReserveFundAmount > 0) {
+    if (meeting.useReserveFund && meeting.partialReserveFundAmount && meeting.partialReserveFundAmount > 0) {
         fundAmountForMeeting = meeting.partialReserveFundAmount;
         description = `모임 회비 부분 사용 총액: ${fundAmountForMeeting.toLocaleString(undefined, {maximumFractionDigits: 0})}원`;
-         if (fundAmountForMeeting > totalSpent) {
-            fundAmountForMeeting = totalSpent;
-            description = `모임 회비 부분 사용 총액: ${fundAmountForMeeting.toLocaleString(undefined, {maximumFractionDigits: 0})}원 (총 지출액으로 제한됨)`;
+        if (meeting.isSettled && fundAmountForMeeting > totalSpent) {
+            // This case is tricky. If settled, the amount recorded would be capped by totalSpent.
+            // For display, we show what was set as 'partialReserveFundAmount'.
+            // The actual deduction already happened based on Math.min(partialReserveFundAmount, totalSpent) if logic is robust.
         }
     } else if (meeting.useReserveFund && (!meeting.partialReserveFundAmount || meeting.partialReserveFundAmount <= 0)) {
         description = "회비 사용하도록 설정되었으나, 사용할 금액이 지정되지 않았거나 0원입니다.";
@@ -91,21 +92,25 @@ export function PaymentSummary({ meeting, expenses, participants, allFriends }: 
         description = "총 지출이 없어 회비가 사용되지 않았습니다.";
     }
 
+    const actualFundUsedForCalculation = meeting.isSettled && meeting.useReserveFund && meeting.partialReserveFundAmount
+        ? Math.min(meeting.partialReserveFundAmount, totalSpent)
+        : (meeting.useReserveFund && meeting.partialReserveFundAmount ? meeting.partialReserveFundAmount : 0);
 
-    const perPersonFundBenefit = benefitingParticipantIds.size > 0 && fundAmountForMeeting > 0
-      ? fundAmountForMeeting / benefitingParticipantIds.size
+    const perPersonFundBenefit = benefitingParticipantIds.size > 0 && actualFundUsedForCalculation > 0
+      ? actualFundUsedForCalculation / benefitingParticipantIds.size
       : 0;
 
-    const finalNetCostAfterFundPerBenefitingParticipant = initialPerPersonCost - perPersonFundBenefit;
+    const finalNetCostPerBenefitingParticipant = initialPerPersonCost - perPersonFundBenefit;
 
     return { 
-      totalSpent: totalSpent, 
-      initialPerPersonCost: initialPerPersonCost,
+      totalSpent, 
+      initialPerPersonCost,
       fundApplicationDetails: {
-        amount: fundAmountForMeeting,
-        description: description
+        amount: actualFundUsedForCalculation,
+        description
       },
-      finalNetCostAfterFundPerBenefitingParticipant: parseFloat(finalNetCostAfterFundPerBenefitingParticipant.toFixed(2)),
+      finalNetCostPerBenefitingParticipant: parseFloat(finalNetCostPerBenefitingParticipant.toFixed(2)),
+      perPersonFundBenefit: parseFloat(perPersonFundBenefit.toFixed(2)),
     };
   }, [expenses, meeting, benefitingParticipantIds, participants]);
 
@@ -114,10 +119,9 @@ export function PaymentSummary({ meeting, expenses, participants, allFriends }: 
     const totalFundContributionForMeeting = derivedDetails.fundApplicationDetails.amount;
 
     if (meeting.useReserveFund && totalFundContributionForMeeting > 0.01 && benefitingParticipantIds.size > 0) {
-        const discountPerBeneficiary = totalFundContributionForMeeting / benefitingParticipantIds.size;
+        const discountPerBeneficiary = derivedDetails.perPersonFundBenefit;
         benefitingParticipantIds.forEach(id => {
-             // Ensure this addition doesn't make them receive money if they didn't pay anything initially
-            // This logic is more about reducing what they owe.
+            // Ensure ledger entry exists for the beneficiary
             calculatedFinalLedger[id] = (calculatedFinalLedger[id] || 0) + discountPerBeneficiary;
         });
     }
@@ -125,52 +129,48 @@ export function PaymentSummary({ meeting, expenses, participants, allFriends }: 
     const payoutsList: FundPayoutToPayer[] = [];
     if (totalFundContributionForMeeting > 0.01) {
         let fundRemainingToPayout = totalFundContributionForMeeting;
-        // Payers are those who initially have a positive balance in initialPaymentLedger (they are owed money by the group)
         const sortedInitialPayers = Object.entries(initialPaymentLedger)
             .filter(([_, amount]) => amount > 0.01) 
-            .sort(([, aAmount], [, bAmount]) => bAmount - aAmount) // Pay largest creditors first
+            .sort(([, aAmount], [, bAmount]) => bAmount - aAmount) 
             .map(([id]) => id);
 
         for (const payerId of sortedInitialPayers) {
             if (fundRemainingToPayout <= 0.01) break;
-            // Amount owed to this specific payer by the group *before* fund distribution to beneficiaries
             const amountOwedToPayerByGroupInitially = initialPaymentLedger[payerId] || 0;
-            // The fund can reimburse this payer up to what they initially paid out or what's left in the fund
             const reimbursementAmount = Math.min(amountOwedToPayerByGroupInitially, fundRemainingToPayout);
 
             if (reimbursementAmount > 0.01) {
                 payoutsList.push({ to: payerId, amount: reimbursementAmount });
                 fundRemainingToPayout -= reimbursementAmount;
-                // This reimbursement is from the fund, so it reduces what the group effectively owes the payer.
-                // But finalLedgerForDisplay already accounts for benefit to owers. This payout list is for info.
             }
         }
     }
     
     return { payoutsList, finalLedgerForDisplay: calculatedFinalLedger };
 
-  }, [initialPaymentLedger, meeting, benefitingParticipantIds, derivedDetails.fundApplicationDetails.amount]);
+  }, [initialPaymentLedger, meeting.useReserveFund, benefitingParticipantIds, derivedDetails.fundApplicationDetails.amount, derivedDetails.perPersonFundBenefit]);
   
   const simplifiedDebts = useMemo(() => {
     const balances: LedgerEntry[] = Object.entries(finalLedgerForDisplay)
       .map(([friendId, amount]) => ({ friendId, amount: parseFloat(amount.toFixed(2)) }))
-      .sort((a, b) => a.amount - b.amount); // Owers first, then Payers
+      .sort((a, b) => a.amount - b.amount); 
 
     const transactions: { from: string; to: string; amount: number }[] = [];
-    let payersIdx = balances.length -1; // Start with largest creditor
-    let owersIdx = 0; // Start with largest debtor
+    let payersIdx = balances.length -1; 
+    let owersIdx = 0; 
 
     while (owersIdx < payersIdx) {
-        const payer = balances[payersIdx]; // Person who should receive money
-        const ower = balances[owersIdx];  // Person who should pay money
+        const payer = balances[payersIdx]; 
+        const ower = balances[owersIdx];  
         
-        // Skip if payer doesn't need to receive or ower doesn't need to pay (or tiny amounts)
+        if (!payer || !ower) break; // Safety check
+
         if (payer.amount < 0.01) { payersIdx--; continue; }
         if (ower.amount > -0.01) { owersIdx++; continue; }
 
         const amountToTransfer = Math.min(payer.amount, -ower.amount);
 
-        if (amountToTransfer > 0.01) { // Ensure meaningful transfer
+        if (amountToTransfer > 0.01) { 
             transactions.push({
                 from: ower.friendId,
                 to: payer.friendId,
@@ -180,9 +180,7 @@ export function PaymentSummary({ meeting, expenses, participants, allFriends }: 
             ower.amount += amountToTransfer;
         }
         
-        // If payer is fully paid, move to next payer
         if (Math.abs(payer.amount) < 0.01) payersIdx--;
-        // If ower has paid all dues, move to next ower
         if (Math.abs(ower.amount) < 0.01) owersIdx++;
     }
     return transactions;
@@ -196,7 +194,6 @@ export function PaymentSummary({ meeting, expenses, participants, allFriends }: 
     return (
       <Card>
         <CardHeader>
-          <CardTitle>정산 요약</CardTitle>
           <CardDescription>모임의 최종 정산 내역입니다.</CardDescription>
         </CardHeader>
         <CardContent>
@@ -209,7 +206,7 @@ export function PaymentSummary({ meeting, expenses, participants, allFriends }: 
   return (
     <Card>
       <CardHeader>
-        <CardTitle>정산 요약</CardTitle>
+        {/* <CardTitle>정산 요약</CardTitle>  REMOVED THIS LINE */}
         <CardDescription className="space-y-1 mt-1">
             <div>
                 총 지출: {derivedDetails.totalSpent.toLocaleString(undefined, {maximumFractionDigits: 0})}원
@@ -225,7 +222,7 @@ export function PaymentSummary({ meeting, expenses, participants, allFriends }: 
             </div>
             {derivedDetails.fundApplicationDetails.amount > 0.01 && benefitingParticipantIds.size > 0 && participants.length > 0 && (
               <div>
-                혜택 참여자 1인당 최종 부담액 (회비 적용 후): {derivedDetails.finalNetCostAfterFundPerBenefitingParticipant.toLocaleString(undefined, {maximumFractionDigits: 0})}원
+                혜택 참여자 1인당 최종 부담액 (회비 적용 후): {derivedDetails.finalNetCostPerBenefitingParticipant.toLocaleString(undefined, {maximumFractionDigits: 0})}원
               </div>
             )}
         </CardDescription>
@@ -243,7 +240,7 @@ export function PaymentSummary({ meeting, expenses, participants, allFriends }: 
                     개인별 최종 정산 현황
                 </h3>
                 <CardDescription>회비 지원이 모두 반영된 후의 개인별 최종 정산액입니다.</CardDescription>
-                <ScrollArea className="pr-3 mt-2"> {/* Removed max-h */}
+                <ScrollArea className="pr-3 mt-2">
                 <Table>
                     <TableHeader>
                     <TableRow>
@@ -258,7 +255,7 @@ export function PaymentSummary({ meeting, expenses, participants, allFriends }: 
                         <TableCell className="font-medium flex items-center">
                             <UserCircle className="h-4 w-4 mr-2 opacity-70"/>
                             {getFriendNickname(friendId)}
-                            {meeting.useReserveFund && meeting.partialReserveFundAmount && meeting.partialReserveFundAmount > 0 && !benefitingParticipantIds.has(friendId) && (
+                            {meeting.useReserveFund && derivedDetails.fundApplicationDetails.amount > 0 && !benefitingParticipantIds.has(friendId) && (
                                 <Badge variant="outline" className="ml-2 text-xs">회비 미적용</Badge>
                             )}
                         </TableCell>
@@ -284,7 +281,7 @@ export function PaymentSummary({ meeting, expenses, participants, allFriends }: 
                 </Table>
                 </ScrollArea>
             </div>
-
+            
             {simplifiedDebts.length > 0 && (
                 <div>
                     <h3 className="text-md font-semibold mb-2 flex items-center gap-1.5">
@@ -292,7 +289,7 @@ export function PaymentSummary({ meeting, expenses, participants, allFriends }: 
                         최종 송금 제안
                     </h3>
                     <CardDescription>개인 간 필요한 최종 송금 내역입니다.</CardDescription>
-                    <ScrollArea className="pr-3 mt-2"> {/* Removed max-h */}
+                    <ScrollArea className="pr-3 mt-2"> 
                         <Table>
                         <TableHeader>
                             <TableRow>
@@ -316,9 +313,6 @@ export function PaymentSummary({ meeting, expenses, participants, allFriends }: 
                     </ScrollArea>
                 </div>
             )}
-            {simplifiedDebts.length === 0 && expenses.length > 0 && derivedDetails.fundApplicationDetails.amount === 0 && ( 
-                <p className="text-center text-muted-foreground py-3">모든 정산이 완료되었거나 추가 송금이 필요하지 않습니다.</p>
-            )}
 
             {derivedDetails.fundApplicationDetails.amount > 0.01 && fundPayoutsToPayersList.length > 0 && (
               <div>
@@ -327,7 +321,7 @@ export function PaymentSummary({ meeting, expenses, participants, allFriends }: 
                   회비 지원 상세 (초기 결제자에게)
                 </h3>
                 <CardDescription>회비에서 각 초기 결제자에게 지원된 금액입니다. 이 내역은 위 개인별 정산 및 최종 송금 제안에 이미 반영되어 있습니다.</CardDescription>
-                <ScrollArea className="pr-3 mt-2"> {/* Removed max-h */}
+                <ScrollArea className="pr-3 mt-2">
                   <Table>
                     <TableHeader>
                       <TableRow>
@@ -351,6 +345,12 @@ export function PaymentSummary({ meeting, expenses, participants, allFriends }: 
                 </ScrollArea>
               </div>
             )}
+
+
+            {simplifiedDebts.length === 0 && expenses.length > 0 && ( 
+                <p className="text-center text-muted-foreground py-3">모든 정산이 완료되었거나 추가 송금이 필요하지 않습니다.</p>
+            )}
+
             </div>
         )}
       </CardContent>
@@ -358,7 +358,7 @@ export function PaymentSummary({ meeting, expenses, participants, allFriends }: 
         <CardFooter>
             <p className="text-xs text-muted-foreground">
                 참고: 소수점 계산으로 인해 10원 미만의 오차가 발생할 수 있습니다.
-                {meeting.useReserveFund && meeting.partialReserveFundAmount && meeting.partialReserveFundAmount > 0 && (
+                {meeting.useReserveFund && derivedDetails.fundApplicationDetails.amount > 0 && (
                      " 설정된 회비 사용액이 혜택 대상자들의 초기 부담금을 줄이는 데 사용됩니다."
                 )}
             </p>

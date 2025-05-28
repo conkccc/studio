@@ -36,7 +36,7 @@ export default function DashboardPage() {
             const totalSpent = expenses.reduce((sum, exp) => sum + exp.totalAmount, 0);
             const perPersonCost = latestMeeting.participantIds.length > 0 ? totalSpent / latestMeeting.participantIds.length : 0;
             
-            let summary = `최근 모임'${latestMeeting.name}'에서 ${latestMeeting.participantIds.length}명이 총 ${totalSpent.toLocaleString()}원 지출, 1인당 ${perPersonCost.toLocaleString(undefined, {maximumFractionDigits: 0})}원`;
+            let summary = `최근 모임 '${latestMeeting.name}'에서 ${latestMeeting.participantIds.length}명이 총 ${totalSpent.toLocaleString()}원 지출, 1인당 ${perPersonCost.toLocaleString(undefined, {maximumFractionDigits: 0})}원`;
             if (latestMeeting.isSettled) {
               summary += " 정산 완료.";
             } else if (expenses.length > 0) {

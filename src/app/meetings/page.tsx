@@ -11,7 +11,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import type { Meeting, Friend } from '@/lib/types';
 import { useSearchParams } from 'next/navigation';
 
-const ITEMS_PER_PAGE = 10;
+const ITEMS_PER_PAGE = 5;
 
 export default function MeetingsPage() {
   const { currentUser, isAdmin, loading: authLoading } = useAuth();
