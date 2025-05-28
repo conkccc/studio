@@ -3,11 +3,10 @@
 
 import type { Expense, Friend } from '@/lib/types';
 import React, { useState, useTransition } from 'react';
-// Card components are not used here, removed for cleanup
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/hooks/use-toast';
 import { deleteExpenseAction } from '@/lib/actions';
-import { UserCircle, Users, Edit3, Trash2, Loader2 } from 'lucide-react'; // CalendarClock removed
+import { UserCircle, Users, Edit3, Trash2, Loader2 } from 'lucide-react';
 import { format } from 'date-fns';
 import { ko } from 'date-fns/locale';
 import {
@@ -21,39 +20,39 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
-// import { EditExpenseDialog } from './EditExpenseDialog'; // Placeholder for edit functionality
+import { EditExpenseDialog } from './EditExpenseDialog'; 
 
 interface ExpenseItemProps {
   expense: Expense;
+  meetingId: string; // Added meetingId
   allFriends: Friend[];
-  participants: Friend[]; // Meeting participants
-  // currentUserId prop removed, will use canManage prop based on isAdmin
+  participants: Friend[]; 
   onExpenseUpdated: (updatedExpense: Expense) => void;
   onExpenseDeleted: (deletedExpenseId: string) => void;
   isMeetingSettled: boolean;
-  canManage: boolean; // New prop to determine if current user can manage this expense
+  canManage: boolean; 
 }
 
 export function ExpenseItem({ 
   expense, 
+  meetingId, // Use meetingId from props
   allFriends, 
   participants,
   onExpenseUpdated, 
   onExpenseDeleted,
   isMeetingSettled,
-  canManage // Use this prop
+  canManage
 }: ExpenseItemProps) {
   const payer = allFriends.find(f => f.id === expense.paidById);
   const { toast } = useToast();
   const [isDeleting, setIsDeleting] = useState(false);
-  const [isPending, startTransition] = useTransition();
+  const [isPending, startTransition] = useTransition(); // General pending state
 
   const getSplitDetails = () => {
     if (expense.splitType === 'equally') {
       const involved = expense.splitAmongIds
         ?.map(id => allFriends.find(f => f.id === id)?.nickname)
         .filter(Boolean) || [];
-      // If all participants in the meeting are involved, just say "모든 참여자"
       if (involved.length > 0 && involved.length === participants.length && participants.every(p => involved.includes(p.nickname))) {
         return "모든 참여자";
       }
@@ -73,7 +72,9 @@ export function ExpenseItem({
   };
 
   const handleDelete = () => {
-    if (isMeetingSettled) {
+    if (isMeetingSettled && canManage) { // Allow admin to delete even if settled, but it will unsettle the meeting
+        // This case will be handled by the action to unsettle if necessary
+    } else if (isMeetingSettled) {
       toast({ title: '오류', description: '정산이 완료된 모임의 지출은 삭제할 수 없습니다.', variant: 'destructive' });
       return;
     }
@@ -83,7 +84,7 @@ export function ExpenseItem({
     }
     setIsDeleting(true);
     startTransition(async () => {
-      const result = await deleteExpenseAction(expense.meetingId, expense.id);
+      const result = await deleteExpenseAction(expense.id, meetingId); // Pass expense.id and meetingId
       if (result.success) {
         toast({ title: '성공', description: '지출 항목이 삭제되었습니다.' });
         onExpenseDeleted(expense.id);
@@ -119,25 +120,23 @@ export function ExpenseItem({
       </div>
       {canManage && (
         <div className="mt-3 flex justify-end space-x-2">
-           {/* 
-            // EditExpenseDialog would also need to be adapted for canManage and isMeetingSettled.
-            <EditExpenseDialog 
-                expense={expense} 
-                participants={participants} 
-                allFriends={allFriends}
-                onExpenseUpdated={onExpenseUpdated} 
-                triggerButton={
-                    <Button variant="ghost" size="sm" className="text-xs" disabled={isPending || isDeleting || isMeetingSettled}>
-                        <Edit3 className="mr-1 h-3 w-3" /> 수정
-                    </Button>
-                }
-                meetingId={expense.meetingId}
-                canManage={canManage}
-            /> 
-            */}
+          <EditExpenseDialog 
+            expenseToEdit={expense}
+            meetingId={meetingId}
+            participants={participants}
+            allFriends={allFriends}
+            onExpenseUpdated={onExpenseUpdated}
+            canManage={canManage}
+            isMeetingSettled={isMeetingSettled}
+            triggerButton={
+              <Button variant="ghost" size="sm" className="text-xs" disabled={isPending || isDeleting || (isMeetingSettled && !canManage)}>
+                <Edit3 className="mr-1 h-3 w-3" /> 수정
+              </Button>
+            }
+          />
           <AlertDialog>
             <AlertDialogTrigger asChild>
-              <Button variant="ghost" size="sm" className="text-xs text-destructive hover:text-destructive" disabled={isPending || isDeleting || isMeetingSettled}>
+              <Button variant="ghost" size="sm" className="text-xs text-destructive hover:text-destructive" disabled={isPending || isDeleting || (isMeetingSettled && !canManage)}>
                 <Trash2 className="mr-1 h-3 w-3" /> 삭제
               </Button>
             </AlertDialogTrigger>
@@ -146,6 +145,7 @@ export function ExpenseItem({
                 <AlertDialogTitle>정말로 삭제하시겠습니까?</AlertDialogTitle>
                 <AlertDialogDescription>
                   이 작업은 되돌릴 수 없습니다. '{expense.description}' 지출 내역이 영구적으로 삭제됩니다.
+                  {isMeetingSettled && canManage && " 정산이 완료된 모임이므로, 이 지출을 삭제하면 모임이 '미정산' 상태로 변경되고 회비 사용 내역이 되돌려집니다."}
                 </AlertDialogDescription>
               </AlertDialogHeader>
               <AlertDialogFooter>
@@ -162,3 +162,5 @@ export function ExpenseItem({
     </li>
   );
 }
+
+    

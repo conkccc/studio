@@ -12,15 +12,12 @@ import {
   addExpense as dbAddExpense,
   updateExpense as dbUpdateExpense,
   deleteExpense as dbDeleteExpense,
-  getFriendById,
   getMeetingById as dbGetMeetingById,
   getExpensesByMeetingId as dbGetExpensesByMeetingId,
-  getFriends as dbGetFriends,
   getReserveFundBalance,
   setReserveFundBalance as dbSetReserveFundBalance,
   recordMeetingDeduction as dbRecordMeetingDeduction,
   revertMeetingDeduction as dbRevertMeetingDeduction,
-  getLoggedReserveFundTransactions,
   getExpenseById as dbGetExpenseById,
 } from './data-store';
 import type { Friend, Meeting, Expense, ReserveFundTransaction } from './types';
@@ -28,9 +25,9 @@ import type { Friend, Meeting, Expense, ReserveFundTransaction } from './types';
 // Friend Actions
 export async function createFriendAction(nickname: string, name?: string) {
   try {
-    const newFriend = await dbAddFriend(nickname, name);
+    const newFriend = await dbAddFriend({ nickname, name, createdAt: new Date() });
     revalidatePath('/friends');
-    revalidatePath('/meetings/new');
+    revalidatePath('/meetings/new'); // Revalidate new meeting page as friends list might change
     return { success: true, friend: newFriend };
   } catch (error) {
     console.error("createFriendAction Error:", error);
@@ -43,7 +40,7 @@ export async function updateFriendAction(id: string, updates: Partial<Omit<Frien
     const updatedFriend = await dbUpdateFriend(id, updates);
     if (!updatedFriend) throw new Error('Friend not found for update');
     revalidatePath('/friends');
-    revalidatePath(`/meetings`);
+    revalidatePath(`/meetings`); // Revalidate all meetings in case participant names changed
     return { success: true, friend: updatedFriend };
   } catch (error) {
     console.error("updateFriendAction Error:", error);
@@ -68,8 +65,8 @@ export async function createMeetingAction(meetingData: Omit<Meeting, 'id' | 'cre
   try {
     const newMeeting = await dbAddMeeting(meetingData);
     revalidatePath('/meetings');
-    revalidatePath('/');
-    revalidatePath(`/meetings/${newMeeting.id}`);
+    revalidatePath('/'); // Revalidate dashboard
+    revalidatePath(`/meetings/${newMeeting.id}`); // Revalidate specific new meeting page
     return { success: true, meeting: newMeeting };
   } catch (error) {
     console.error("createMeetingAction Error:", error);
@@ -77,19 +74,30 @@ export async function createMeetingAction(meetingData: Omit<Meeting, 'id' | 'cre
   }
 }
 
-export async function updateMeetingAction(id: string, updates: Partial<Omit<Meeting, 'id' | 'createdAt' | 'isSettled'>>) {
+export async function updateMeetingAction(id: string, updates: Partial<Omit<Meeting, 'id' | 'createdAt'>>) {
   try {
-    const updatedMeeting = await dbUpdateMeeting(id, updates);
-    if (!updatedMeeting) throw new Error('Meeting not found for update');
-
-    if (updatedMeeting.isSettled && (updates.useReserveFund !== undefined || updates.partialReserveFundAmount !== undefined)) {
-      await dbRevertMeetingDeduction(id);
-      await dbUpdateMeeting(id, { isSettled: false });
+    const currentMeeting = await dbGetMeetingById(id);
+    if (!currentMeeting) {
+      return { success: false, error: 'Meeting not found for update.' };
     }
+
+    // Check if reserve fund usage details are changing on an already settled meeting
+    const reserveFundDetailsChanged = updates.useReserveFund !== undefined || updates.partialReserveFundAmount !== undefined;
+
+    if (currentMeeting.isSettled && reserveFundDetailsChanged) {
+      await dbRevertMeetingDeduction(id); // Revert previous deduction if any
+      // Temporarily mark as unsettled. Finalize will handle new deduction if applicable.
+      updates.isSettled = false; 
+    }
+
+    const updatedMeeting = await dbUpdateMeeting(id, updates);
+    if (!updatedMeeting) throw new Error('Meeting not found after update attempt.');
 
     revalidatePath('/meetings');
     revalidatePath(`/meetings/${id}`);
-    revalidatePath('/reserve-fund');
+    if (reserveFundDetailsChanged || (updates.isSettled !== undefined && !updates.isSettled)) {
+      revalidatePath('/reserve-fund'); // Revalidate if fund usage or settlement status changes
+    }
     return { success: true, meeting: updatedMeeting };
   } catch (error) {
     console.error("updateMeetingAction Error:", error);
@@ -99,7 +107,7 @@ export async function updateMeetingAction(id: string, updates: Partial<Omit<Meet
 
 export async function deleteMeetingAction(id: string) {
   try {
-    await dbDeleteMeeting(id);
+    await dbDeleteMeeting(id); // This already handles reverting fund deduction in data-store
     revalidatePath('/meetings');
     revalidatePath('/');
     revalidatePath('/reserve-fund');
@@ -129,16 +137,16 @@ export async function createExpenseAction(expenseData: Omit<Expense, 'id' | 'cre
   }
 }
 
-export async function updateExpenseAction(meetingId: string, expenseId: string, updates: Partial<Omit<Expense, 'id' | 'createdAt' | 'meetingId'>>) {
+export async function updateExpenseAction(expenseId: string, meetingId: string, updates: Partial<Omit<Expense, 'id' | 'createdAt' | 'meetingId'>>) {
   try {
-    const updatedExpense = await dbUpdateExpense(meetingId, expenseId, updates);
+    const updatedExpense = await dbUpdateExpense(expenseId, meetingId, updates);
     if (!updatedExpense) throw new Error('Expense not found for update');
     revalidatePath(`/meetings/${meetingId}`);
 
     const meeting = await dbGetMeetingById(meetingId);
     if (meeting && meeting.isSettled) {
       await dbUpdateMeeting(meetingId, { isSettled: false });
-      await dbRevertMeetingDeduction(meetingId);
+      await dbRevertMeetingDeduction(meetingId); // Revert deduction for the meeting
       revalidatePath('/reserve-fund');
     }
     return { success: true, expense: updatedExpense };
@@ -148,9 +156,14 @@ export async function updateExpenseAction(meetingId: string, expenseId: string, 
   }
 }
 
-export async function deleteExpenseAction(meetingId: string, expenseId: string) {
+
+export async function deleteExpenseAction(expenseId: string, meetingId: string) {
   try {
-    await dbDeleteExpense(meetingId, expenseId);
+    const expense = await dbGetExpenseById(expenseId, meetingId);
+    if (!expense) {
+        return { success: false, error: "Expense not found." };
+    }
+    await dbDeleteExpense(expenseId, meetingId);
     revalidatePath(`/meetings/${meetingId}`);
 
     const meeting = await dbGetMeetingById(meetingId);
@@ -169,9 +182,9 @@ export async function deleteExpenseAction(meetingId: string, expenseId: string) 
 // Reserve Fund Actions
 export async function setReserveFundBalanceAction(newBalance: number, description?: string) {
   try {
-    await dbSetReserveFundBalance(newBalance, description || "수동 잔액 설정");
+    await dbSetReserveFundBalance(newBalance, description || "수동 잔액 조정");
     revalidatePath('/reserve-fund');
-    revalidatePath('/');
+    revalidatePath('/'); // For dashboard balance display
     return { success: true, newBalance };
   } catch (error) {
     console.error("setReserveFundBalanceAction Error:", error);
@@ -183,70 +196,68 @@ export async function finalizeMeetingSettlementAction(meetingId: string) {
   try {
     const meeting = await dbGetMeetingById(meetingId);
     if (!meeting) {
-      return { success: false, error: 'Meeting not found.' };
-    }
-
-    if (!meeting.useReserveFund) {
-      const settledMeeting = await dbUpdateMeeting(meetingId, { isSettled: true });
-      if (!settledMeeting) return { success: false, error: 'Failed to update meeting status.'};
-      revalidatePath(`/meetings/${meetingId}`);
-      return { success: true, meeting: settledMeeting, message: "모임 정산 완료 (회비 사용 안 함)." };
+      return { success: false, error: '모임을 찾을 수 없습니다.' };
     }
 
     if (meeting.isSettled) {
       return { success: true, meeting, message: "이미 정산이 확정된 모임입니다." };
     }
 
-    const amountToDeduct = meeting.partialReserveFundAmount;
-    if (!amountToDeduct || amountToDeduct <= 0) {
-      const settledMeetingNoFund = await dbUpdateMeeting(meetingId, { isSettled: true });
-      if (!settledMeetingNoFund) return { success: false, error: 'Failed to update meeting status.'};
-      revalidatePath(`/meetings/${meetingId}`);
-      return { success: true, meeting: settledMeetingNoFund, message: "사용할 회비 금액이 설정되지 않아, 회비 사용 없이 정산 완료." };
-    }
+    let message = `모임 (${meeting.name}) 정산이 확정되었습니다.`;
 
-    const expenses = await dbGetExpensesByMeetingId(meetingId);
-    if (expenses.length === 0) {
-      const settledMeetingNoExpenses = await dbUpdateMeeting(meetingId, { isSettled: true });
-       if (!settledMeetingNoExpenses) return { success: false, error: 'Failed to update meeting status.'};
-      revalidatePath(`/meetings/${meetingId}`);
-      return { success: true, meeting: settledMeetingNoExpenses, message: "지출 내역이 없어 회비 사용 없이 정산 완료." };
-    }
+    if (meeting.useReserveFund && meeting.partialReserveFundAmount && meeting.partialReserveFundAmount > 0) {
+      const expenses = await dbGetExpensesByMeetingId(meetingId);
+      if (expenses.length === 0) {
+         message = `모임 (${meeting.name}) 정산 확정. 지출 내역이 없어 회비는 사용되지 않았습니다.`;
+      } else {
+        const currentReserveBalance = await getReserveFundBalance();
+        const amountToDeduct = meeting.partialReserveFundAmount;
+        const actualDeduction = Math.min(amountToDeduct, currentReserveBalance);
 
-    const currentReserveBalance = await getReserveFundBalance();
-    const actualDeduction = Math.min(amountToDeduct, currentReserveBalance);
-    let message = `모임 (${meeting.name}) 정산 완료.`;
+        // Revert any previous deduction for this meeting to ensure idempotency before new record
+        await dbRevertMeetingDeduction(meeting.id); 
 
-    await dbRevertMeetingDeduction(meetingId); // Revert any previous deduction
-
-    if (actualDeduction > 0.001) { // Check for a meaningful amount
-      await dbRecordMeetingDeduction(meeting.id, meeting.name, actualDeduction, new Date(meeting.dateTime));
-      message = `모임 (${meeting.name}) 정산 완료. 회비에서 ${actualDeduction.toLocaleString()}원 사용.`;
-      if (actualDeduction < amountToDeduct) {
-        message += ` (회비 잔액 부족으로 부분 사용)`;
+        if (actualDeduction > 0.001) {
+          await dbRecordMeetingDeduction(meeting.id, meeting.name, actualDeduction, new Date(meeting.dateTime));
+          message = `모임 (${meeting.name}) 정산 확정. 회비에서 ${actualDeduction.toLocaleString()}원 사용.`;
+          if (actualDeduction < amountToDeduct) {
+            message += ` (회비 잔액 부족으로 부분 사용)`;
+          }
+        } else if (amountToDeduct > 0 && currentReserveBalance <= 0.001) {
+          message = `모임 (${meeting.name}) 정산 확정. 회비 잔액 부족으로 설정된 금액을 사용할 수 없습니다.`;
+        } else {
+          message = `모임 (${meeting.name}) 정산 확정. 설정된 회비 사용액이 없거나 0원입니다.`;
+        }
       }
-    } else if (amountToDeduct > 0 && currentReserveBalance <= 0) {
-      message = `모임 (${meeting.name}) 정산 완료. 회비 잔액 부족으로 설정된 금액을 사용할 수 없습니다.`;
     } else {
-      message = `모임 (${meeting.name}) 정산 완료. 설정된 회비 사용액이 없거나 0원입니다.`;
+      message = `모임 (${meeting.name}) 정산 확정. 회비 사용 설정이 되어있지 않습니다.`;
     }
-
+    
     const updatedMeeting = await dbUpdateMeeting(meetingId, { isSettled: true });
     if (!updatedMeeting) {
-      // Attempt to revert deduction if marking as settled failed, though this might be complex
-      // For simplicity, we just return an error here. Proper transactionality would be better.
-      return { success: false, error: 'Failed to mark meeting as settled after fund transaction.' };
+      // This case should ideally not happen if the meeting existed before.
+      // If it does, an attempt to revert any newly recorded deduction might be needed,
+      // but it's complex without full transaction support across actions.
+      return { success: false, error: '정산 상태 업데이트에 실패했습니다.' };
     }
 
     revalidatePath(`/meetings/${meetingId}`);
     revalidatePath('/reserve-fund');
-    revalidatePath('/');
+    revalidatePath('/'); // For dashboard balance display
     return { success: true, meeting: updatedMeeting, message };
 
   } catch (error) {
     console.error("finalizeMeetingSettlementAction Error:", error);
-    const errorMessage = error instanceof Error ? error.message : 'Failed to finalize meeting settlement due to an unexpected error.';
-    // Potentially try to revert any partial changes if possible, though complex without transactions
+    const errorMessage = error instanceof Error ? error.message : '정산 확정 중 예기치 않은 오류가 발생했습니다.';
+    // Attempt to revert meeting to unsettled if an error occurred after potential DB changes
+    try {
+        await dbUpdateMeeting(meetingId, {isSettled: false});
+        await dbRevertMeetingDeduction(meetingId);
+    } catch (revertError) {
+        console.error("Failed to revert settlement status after error:", revertError);
+    }
     return { success: false, error: errorMessage };
   }
 }
+
+    

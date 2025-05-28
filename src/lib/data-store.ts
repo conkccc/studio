@@ -32,14 +32,19 @@ const RESERVE_FUND_TRANSACTIONS_COLLECTION = 'reserveFundTransactions';
 // Helper function to convert Firestore snapshot to data with ID
 const dataFromSnapshot = <T extends { id: string }>(snapshot: any): T | undefined => {
   if (!snapshot.exists()) return undefined;
-  const data = snapshot.data();
+  let data = snapshot.data();
+
+  // Ensure data is an object before proceeding
+  if (typeof data !== 'object' || data === null) {
+    console.warn(`Snapshot data for ID ${snapshot.id} is not an object:`, data);
+    data = {}; // Default to an empty object to avoid errors
+  }
+
 
   const convertTimestampToDate = (field: any) => {
     if (field instanceof Timestamp) {
       return field.toDate();
     }
-    // Handle cases where dates might already be JS Date objects (e.g., after optimistic updates or if not stored as Timestamp)
-    // This might not be strictly necessary if all date fields are consistently Timestamps in Firestore.
     if (typeof field === 'string' || typeof field === 'number') {
         const d = new Date(field);
         if (!isNaN(d.getTime())) return d;
@@ -48,7 +53,7 @@ const dataFromSnapshot = <T extends { id: string }>(snapshot: any): T | undefine
   };
 
   const processedData: any = { ...data };
-  const dateFields: string[] = ['createdAt', 'dateTime', 'endTime', 'date']; // Common date fields
+  const dateFields: string[] = ['createdAt', 'dateTime', 'endTime', 'date']; 
 
   for (const field of dateFields) {
     if (processedData.hasOwnProperty(field) && processedData[field]) {
@@ -56,15 +61,12 @@ const dataFromSnapshot = <T extends { id: string }>(snapshot: any): T | undefine
     }
   }
   
-  // Specifically handle customSplits amounts if they were stored differently (not applicable here as they are numbers)
-
   return {
     ...processedData,
     id: snapshot.id,
   } as T;
 };
 
-// Helper function to convert Firestore query snapshot to array of data with IDs
 const arrayFromSnapshot = <T extends { id: string }>(snapshot: any): T[] => {
   return snapshot.docs.map((doc: any) => dataFromSnapshot<T>(doc)).filter((item: T | undefined): item is T => item !== undefined);
 };
@@ -85,19 +87,16 @@ export const getFriendById = async (id: string): Promise<Friend | undefined> => 
   return dataFromSnapshot<Friend>(snapshot);
 };
 
-export const addFriend = async (nickname: string, name?: string): Promise<Friend> => {
-  const newFriendData = {
-    nickname,
-    name: name || '',
-    createdAt: Timestamp.now(),
+export const addFriend = async (friendData: Omit<Friend, 'id'>): Promise<Friend> => {
+  const dataToStore = {
+    ...friendData,
+    createdAt: Timestamp.fromDate(new Date(friendData.createdAt)),
   };
   const friendsCollectionRef = collection(db, FRIENDS_COLLECTION);
-  const docRef = await addDoc(friendsCollectionRef, newFriendData);
+  const docRef = await addDoc(friendsCollectionRef, dataToStore);
   return {
     id: docRef.id,
-    nickname: newFriendData.nickname,
-    name: newFriendData.name,
-    createdAt: newFriendData.createdAt.toDate()
+    ...friendData, 
   };
 };
 
@@ -114,7 +113,6 @@ export const deleteFriend = async (id: string): Promise<void> => {
   batch.delete(friendDocRef);
 
   const meetingsCollectionRef = collection(db, MEETINGS_COLLECTION);
-
   const participantQuery = query(meetingsCollectionRef, where('participantIds', 'array-contains', id));
   const participantSnapshot = await getDocs(participantQuery);
   participantSnapshot.forEach(meetingDocSnapshot => {
@@ -147,7 +145,7 @@ export const addMeeting = async (meetingData: Omit<Meeting, 'id' | 'createdAt' |
     ...meetingData,
     dateTime: Timestamp.fromDate(new Date(meetingData.dateTime)),
     createdAt: Timestamp.now(),
-    isSettled: false,
+    isSettled: false, // Always false on creation
     nonReserveFundParticipants: meetingData.nonReserveFundParticipants || [],
     useReserveFund: meetingData.useReserveFund || false,
     partialReserveFundAmount: meetingData.partialReserveFundAmount || 0,
@@ -155,7 +153,7 @@ export const addMeeting = async (meetingData: Omit<Meeting, 'id' | 'createdAt' |
   if (meetingData.endTime) {
     dataToStore.endTime = Timestamp.fromDate(new Date(meetingData.endTime));
   } else {
-    dataToStore.endTime = null;
+    dataToStore.endTime = null; 
   }
 
   const meetingsCollectionRef = collection(db, MEETINGS_COLLECTION);
@@ -178,7 +176,7 @@ export const updateMeeting = async (id: string, updates: Partial<Omit<Meeting, '
   if (updates.dateTime) {
     updateData.dateTime = Timestamp.fromDate(new Date(updates.dateTime));
   }
-  if (updates.hasOwnProperty('endTime')) {
+  if (updates.hasOwnProperty('endTime')) { // Check if endTime is explicitly being set (even to undefined)
     updateData.endTime = updates.endTime ? Timestamp.fromDate(new Date(updates.endTime)) : null;
   }
   if (updates.hasOwnProperty('nonReserveFundParticipants') && !Array.isArray(updates.nonReserveFundParticipants)) {
@@ -191,7 +189,6 @@ export const updateMeeting = async (id: string, updates: Partial<Omit<Meeting, '
     updateData.partialReserveFundAmount = updates.partialReserveFundAmount || 0;
   }
 
-
   await updateDoc(meetingDocRef, updateData);
   const updatedSnapshot = await getDoc(meetingDocRef);
   return dataFromSnapshot<Meeting>(updatedSnapshot) || null;
@@ -201,14 +198,12 @@ export const deleteMeeting = async (id: string): Promise<void> => {
   const batch = writeBatch(db);
   const meetingDocRef = doc(db, MEETINGS_COLLECTION, id);
 
-  // Delete all expenses in the subcollection
   const expensesCollectionRef = collection(db, MEETINGS_COLLECTION, id, EXPENSES_SUBCOLLECTION);
   const expensesSnapshot = await getDocs(expensesCollectionRef);
   expensesSnapshot.forEach(expenseDoc => {
     batch.delete(expenseDoc.ref);
   });
 
-  // Revert any reserve fund deduction for this meeting
   await revertMeetingDeduction(id, batch);
   
   batch.delete(meetingDocRef);
@@ -224,7 +219,7 @@ export const getExpensesByMeetingId = async (meetingId: string): Promise<Expense
   return arrayFromSnapshot<Expense>(snapshot);
 };
 
-export const getExpenseById = async (meetingId: string, expenseId: string): Promise<Expense | undefined> => {
+export const getExpenseById = async (expenseId: string, meetingId: string): Promise<Expense | undefined> => {
   if (!meetingId || !expenseId) return undefined;
   const expenseDocRef = doc(db, MEETINGS_COLLECTION, meetingId, EXPENSES_SUBCOLLECTION, expenseId);
   const snapshot = await getDoc(expenseDocRef);
@@ -242,7 +237,7 @@ export const addExpense = async (expenseData: Omit<Expense, 'id' | 'createdAt'>)
   const meeting = await getMeetingById(expenseData.meetingId);
   if (meeting?.isSettled) {
     const batch = writeBatch(db);
-    await revertMeetingDeduction(expenseData.meetingId, batch); // Ensure existing deduction is reverted
+    await revertMeetingDeduction(expenseData.meetingId, batch);
     const meetingDocRef = doc(db, MEETINGS_COLLECTION, expenseData.meetingId);
     batch.update(meetingDocRef, { isSettled: false });
     await batch.commit();
@@ -255,10 +250,17 @@ export const addExpense = async (expenseData: Omit<Expense, 'id' | 'createdAt'>)
   };
 };
 
-export const updateExpense = async (meetingId: string, expenseId: string, updates: Partial<Omit<Expense, 'id' | 'createdAt' | 'meetingId'>>): Promise<Expense | null> => {
+export const updateExpense = async (expenseId: string, meetingId: string, updates: Partial<Omit<Expense, 'id' | 'createdAt' | 'meetingId'>>): Promise<Expense | null> => {
   if (!meetingId || !expenseId) return null;
   const expenseDocRef = doc(db, MEETINGS_COLLECTION, meetingId, EXPENSES_SUBCOLLECTION, expenseId);
-  await updateDoc(expenseDocRef, updates);
+  
+  const updateData = { ...updates };
+  // Ensure no problematic fields like 'id', 'meetingId', 'createdAt' are in updates directly
+  delete (updateData as any).id;
+  delete (updateData as any).meetingId;
+  delete (updateData as any).createdAt;
+
+  await updateDoc(expenseDocRef, updateData);
 
   const meeting = await getMeetingById(meetingId);
   if (meeting?.isSettled) {
@@ -273,7 +275,7 @@ export const updateExpense = async (meetingId: string, expenseId: string, update
   return dataFromSnapshot<Expense>(updatedSnapshot) || null;
 };
 
-export const deleteExpense = async (meetingId: string, expenseId: string): Promise<void> => {
+export const deleteExpense = async (expenseId: string, meetingId: string): Promise<void> => {
   if (!meetingId || !expenseId) return;
   const expenseDocRef = doc(db, MEETINGS_COLLECTION, meetingId, EXPENSES_SUBCOLLECTION, expenseId);
   await deleteDoc(expenseDocRef);
@@ -298,7 +300,14 @@ export const getReserveFundBalance = async (): Promise<number> => {
   if (balanceSnap.exists() && typeof balanceSnap.data()?.balance === 'number') {
     return balanceSnap.data().balance;
   }
-  await setDoc(balanceDocRef, { balance: 0 }); // Initialize if not exists
+  // If doc doesn't exist or balance field is missing/not a number, initialize it.
+  try {
+    await setDoc(balanceDocRef, { balance: 0 }, { merge: true }); // Use merge to avoid overwriting other fields if any
+  } catch (error) {
+      console.error("Error initializing reserve fund balance:", error);
+      // Fallback or rethrow error as appropriate for your app's error handling
+      return 0;
+  }
   return 0;
 };
 
@@ -326,9 +335,9 @@ export const setReserveFundBalance = async (newBalance: number, description?: st
   
   const logEntry: Omit<ReserveFundTransaction, 'id'> = {
     type: 'balance_update',
-    amount: newBalance,
+    amount: newBalance, // For balance_update, this amount IS the new balance.
     description: description || `잔액 ${newBalance.toLocaleString()}원으로 설정됨`,
-    date: Timestamp.now().toDate(), // Store as JS Date
+    date: Timestamp.now().toDate(),
   };
   const newLogDocRef = doc(collection(db, RESERVE_FUND_TRANSACTIONS_COLLECTION));
   batch.set(newLogDocRef, logEntry);
@@ -337,25 +346,26 @@ export const setReserveFundBalance = async (newBalance: number, description?: st
 };
 
 export const recordMeetingDeduction = async (meetingId: string, meetingName: string, amountDeducted: number, date: Date, batch?: any): Promise<void> => {
-  if (amountDeducted <= 0) return;
+  if (amountDeducted <= 0.001) return; // Do not record negligible or zero deductions
 
   const useExistingBatch = !!batch;
   const currentBatch = useExistingBatch ? batch : writeBatch(db);
 
   const balanceDocRef = getReserveFundBalanceDocRef();
-  if (!useExistingBatch) {
+  // Ensure balance doc exists if not using an external batch that might create it.
+  if (!useExistingBatch) { 
     const balanceSnap = await getDoc(balanceDocRef);
     if (!balanceSnap.exists()) {
-      currentBatch.set(balanceDocRef, { balance: 0 });
+      currentBatch.set(balanceDocRef, { balance: 0 }); // Initialize if doesn't exist
     }
   }
   currentBatch.update(balanceDocRef, { balance: increment(-amountDeducted) });
 
   const logEntry: Omit<ReserveFundTransaction, 'id'> = {
     type: 'meeting_deduction',
-    amount: -amountDeducted,
+    amount: -amountDeducted, // Store deduction as a negative value
     description: `모임 (${meetingName}) 회비 사용`,
-    date: date, // JS Date is fine here, Firestore SDK converts to Timestamp
+    date: date, // JS Date from parameter
     meetingId: meetingId,
   };
   const newLogDocRef = doc(collection(db, RESERVE_FUND_TRANSACTIONS_COLLECTION));
@@ -378,15 +388,17 @@ export const revertMeetingDeduction = async (meetingId: string, batch?: any): Pr
 
   if (!snapshot.empty) {
     snapshot.forEach(txDoc => {
-      const txData = txDoc.data() as Partial<ReserveFundTransaction>; // data() returns DocumentData
-      if (txData.amount && typeof txData.amount === 'number') {
-        totalRevertedAmount += Math.abs(txData.amount);
+      const txData = txDoc.data() as Partial<ReserveFundTransaction>; 
+      // amount is stored as negative for deduction, so Math.abs gives the positive value to add back
+      if (txData.amount && typeof txData.amount === 'number') { 
+        totalRevertedAmount += Math.abs(txData.amount); 
       }
       currentBatch.delete(txDoc.ref);
     });
 
-    if (totalRevertedAmount > 0) {
+    if (totalRevertedAmount > 0.001) { // Only update if a meaningful amount was reverted
       const balanceDocRef = getReserveFundBalanceDocRef();
+      // Ensure balance doc exists if not using an external batch
       if (!useExistingBatch) { 
         const balanceSnap = await getDoc(balanceDocRef);
         if (!balanceSnap.exists()) {
@@ -397,7 +409,9 @@ export const revertMeetingDeduction = async (meetingId: string, batch?: any): Pr
     }
   }
 
-  if (!useExistingBatch && totalRevertedAmount > 0) {
+  if (!useExistingBatch && totalRevertedAmount > 0.001) {
     await currentBatch.commit();
   }
 };
+
+    
