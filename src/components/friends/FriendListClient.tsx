@@ -51,7 +51,6 @@ export function FriendListClient({ initialFriends }: FriendListClientProps) {
       return;
     }
     startTransition(async () => {
-      // 'role' is no longer part of the friend update
       const result = await updateFriendAction(id, { nickname: editForm.nickname, name: editForm.name });
       if (result.success && result.friend) {
         setFriends(prev => prev.map(f => (f.id === id ? result.friend! : f)));

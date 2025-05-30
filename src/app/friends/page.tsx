@@ -1,7 +1,7 @@
 
 'use client';
 import { useEffect, useState } from 'react';
-import { getFriends } from '@/lib/data-store'; // Now async
+import { getFriends } from '@/lib/data-store';
 import { AddFriendDialog } from '@/components/friends/AddFriendDialog';
 import { FriendListClient } from '@/components/friends/FriendListClient';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
@@ -12,30 +12,39 @@ import { Button } from '@/components/ui/button';
 import type { Friend } from '@/lib/types';
 
 export default function FriendsPage() {
-  const { currentUser, isAdmin, loading } = useAuth();
+  const { currentUser, isAdmin, userRole, loading: authLoading } = useAuth();
   const [friends, setFriends] = useState<Friend[]>([]);
   const [dataLoading, setDataLoading] = useState(true);
 
   useEffect(() => {
-    if (!loading && currentUser && isAdmin) {
-      const fetchFriends = async () => {
-        try {
-          const fetchedFriends = await getFriends();
-          setFriends(fetchedFriends);
-        } catch (error) {
-          console.error("Failed to fetch friends:", error);
-          // Optionally set an error state to display to the user
-        } finally {
-          setDataLoading(false);
-        }
-      };
-      fetchFriends();
-    } else if (!loading && (!currentUser || !isAdmin)) {
-      setDataLoading(false); // Not an admin or not logged in, stop loading
+    if (authLoading) {
+      setDataLoading(true);
+      return;
     }
-  }, [currentUser, isAdmin, loading]);
 
-  if (loading || dataLoading) {
+    if (!currentUser || !isAdmin) { // Only admin can fetch/see friends
+      setDataLoading(false);
+      setFriends([]);
+      return;
+    }
+    
+    const fetchFriends = async () => {
+      setDataLoading(true);
+      try {
+        const fetchedFriends = await getFriends();
+        setFriends(fetchedFriends);
+      } catch (error) {
+        console.error("Failed to fetch friends:", error);
+        setFriends([]);
+      } finally {
+        setDataLoading(false);
+      }
+    };
+    fetchFriends();
+
+  }, [authLoading, currentUser, isAdmin]);
+
+  if (authLoading || (isAdmin && dataLoading)) {
     return (
       <div className="flex justify-center items-center min-h-[calc(100vh-150px)]">
         <p className="text-xl text-muted-foreground">친구 목록 로딩 중...</p>
@@ -43,7 +52,7 @@ export default function FriendsPage() {
     );
   }
 
-  if (!currentUser) { // Should be caught by middleware, but as a fallback
+  if (!currentUser && process.env.NEXT_PUBLIC_DEV_MODE_SKIP_AUTH !== "true") {
     return (
       <div className="container mx-auto py-8 text-center">
         <h1 className="text-2xl font-bold mb-4">로그인 필요</h1>
@@ -55,7 +64,7 @@ export default function FriendsPage() {
     );
   }
 
-  if (!isAdmin) {
+  if (!isAdmin) { // Covers 'user' and 'none' roles
     return (
       <div className="container mx-auto py-8 text-center">
         <h1 className="text-2xl font-bold mb-4">접근 권한 없음</h1>
@@ -67,6 +76,7 @@ export default function FriendsPage() {
     );
   }
 
+  // Admin view
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">

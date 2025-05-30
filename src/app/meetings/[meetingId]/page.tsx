@@ -2,74 +2,100 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { getMeetingById, getExpensesByMeetingId, getFriends } from '@/lib/data-store'; // Now async
+import { getMeetingById, getExpensesByMeetingId, getFriends } from '@/lib/data-store';
 import { MeetingDetailsClient } from '@/components/meetings/MeetingDetailsClient';
 import { Button } from '@/components/ui/button';
 import { ArrowLeft } from 'lucide-react';
 import Link from 'next/link';
-import { useParams, useRouter } from 'next/navigation'; // For client component
+import { useParams, useRouter } from 'next/navigation';
 import type { Meeting, Expense, Friend } from '@/lib/types';
 import { useAuth } from '@/contexts/AuthContext';
 
 export default function MeetingDetailPage() {
   const params = useParams();
   const router = useRouter();
-  const { currentUser, isAdmin, loading: authLoading } = useAuth();
+  const { currentUser, isAdmin, userRole, loading: authLoading } = useAuth();
 
   const meetingId = typeof params.meetingId === 'string' ? params.meetingId : undefined;
 
-  const [meeting, setMeeting] = useState<Meeting | null | undefined>(undefined); // undefined for loading, null for not found
+  const [meeting, setMeeting] = useState<Meeting | null | undefined>(undefined);
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [allFriends, setAllFriends] = useState<Friend[]>([]);
-  // spendingDataForAI state removed
   const [dataLoading, setDataLoading] = useState(true);
 
   useEffect(() => {
-    if (meetingId) {
-      const fetchData = async () => {
-        setDataLoading(true);
-        try {
-          const fetchedMeeting = await getMeetingById(meetingId);
-          if (!fetchedMeeting) {
-            setMeeting(null); // Not found
-            setDataLoading(false);
-            return;
-          }
-          setMeeting(fetchedMeeting);
-
-          // getSpendingDataForMeeting call removed
-          const [fetchedExpenses, fetchedFriends] = await Promise.all([
-            getExpensesByMeetingId(meetingId),
-            getFriends(),
-          ]);
-          setExpenses(fetchedExpenses);
-          setAllFriends(fetchedFriends);
-          // setSpendingDataForAI removed
-
-        } catch (error) {
-          console.error("Failed to fetch meeting details:", error);
-          setMeeting(null); // Error case
-        } finally {
-          setDataLoading(false);
-        }
-      };
-      fetchData();
-    } else {
-        // No meetingId, treat as not found or redirect
-        setMeeting(null);
-        setDataLoading(false);
+    if (authLoading && process.env.NEXT_PUBLIC_DEV_MODE_SKIP_AUTH !== "true") {
+      setDataLoading(true);
+      return;
     }
-  }, [meetingId]);
+    if (!meetingId) {
+        setMeeting(null); // No meetingId, treat as not found
+        setDataLoading(false);
+        return;
+    }
+    // Allow data fetching if dev mode skip auth, or not auth loading and (user has role or no current user for public view)
+    const canFetch = process.env.NEXT_PUBLIC_DEV_MODE_SKIP_AUTH === "true" || 
+                     (!authLoading && (userRole !== null || !currentUser));
+    
+    if (!canFetch) {
+      setDataLoading(false);
+      // Potentially set meeting to null or keep undefined to show appropriate message
+      return;
+    }
 
-  if (authLoading || dataLoading) {
+    const fetchData = async () => {
+      setDataLoading(true);
+      try {
+        const fetchedMeeting = await getMeetingById(meetingId);
+        if (!fetchedMeeting) {
+          setMeeting(null);
+          setDataLoading(false);
+          return;
+        }
+        setMeeting(fetchedMeeting);
+
+        // Fetch expenses and friends regardless of user role for public viewing capability
+        // If restricted, these fetches would also need role checks or rely on Firestore rules.
+        const [fetchedExpenses, fetchedFriends] = await Promise.all([
+          getExpensesByMeetingId(meetingId),
+          getFriends(), // getFriends might be restricted to admin/user by Firestore rules
+        ]);
+        setExpenses(fetchedExpenses);
+        setAllFriends(fetchedFriends);
+
+      } catch (error) {
+        console.error("Failed to fetch meeting details:", error);
+        setMeeting(null);
+      } finally {
+        setDataLoading(false);
+      }
+    };
+    fetchData();
+  }, [meetingId, authLoading, currentUser, userRole]); // Removed isAdmin from deps as data fetching might be public
+
+
+  if ((authLoading && process.env.NEXT_PUBLIC_DEV_MODE_SKIP_AUTH !== "true") || dataLoading) {
     return (
       <div className="flex justify-center items-center min-h-[calc(100vh-150px)]">
         <p className="text-xl text-muted-foreground">모임 상세 정보 로딩 중...</p>
       </div>
     );
   }
-
-  if (meeting === null) { // Explicitly null for not found
+  
+  // This check is for after loading completes
+  if (userRole === 'none' && currentUser && process.env.NEXT_PUBLIC_DEV_MODE_SKIP_AUTH !== "true") {
+    return (
+      <div className="container mx-auto py-8 text-center">
+        <h1 className="text-2xl font-bold mb-4">접근 권한 없음</h1>
+        <p className="text-muted-foreground mb-6">이 모임의 상세 정보를 보려면 역할 할당이 필요합니다. 관리자에게 문의하세요.</p>
+        <Button asChild>
+          <Link href="/">대시보드로 돌아가기</Link>
+        </Button>
+      </div>
+    );
+  }
+  
+  if (meeting === null) {
     return (
       <div className="container mx-auto py-8 text-center">
         <h1 className="text-2xl font-bold mb-4">모임을 찾을 수 없습니다.</h1>
@@ -81,28 +107,18 @@ export default function MeetingDetailPage() {
     );
   }
   
-  if (!meeting) { // Still loading or error before meeting is set
-    return <div className="text-center py-10">로딩 중...</div>;
+  if (!meeting && !dataLoading) { // If meeting is undefined after loading (should be caught by null check above)
+    return <div className="text-center py-10">모임 정보를 불러올 수 없습니다.</div>;
   }
 
-  // currentUserId is now derived from useAuth in MeetingDetailsClient
-  // const currentUserId = currentUser?.uid || (allFriends.length > 0 ? allFriends[0].id : 'mock-user-id'); 
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <Button variant="outline" asChild>
-          <Link href="/meetings">
-            <ArrowLeft className="mr-2 h-4 w-4" />
-            모든 모임 목록
-          </Link>
-        </Button>
-      </div>
+      {/* "All Meetings" button is now inside MeetingDetailsClient and conditional */}
       <MeetingDetailsClient
-        initialMeeting={meeting}
+        initialMeeting={meeting!} // Assert meeting is not null/undefined here
         initialExpenses={expenses}
         allFriends={allFriends}
-        // spendingDataForAI prop removed
       />
     </div>
   );

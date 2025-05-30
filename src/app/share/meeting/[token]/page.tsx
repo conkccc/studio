@@ -2,8 +2,8 @@
 import { getMeetingByShareToken, getExpensesByMeetingId, getFriends } from '@/lib/data-store';
 import { MeetingDetailsClient } from '@/components/meetings/MeetingDetailsClient';
 import { Button } from '@/components/ui/button';
-import { AlertTriangle, ArrowLeft } from 'lucide-react'; // Added ArrowLeft
-import Link from 'next/link'; // Added Link
+import { AlertTriangle, ArrowLeft } from 'lucide-react';
+import Link from 'next/link';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 
 interface SharedMeetingPageProps {
@@ -43,11 +43,11 @@ export default async function SharedMeetingPage({ params }: SharedMeetingPagePro
           <CardHeader>
             <CardTitle className="flex items-center justify-center gap-2">
               <AlertTriangle className="h-6 w-6 text-destructive" />
-              링크 오류
+              링크 오류 또는 만료
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <p className="text-muted-foreground">유효하지 않거나 만료된 공유 링크입니다.</p>
+            <p className="text-muted-foreground">요청하신 모임 공유 링크가 유효하지 않거나 만료되었습니다.</p>
              <Button asChild className="mt-6">
               <Link href="/"><ArrowLeft className="mr-2 h-4 w-4"/> 홈으로 돌아가기</Link>
             </Button>
@@ -58,8 +58,9 @@ export default async function SharedMeetingPage({ params }: SharedMeetingPagePro
   }
 
   // Fetch additional data needed by MeetingDetailsClient
+  // These calls should ideally be efficient and not fetch unnecessary data.
   const expenses = await getExpensesByMeetingId(meeting.id);
-  const allFriends = await getFriends();
+  const allFriends = await getFriends(); // For mapping participant IDs to names
 
   return (
     <div className="container mx-auto py-8">

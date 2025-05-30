@@ -1,7 +1,8 @@
 
 'use client';
 
-import type { Meeting, Expense, Friend, User } from '@/lib/types';
+import type { Meeting, Expense, Friend } from '@/lib/types';
+import { Timestamp } from 'firebase/firestore';
 import React, { useState, useTransition, useEffect, useMemo, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
@@ -36,14 +37,15 @@ import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Input } from '@/components/ui/input';
+import Link from 'next/link';
 import { cn } from '@/lib/utils';
-import { googleMapsMapId } from '@/lib/firebase'; // Import mapId
+import { googleMapsMapId } from '@/lib/firebase';
 
 interface MeetingDetailsClientProps {
   initialMeeting: Meeting;
   initialExpenses: Expense[];
   allFriends: Friend[];
-  isReadOnlyShare?: boolean; // For shared, read-only view
+  isReadOnlyShare?: boolean;
 }
 
 export function MeetingDetailsClient({
@@ -53,20 +55,23 @@ export function MeetingDetailsClient({
   isReadOnlyShare = false,
 }: MeetingDetailsClientProps) {
   const [meeting, setMeeting] = useState<Meeting>(initialMeeting);
-  const [expenses, setExpenses] = useState<Expense[]>(initialExpenses.sort((a,b) => (b.createdAt instanceof Date ? b.createdAt.getTime() : (b.createdAt as any).toDate().getTime()) - (a.createdAt instanceof Date ? a.createdAt.getTime() : (a.createdAt as any).toDate().getTime())));
+  const [expenses, setExpenses] = useState<Expense[]>(initialExpenses.sort((a, b) => (b.createdAt instanceof Date ? b.createdAt.getTime() : (b.createdAt as any).toDate().getTime()) - (a.createdAt instanceof Date ? a.createdAt.getTime() : (a.createdAt as any).toDate().getTime())));
   const [isDeleting, setIsDeleting] = useState(false);
   const [isFinalizing, setIsFinalizing] = useState(false);
   const [formattedMeetingDateTime, setFormattedMeetingDateTime] = useState<string | null>(null);
 
-  // Share settings state
-  const [shareEnabled, setShareEnabled] = useState(meeting.isShareEnabled || false);
-  const [selectedExpiryDays, setSelectedExpiryDays] = useState<string>("7");
+  const [shareEnabled, setShareEnabled] = useState(initialMeeting.isShareEnabled || false);
+  const [selectedExpiryDays, setSelectedExpiryDays] = useState<string>(
+    initialMeeting.shareExpiryDate && initialMeeting.dateTime
+      ? Math.max(1, differenceInCalendarDays(initialMeeting.shareExpiryDate, new Date())).toString() // Ensure at least 1 day if date is in past
+      : "7" // Default to 7 days
+  );
   const [currentShareLink, setCurrentShareLink] = useState<string | null>(null);
   const [isShareSettingsSaving, setIsShareSettingsSaving] = useState(false);
 
   const { toast } = useToast();
   const router = useRouter();
-  const { currentUser, isAdmin, userRole } = useAuth();
+  const { currentUser, isAdmin } = useAuth();
   const isCreator = currentUser?.uid === meeting.creatorId;
 
   const mapContainerRef = useRef<HTMLDivElement>(null);
@@ -75,18 +80,16 @@ export function MeetingDetailsClient({
   const [isMapsJsApiLoaded, setIsMapsJsApiLoaded] = useState(false);
   const [showMap, setShowMap] = useState(false);
 
-  const isMapFeatureAvailable = isMapsJsApiLoaded && meeting.locationCoordinates;
-
   useEffect(() => {
-    // Check if Google Maps API is already loaded
     if (window.google && window.google.maps && window.google.maps.Map && window.google.maps.marker) {
       setIsMapsJsApiLoaded(true);
     } else {
-      // If not, you might need a more robust way to ensure it loads if this component
-      // is rendered without the main form's loader. For now, we assume it's loaded elsewhere or rely on this check.
-      console.warn("MeetingDetailsClient: Google Maps API not fully loaded.");
+      console.warn("MeetingDetailsClient: Google Maps API not fully loaded. Map features might be limited.");
+      setIsMapsJsApiLoaded(false);
     }
   }, []);
+  
+  const isMapFeatureAvailable = isMapsJsApiLoaded && meeting.locationCoordinates && googleMapsMapId;
 
 
   useEffect(() => {
@@ -97,10 +100,20 @@ export function MeetingDetailsClient({
     } else {
       setCurrentShareLink(null);
     }
+    if (initialMeeting.shareExpiryDate && initialMeeting.dateTime) {
+        const diffDays = differenceInCalendarDays(initialMeeting.shareExpiryDate, new Date());
+        if (diffDays >= 90) setSelectedExpiryDays("90");
+        else if (diffDays >= 30) setSelectedExpiryDays("30");
+        else if (diffDays >= 7) setSelectedExpiryDays("7");
+        else if (diffDays > 0) setSelectedExpiryDays(diffDays.toString()); // For custom or very near expiry
+        else setSelectedExpiryDays("7"); // Default or if expired
+    } else {
+        setSelectedExpiryDays("7");
+    }
   }, [initialMeeting]);
 
   useEffect(() => {
-    setExpenses(initialExpenses.sort((a,b) => (b.createdAt instanceof Date ? b.createdAt.getTime() : (b.createdAt as any).toDate().getTime()) - (a.createdAt instanceof Date ? a.createdAt.getTime() : (a.createdAt as any).toDate().getTime())));
+    setExpenses(initialExpenses.sort((a, b) => (b.createdAt instanceof Date ? b.createdAt.getTime() : (b.createdAt as any).toDate().getTime()) - (a.createdAt instanceof Date ? a.createdAt.getTime() : (a.createdAt as any).toDate().getTime())));
   }, [initialExpenses]);
 
   useEffect(() => {
@@ -126,10 +139,10 @@ export function MeetingDetailsClient({
     }
   }, [meeting?.dateTime, meeting?.endTime]);
 
-   useEffect(() => {
+  useEffect(() => {
     if (showMap && isMapFeatureAvailable && mapContainerRef.current && window.google?.maps?.Map && window.google?.maps?.marker?.AdvancedMarkerElement) {
       const { AdvancedMarkerElement } = window.google.maps.marker;
-      const currentCoords = meeting.locationCoordinates!; // Assert not null due to isMapFeatureAvailable
+      const currentCoords = meeting.locationCoordinates!;
 
       if (!mapInstanceRef.current) {
         mapInstanceRef.current = new window.google.maps.Map(mapContainerRef.current, {
@@ -137,32 +150,28 @@ export function MeetingDetailsClient({
           zoom: 15,
           disableDefaultUI: true,
           zoomControl: true,
-          mapId: googleMapsMapId, // Use imported mapId
+          mapId: googleMapsMapId,
         });
       } else {
         mapInstanceRef.current.setCenter(currentCoords);
         mapInstanceRef.current.setZoom(15);
       }
 
-      if (!markerInstanceRef.current) {
+      if (markerInstanceRef.current) { // If marker exists, update its position and map
+        markerInstanceRef.current.position = currentCoords;
+        markerInstanceRef.current.title = meeting.locationName || '선택된 장소';
+        markerInstanceRef.current.map = mapInstanceRef.current;
+      } else { // If marker doesn't exist, create it
         markerInstanceRef.current = new AdvancedMarkerElement({
           map: mapInstanceRef.current,
           position: currentCoords,
           title: meeting.locationName || '선택된 장소',
         });
-      } else {
-        markerInstanceRef.current.position = currentCoords;
-        markerInstanceRef.current.title = meeting.locationName || '선택된 장소';
-        markerInstanceRef.current.map = mapInstanceRef.current; // Ensure marker is on map
       }
     } else if (markerInstanceRef.current) {
       markerInstanceRef.current.map = null; // Hide marker if showMap is false or map not available
     }
-    // No explicit cleanup needed for mapInstanceRef in this simplified setup if DOM node is removed
-    // However, if mapInstanceRef.current is persisted across showMap toggles without re-init,
-    // you might need more sophisticated cleanup or re-attachment logic.
   }, [showMap, isMapFeatureAvailable, meeting.locationCoordinates, meeting.locationName]);
-
 
   const participants = useMemo(() =>
     meeting.participantIds
@@ -175,13 +184,10 @@ export function MeetingDetailsClient({
     if (currentUser && meeting.creatorId === currentUser.uid && isAdmin) {
       return '관리자 (나)';
     }
-    const creatorUser = allFriends.find(f => f.id === meeting.creatorId); // Try finding in friends first
-    if (creatorUser) return creatorUser.nickname;
-
-    // Fallback to check if creator is the current admin user (if not in friends list)
+    const creatorFriend = allFriends.find(f => f.id === meeting.creatorId);
+    if (creatorFriend) return creatorFriend.nickname;
     if (currentUser && meeting.creatorId === currentUser.uid) return currentUser.displayName || currentUser.email || '알 수 없는 생성자';
-
-    return '관리자'; // Default if not found
+    return '관리자';
   }, [meeting.creatorId, allFriends, currentUser, isAdmin]);
 
   const handleExpenseAdded = (newExpense: Expense) => {
@@ -195,17 +201,21 @@ export function MeetingDetailsClient({
   const handleExpenseUpdated = (updatedExpense: Expense) => {
     const newExpenses = expenses.map(e => e.id === updatedExpense.id ? updatedExpense : e).sort((a,b) => (b.createdAt instanceof Date ? b.createdAt.getTime() : (b.createdAt as any).toDate().getTime()) - (a.createdAt instanceof Date ? a.createdAt.getTime() : (a.createdAt as any).toDate().getTime()));
     setExpenses(newExpenses);
-     if (meeting.isSettled) {
-        setMeeting(prev => ({ ...prev, isSettled: false }));
+    if (meeting.isSettled) {
+      setMeeting(prev => ({ ...prev, isSettled: false }));
     }
   };
 
   const handleExpenseDeleted = (deletedExpenseId: string) => {
     setExpenses(prev => prev.filter(e => e.id !== deletedExpenseId));
-     if (meeting.isSettled) {
-        setMeeting(prev => ({ ...prev, isSettled: false }));
+    if (meeting.isSettled) {
+      setMeeting(prev => ({ ...prev, isSettled: false }));
     }
   };
+
+  const canManageMeetingActions = (isAdmin || isCreator) && !isReadOnlyShare;
+  const canManageExpenses = (isAdmin || isCreator) && !isReadOnlyShare;
+  const canFinalize = isAdmin && meeting.useReserveFund && meeting.partialReserveFundAmount && meeting.partialReserveFundAmount > 0 && !meeting.isSettled && expenses.length > 0 && !isReadOnlyShare;
 
   const handleDeleteMeeting = async () => {
     if (!currentUser?.uid) {
@@ -254,11 +264,15 @@ export function MeetingDetailsClient({
       toast({ title: "오류", description: "로그인이 필요합니다.", variant: "destructive" });
       return;
     }
+    if (!canManageMeetingActions) {
+        toast({ title: '권한 없음', description: '공유 설정을 변경할 권한이 없습니다.', variant: 'destructive'});
+        return;
+    }
     setIsShareSettingsSaving(true);
     const result = await toggleMeetingShareAction(meeting.id, currentUser.uid, shareEnabled, parseInt(selectedExpiryDays));
     if (result.success && result.meeting) {
       toast({ title: "성공", description: "공유 설정이 저장되었습니다." });
-      setMeeting(result.meeting); // Update local meeting state with new share info
+      setMeeting(result.meeting); 
       if (result.meeting.isShareEnabled && result.meeting.shareToken) {
         setCurrentShareLink(`${window.location.origin}/share/meeting/${result.meeting.shareToken}`);
       } else {
@@ -277,14 +291,11 @@ export function MeetingDetailsClient({
         .catch(() => toast({ title: "오류", description: "링크 복사에 실패했습니다.", variant: "destructive" }));
     }
   };
-
+  
   const mapLink = meeting.locationCoordinates
-    ? `https://www.google.com/maps/search/?api=1&query=${meeting.locationCoordinates.lat},${meeting.locationCoordinates.lng}`
-    : `https://maps.google.com/?q=${encodeURIComponent(meeting.locationName)}`;
+  ? `https://www.google.com/maps/search/?api=1&query=${meeting.locationCoordinates.lat},${meeting.locationCoordinates.lng}`
+  : `https://maps.google.com/?q=${encodeURIComponent(meeting.locationName)}`;
 
-  const canManageMeetingActions = (isAdmin || isCreator) && !isReadOnlyShare;
-  const canManageExpenses = (isAdmin || isCreator) && !isReadOnlyShare;
-  const canFinalize = isAdmin && meeting.useReserveFund && meeting.partialReserveFundAmount && meeting.partialReserveFundAmount > 0 && !meeting.isSettled && expenses.length > 0 && !isReadOnlyShare;
 
   return (
     <div className="space-y-6">
@@ -296,7 +307,6 @@ export function MeetingDetailsClient({
               모든 모임 목록
             </Link>
           </Button>
-          {/* "모임 정보 다시 보기" 버튼 삭제됨 */}
         </div>
       )}
 
@@ -429,7 +439,7 @@ export function MeetingDetailsClient({
                 <p className="text-muted-foreground pl-6">사용 안함</p>
             </div>
           )}
-          {isMapFeatureAvailable && (
+          {isMapFeatureAvailable && !isReadOnlyShare && (
              <div className="mt-4">
                 <Button
                   type="button"
@@ -553,11 +563,10 @@ export function MeetingDetailsClient({
                         expense={expense}
                         meetingId={meeting.id}
                         allFriends={allFriends}
-                        participants={participants}
+                        participants={participants} 
                         onExpenseUpdated={handleExpenseUpdated}
                         onExpenseDeleted={handleExpenseDeleted}
                         isMeetingSettled={meeting.isSettled || false}
-                        canManage={canManageExpenses && !meeting.isSettled}
                       />
                     ))}
                   </ul>
@@ -572,7 +581,6 @@ export function MeetingDetailsClient({
           <Card>
             <CardHeader>
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-                {/* CardTitle "정산 요약"은 여기서 제거됨 (탭 이름으로 충분) */}
                 {canFinalize && (
                   <Button onClick={handleFinalizeSettlement} disabled={isFinalizing || isDeleting} size="sm">
                     {isFinalizing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <CheckCircle2 className="mr-2 h-4 w-4" />}

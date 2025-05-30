@@ -2,44 +2,59 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 
-const publicPaths = ['/login', '/api/auth', '/img', '/favicon.ico']; // 인증 없이 접근 가능한 경로 추가
+// Define public paths that do not require authentication
+const publicPaths = ['/login', '/share/meeting', '/img', '/favicon.ico', '/api/auth']; 
 
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
-  const authToken = request.cookies.get('firebaseIdToken'); // Firebase Auth SDK가 사용하는 쿠키 이름 (실제 이름은 다를 수 있음, 확인 필요)
 
-  // 공개 경로 또는 API 경로는 미들웨어 처리에서 제외 (Next.js 정적 파일 및 API 경로 패턴)
-  if (
-    publicPaths.some(path => pathname.startsWith(path)) ||
-    pathname.startsWith('/_next/') || // Next.js 내부 정적 파일
-    pathname.startsWith('/static/') || // 일반적인 정적 파일 폴더 (만약 사용한다면)
-    /\.(.*)$/.test(pathname) // 파일 확장자가 있는 경우 (예: .png, .jpg)
-  ) {
+  // If dev mode skip auth is enabled, allow all requests
+  if (process.env.NEXT_PUBLIC_DEV_MODE_SKIP_AUTH === "true") {
     return NextResponse.next();
   }
 
-  // 인증 토큰이 없고, 보호된 경로에 접근하려는 경우 로그인 페이지로 리디렉션
-  if (!authToken) {
+  // Check if the current path is one of the public paths or an internal Next.js path
+  const isPublicPath = publicPaths.some(path => pathname.startsWith(path));
+  const isNextInternal = pathname.startsWith('/_next/') || pathname.startsWith('/static/') || /\.(.*)$/.test(pathname);
+
+  if (isPublicPath || isNextInternal) {
+    return NextResponse.next();
+  }
+
+  // For all other paths, check for an authentication token (cookie)
+  // The actual name of the cookie might vary based on Firebase SDK version or custom setup.
+  // Common names: 'firebaseIdToken', '__session', etc.
+  // For simplicity, we'll assume a generic name or that Firebase SDK handles client-side redirection effectively
+  // if server-side cookie check is too complex here.
+  // This basic check is for UI redirection, not for API security.
+  const authTokenCookie = request.cookies.get('firebaseIdToken'); // Placeholder name, might need adjustment
+                                                               // Or, more reliably, check for a session cookie if you implement server-side sessions.
+
+  if (!authTokenCookie) {
+    // If no auth token, redirect to login, preserving the intended destination
     const loginUrl = new URL('/login', request.url);
-    loginUrl.searchParams.set('redirectedFrom', pathname); // 원래 경로를 쿼리 파라미터로 전달 (선택 사항)
+    loginUrl.searchParams.set('redirectedFrom', pathname);
+    console.log(`Middleware: No auth token, redirecting to ${loginUrl.toString()}`);
     return NextResponse.redirect(loginUrl);
   }
 
+  // If token exists, proceed. Actual token validation and role checks happen client-side in AuthContext and pages.
   return NextResponse.next();
 }
 
 export const config = {
-  // 미들웨어가 실행될 경로를 지정합니다.
-  // 모든 경로에 대해 실행하되, 특정 경로는 위에서 프로그래밍 방식으로 제외합니다.
   matcher: [
     /*
      * Match all request paths except for the ones starting with:
-     * - api (API routes)
      * - _next/static (static files)
      * - _next/image (image optimization files)
      * - favicon.ico (favicon file)
-     * - img (image files in public/img) - 이 부분은 publicPaths로 처리했으므로 matcher에서 제외해도 됨
+     * - img (image files in public/img) - Covered by publicPaths
+     * - api/auth (auth related API routes) - Covered by publicPaths
+     *
+     * Match all paths NOT starting with these, to apply the middleware.
+     * The '?!' is a negative lookahead.
      */
-    '/((?!api|_next/static|_next/image|favicon.ico|img).*)',
+    '/((?!_next/static|_next/image|favicon.ico|img/|api/auth).*)',
   ],
 };

@@ -22,6 +22,7 @@ import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover
 import { Check, ChevronsUpDown, Loader2, Edit3 } from 'lucide-react';
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { cn } from '@/lib/utils';
+import { useAuth } from '@/contexts/AuthContext';
 
 const expenseSchema = z.object({
   description: z.string().min(1, '설명을 입력해주세요.').max(100, '설명은 100자 이내여야 합니다.'),
@@ -64,61 +65,55 @@ type ExpenseFormData = z.infer<typeof expenseSchema>;
 interface EditExpenseDialogProps {
   expenseToEdit: Expense;
   meetingId: string;
-  participants: Friend[];
-  allFriends: Friend[]; // allFriends is needed to map paidById etc.
+  participants: Friend[]; // Participants of the current meeting
+  allFriends: Friend[];
   onExpenseUpdated: (updatedExpense: Expense) => void;
   triggerButton?: React.ReactNode;
-  canManage: boolean; // To disable trigger if not allowed
+  canManage: boolean;
   isMeetingSettled: boolean;
 }
 
 export function EditExpenseDialog({
   expenseToEdit,
   meetingId,
-  participants,
-  allFriends,
+  participants, // These are actual meeting participants for this expense
+  allFriends, // All friends for finding names by ID
   onExpenseUpdated,
   triggerButton,
-  canManage,
+  canManage, // Prop to control if editing is allowed (passed from ExpenseItem)
   isMeetingSettled,
 }: EditExpenseDialogProps) {
   const [open, setOpen] = useState(false);
   const [isPending, startTransition] = useTransition();
   const { toast } = useToast();
   const [payerSearchOpen, setPayerSearchOpen] = useState(false);
+  const { currentUser } = useAuth(); // For passing currentUserId to action
 
   const form = useForm<ExpenseFormData>({
     resolver: zodResolver(expenseSchema),
-    defaultValues: {
-      description: expenseToEdit.description,
-      totalAmount: expenseToEdit.totalAmount,
-      paidById: expenseToEdit.paidById,
-      splitType: expenseToEdit.splitType,
-      splitAmongIds: expenseToEdit.splitType === 'equally' ? expenseToEdit.splitAmongIds || participants.map(p => p.id) : participants.map(p => p.id),
-      customSplits: expenseToEdit.splitType === 'custom' 
-        ? participants.map(p => {
-            const existingSplit = expenseToEdit.customSplits?.find(cs => cs.friendId === p.id);
-            return { friendId: p.id, amount: existingSplit ? existingSplit.amount : 0 };
-          })
-        : participants.map(p => ({ friendId: p.id, amount: 0 })),
-    },
+    // Default values are set based on expenseToEdit when the dialog opens (see useEffect)
   });
-
+  
   useEffect(() => {
-    form.reset({
-      description: expenseToEdit.description,
-      totalAmount: expenseToEdit.totalAmount,
-      paidById: expenseToEdit.paidById,
-      splitType: expenseToEdit.splitType,
-      splitAmongIds: expenseToEdit.splitType === 'equally' ? expenseToEdit.splitAmongIds || participants.map(p => p.id) : participants.map(p => p.id),
-      customSplits: expenseToEdit.splitType === 'custom' 
-        ? participants.map(p => {
-            const existingSplit = expenseToEdit.customSplits?.find(cs => cs.friendId === p.id);
-            return { friendId: p.id, amount: existingSplit ? existingSplit.amount : 0 };
-          })
-        : participants.map(p => ({ friendId: p.id, amount: 0 })),
-    });
-  }, [expenseToEdit, participants, form]);
+    if (open) { // Reset form when dialog opens with new/current expenseToEdit data
+      form.reset({
+        description: expenseToEdit.description,
+        totalAmount: expenseToEdit.totalAmount,
+        paidById: expenseToEdit.paidById,
+        splitType: expenseToEdit.splitType,
+        splitAmongIds: expenseToEdit.splitType === 'equally' 
+          ? expenseToEdit.splitAmongIds || participants.map(p => p.id) 
+          : participants.map(p => p.id), // Default to all for custom if not set
+        customSplits: expenseToEdit.splitType === 'custom' 
+          ? participants.map(p => {
+              const existingSplit = expenseToEdit.customSplits?.find(cs => cs.friendId === p.id);
+              return { friendId: p.id, amount: existingSplit ? existingSplit.amount : 0 };
+            })
+          : participants.map(p => ({ friendId: p.id, amount: 0 })), // Default structure for custom
+      });
+    }
+  }, [open, expenseToEdit, participants, form]);
+
 
   const watchSplitType = form.watch('splitType');
   const watchTotalAmount = form.watch('totalAmount');
@@ -130,10 +125,10 @@ export function EditExpenseDialog({
         totalAmount: data.totalAmount,
         paidById: data.paidById,
         splitType: data.splitType,
-        splitAmongIds: data.splitType === 'equally' ? data.splitAmongIds : undefined,
+        splitAmongIds: data.splitType === 'equally' ? data.splitAmongIds : undefined, // Use undefined if not applicable
         customSplits: data.splitType === 'custom' ? data.customSplits : undefined,
       };
-      const result = await updateExpenseAction(expenseToEdit.id, meetingId, payload);
+      const result = await updateExpenseAction(expenseToEdit.id, meetingId, payload, currentUser?.uid || null);
       if (result.success && result.expense) {
         toast({ title: '성공', description: '지출 항목이 수정되었습니다.' });
         onExpenseUpdated(result.expense);
@@ -154,9 +149,14 @@ export function EditExpenseDialog({
     const num = parseFloat(String(value).replace(/,/g, ''));
     return isNaN(num) ? String(value) : num.toLocaleString();
   };
+  
+  const currentMeetingParticipants = participants; // Use the passed 'participants' prop directly
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog open={open} onOpenChange={(isOpen) => {
+        setOpen(isOpen);
+        // No need to form.reset() here if useEffect handles it on `open`
+    }}>
       <DialogTrigger asChild>
         {triggerButton ? (
             React.cloneElement(triggerButton as React.ReactElement, { disabled: !canManage || isMeetingSettled || isPending })
@@ -192,7 +192,7 @@ export function EditExpenseDialog({
                         value={formatNumber(field.value)}
                         onChange={(e) => {
                           const rawValue = e.target.value.replace(/,/g, '');
-                          field.onChange(rawValue === '' ? '' : parseFloat(rawValue));
+                          field.onChange(rawValue === '' ? 0 : parseFloat(rawValue));
                         }}
                         onBlur={field.onBlur}
                         disabled={isPending} 
@@ -217,7 +217,7 @@ export function EditExpenseDialog({
                           className="w-full justify-between"
                           disabled={isPending}
                         >
-                          {field.value ? participants.find(p => p.id === field.value)?.nickname : "결제자 선택..."}
+                          {field.value ? currentMeetingParticipants.find(p => p.id === field.value)?.nickname : "결제자 선택..."}
                           <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
                         </Button>
                       </PopoverTrigger>
@@ -227,10 +227,10 @@ export function EditExpenseDialog({
                            <CommandList>
                             <CommandEmpty>참여자를 찾을 수 없습니다.</CommandEmpty>
                             <CommandGroup>
-                              {participants.map((participant) => (
+                              {currentMeetingParticipants.map((participant) => (
                                 <CommandItem
                                   key={participant.id}
-                                  value={participant.nickname}
+                                  value={participant.nickname} // Use nickname for search, but set ID onSelect
                                   onSelect={() => {
                                     field.onChange(participant.id);
                                     setPayerSearchOpen(false);
@@ -276,7 +276,7 @@ export function EditExpenseDialog({
                 <div>
                   <Label>균등 분배 대상 <span className="text-destructive">*</span></Label>
                   <div className="space-y-2 mt-1 p-3 border rounded-md max-h-40 overflow-y-auto">
-                    {participants.map(participant => (
+                    {currentMeetingParticipants.map(participant => (
                       <div key={participant.id} className="flex items-center space-x-2">
                         <Checkbox
                           id={`edit-split-${participant.id}`}
@@ -302,11 +302,11 @@ export function EditExpenseDialog({
                 <div>
                   <Label>개별 금액 <span className="text-destructive">*</span></Label>
                   <div className="space-y-2 mt-1 p-3 border rounded-md max-h-60 overflow-y-auto">
-                    {participants.map((participant, index) => (
+                    {currentMeetingParticipants.map((participant, index) => (
                       <div key={participant.id} className="flex items-center justify-between space-x-2">
                         <Label htmlFor={`edit-custom-${participant.id}`} className="flex-shrink-0">{participant.nickname}</Label>
                         <Controller
-                          name={`customSplits.${index}.amount`}
+                          name={`customSplits.${index}.amount`} // This should be fine
                           control={form.control}
                           render={({ field }) => (
                              <Input 
@@ -318,8 +318,9 @@ export function EditExpenseDialog({
                                   const rawValue = e.target.value.replace(/,/g, '');
                                   const newAmount = rawValue === '' ? 0 : parseFloat(rawValue);
                                   const currentCustomSplits = form.getValues('customSplits') || [];
+                                  // Ensure the friendId is correctly associated
                                   const updatedSplits = currentCustomSplits.map((cs, i) => 
-                                    i === index ? {...cs, amount: newAmount, friendId: participant.id } : cs
+                                    i === index ? {...cs, friendId: participant.id, amount: newAmount } : cs
                                   );
                                   form.setValue('customSplits', updatedSplits, { shouldValidate: true });
                                 }}
@@ -328,6 +329,7 @@ export function EditExpenseDialog({
                               />
                           )}
                         />
+                        {/* Ensure friendId is registered for each item in the array */}
                         <Controller name={`customSplits.${index}.friendId`} control={form.control} defaultValue={participant.id} render={({field}) => <input type="hidden" {...field} />} />
                       </div>
                     ))}
@@ -352,5 +354,3 @@ export function EditExpenseDialog({
     </Dialog>
   );
 }
-
-    

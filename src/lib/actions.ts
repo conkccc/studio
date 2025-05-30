@@ -3,6 +3,7 @@
 
 import { revalidatePath } from 'next/cache';
 import {
+  getUserById as dbGetUserById,
   addFriend as dbAddFriend,
   updateFriend as dbUpdateFriend,
   deleteFriend as dbDeleteFriend,
@@ -15,12 +16,11 @@ import {
   getMeetingById as dbGetMeetingById,
   getExpensesByMeetingId as dbGetExpensesByMeetingId,
   getReserveFundBalance,
-  dbSetReserveFundBalance, // Renamed in data-store
-  dbRecordMeetingDeduction, // Renamed in data-store
-  dbRevertMeetingDeduction, // Renamed in data-store
+  dbSetReserveFundBalance,
+  dbRecordMeetingDeduction,
+  dbRevertMeetingDeduction,
   getExpenseById as dbGetExpenseById,
-  updateUser as dbUpdateUser, // For updating user roles
-  getUserById as dbGetUserById, // To check admin role for actions
+  updateUser as dbUpdateUser,
 } from './data-store';
 import type { Friend, Meeting, Expense, ReserveFundTransaction, User } from './types';
 import { Timestamp } from 'firebase/firestore';
@@ -31,30 +31,30 @@ import { addDays } from 'date-fns';
 // Friend Actions
 export async function createFriendAction(nickname: string, name?: string) {
   try {
-    // Assuming this action can only be called by an admin (UI controlled)
-    // For true security, verify caller's admin role here using their UID
-    const newFriend = await dbAddFriend({ nickname, name }); // No role field
+    // Permission check should ideally be here if not using Firestore rules exclusively
+    // For now, assuming UI and Firestore rules handle admin-only access
+    const newFriend = await dbAddFriend({ nickname, name });
     revalidatePath('/friends');
-    revalidatePath('/meetings/new');
+    revalidatePath('/meetings/new'); // Friend list might be used here
     return { success: true, friend: newFriend };
   } catch (error) {
     console.error("createFriendAction Error:", error);
-    const errorMessage = error instanceof Error ? error.message : 'Failed to create friend';
+    const errorMessage = error instanceof Error ? error.message : '친구 추가에 실패했습니다.';
     return { success: false, error: errorMessage };
   }
 }
 
 export async function updateFriendAction(id: string, updates: Partial<Omit<Friend, 'id' | 'createdAt'>>) {
   try {
-    // Assuming admin-only action
-    const updatedFriend = await dbUpdateFriend(id, updates); // No role field in updates
-    if (!updatedFriend) throw new Error('Friend not found for update');
+    // Assuming admin-only action based on UI and Firestore rules
+    const updatedFriend = await dbUpdateFriend(id, updates);
+    if (!updatedFriend) throw new Error('친구를 찾을 수 없습니다.');
     revalidatePath('/friends');
-    revalidatePath(`/meetings`);
+    revalidatePath(`/meetings`); // participant lists might need update
     return { success: true, friend: updatedFriend };
   } catch (error) {
     console.error("updateFriendAction Error:", error);
-    const errorMessage = error instanceof Error ? error.message : 'Failed to update friend';
+    const errorMessage = error instanceof Error ? error.message : '친구 정보 수정에 실패했습니다.';
     return { success: false, error: errorMessage };
   }
 }
@@ -68,7 +68,7 @@ export async function deleteFriendAction(id: string) {
     return { success: true };
   } catch (error) {
     console.error("deleteFriendAction Error:", error);
-    const errorMessage = error instanceof Error ? error.message : 'Failed to delete friend';
+    const errorMessage = error instanceof Error ? error.message : '친구 삭제에 실패했습니다.';
     return { success: false, error: errorMessage };
   }
 }
@@ -76,21 +76,22 @@ export async function deleteFriendAction(id: string) {
 // Meeting Actions
 export async function createMeetingAction(
   meetingData: Omit<Meeting, 'id' | 'createdAt' | 'isSettled' | 'isShareEnabled' | 'shareToken' | 'shareExpiryDate'>,
-  currentUserId?: string | null // Added for permission check
+  currentUserId?: string | null
 ) {
   if (!currentUserId) {
     return { success: false, error: "인증되지 않은 사용자입니다. 로그인이 필요합니다." };
   }
-  // Optional: Check if currentUserId is admin based on Firestore role
+  // Basic permission check (assuming only admins can create meetings based on UI)
+  // For robust security, check user's role from Firestore here if needed.
   // const callingUser = await dbGetUserById(currentUserId);
   // if (!callingUser || callingUser.role !== 'admin') {
-  //   return { success: false, error: "모임 생성 권한이 없습니다." };
+  // return { success: false, error: "모임 생성 권한이 없습니다." };
   // }
 
   try {
     const newMeeting = await dbAddMeeting({
       ...meetingData,
-      creatorId: currentUserId, // Ensure creatorId is set to the authenticated user
+      creatorId: currentUserId, // Ensure creatorId is set
     });
     revalidatePath('/meetings');
     revalidatePath('/');
@@ -98,7 +99,7 @@ export async function createMeetingAction(
     return { success: true, meeting: newMeeting };
   } catch (error) {
     console.error("createMeetingAction Error:", error);
-    const errorMessage = error instanceof Error ? error.message : 'Failed to create meeting';
+    const errorMessage = error instanceof Error ? error.message : '모임 생성에 실패했습니다.';
     return { success: false, error: errorMessage };
   }
 }
@@ -115,7 +116,7 @@ export async function updateMeetingAction(
   try {
     const meetingToUpdate = await dbGetMeetingById(id);
     if (!meetingToUpdate) {
-      return { success: false, error: "모임을 찾을 수 없습니다." };
+      return { success: false, error: "수정할 모임을 찾을 수 없습니다." };
     }
 
     const callingUser = await dbGetUserById(currentUserId);
@@ -125,23 +126,28 @@ export async function updateMeetingAction(
       return { success: false, error: "모임 수정 권한이 없습니다." };
     }
 
-    if (meetingToUpdate.isSettled && (updates.useReserveFund !== undefined || updates.partialReserveFundAmount !== undefined)) {
+    // If reserve fund settings change and meeting was settled, unsettle and revert deduction
+    const reserveFundSettingsChanged = updates.useReserveFund !== undefined || updates.partialReserveFundAmount !== undefined || updates.nonReserveFundParticipants !== undefined;
+    if (meetingToUpdate.isSettled && reserveFundSettingsChanged) {
       await dbRevertMeetingDeduction(id);
-      (updates as any).isSettled = false;
+      (updates as any).isSettled = false; // Unset isSettled if fund settings change
+       revalidatePath('/reserve-fund');
     }
 
+
     const updatedMeeting = await dbUpdateMeeting(id, updates);
-    if (!updatedMeeting) throw new Error('Meeting not found after update attempt.');
+    if (!updatedMeeting) throw new Error('모임 업데이트에 실패했습니다.');
 
     revalidatePath('/meetings');
     revalidatePath(`/meetings/${id}`);
-    if (updates.useReserveFund !== undefined || updates.partialReserveFundAmount !== undefined || (updates.isSettled !== undefined && !updates.isSettled)) {
+    revalidatePath('/'); // Dashboard might show recent meeting
+    if (reserveFundSettingsChanged || (updates.isSettled !== undefined && !updates.isSettled)) {
       revalidatePath('/reserve-fund');
     }
     return { success: true, meeting: updatedMeeting };
   } catch (error) {
     console.error("updateMeetingAction Error:", error);
-    const errorMessage = error instanceof Error ? error.message : 'Failed to update meeting';
+    const errorMessage = error instanceof Error ? error.message : '모임 수정에 실패했습니다.';
     return { success: false, error: errorMessage };
   }
 }
@@ -162,14 +168,14 @@ export async function deleteMeetingAction(id: string, currentUserId?: string | n
       return { success: false, error: "모임 삭제 권한이 없습니다." };
     }
 
-    await dbDeleteMeeting(id);
+    await dbDeleteMeeting(id); // This now also reverts fund deduction
     revalidatePath('/meetings');
     revalidatePath('/');
     revalidatePath('/reserve-fund');
     return { success: true };
   } catch (error) {
     console.error("deleteMeetingAction Error:", error);
-    const errorMessage = error instanceof Error ? error.message : 'Failed to delete meeting';
+    const errorMessage = error instanceof Error ? error.message : '모임 삭제에 실패했습니다.';
     return { success: false, error: errorMessage };
   }
 }
@@ -192,29 +198,32 @@ export async function createExpenseAction(expenseData: Omit<Expense, 'id' | 'cre
     }
 
     const newExpense = await dbAddExpense(expenseData);
-    revalidatePath(`/meetings/${expenseData.meetingId}`);
-
+    
     if (meeting.isSettled) {
       await dbUpdateMeeting(expenseData.meetingId, { isSettled: false });
       await dbRevertMeetingDeduction(expenseData.meetingId);
       revalidatePath('/reserve-fund');
     }
+    revalidatePath(`/meetings/${expenseData.meetingId}`);
     return { success: true, expense: newExpense };
   } catch (error) {
     console.error("createExpenseAction Error:", error);
-    const errorMessage = error instanceof Error ? error.message : 'Failed to create expense';
+    const errorMessage = error instanceof Error ? error.message : '지출 항목 추가에 실패했습니다.';
     return { success: false, error: errorMessage };
   }
 }
 
 export async function updateExpenseAction(
+  expenseId: string, // expenseId first for consistency
   meetingId: string,
-  expenseId: string,
   updates: Partial<Omit<Expense, 'id' | 'createdAt' | 'meetingId'>>,
   currentUserId?: string | null
 ) {
   if (!currentUserId) {
     return { success: false, error: "인증되지 않은 사용자입니다. 로그인이 필요합니다." };
+  }
+  if (!meetingId || !expenseId) {
+    return { success: false, error: "잘못된 요청입니다. 모임 ID 또는 지출 ID가 없습니다."};
   }
   try {
     const meeting = await dbGetMeetingById(meetingId);
@@ -229,25 +238,28 @@ export async function updateExpenseAction(
     }
 
     const updatedExpense = await dbUpdateExpense(meetingId, expenseId, updates);
-    if (!updatedExpense) throw new Error('Expense not found for update');
-    revalidatePath(`/meetings/${meetingId}`);
-
+    if (!updatedExpense) throw new Error('지출 항목 업데이트에 실패했습니다.');
+    
     if (meeting.isSettled) {
       await dbUpdateMeeting(meetingId, { isSettled: false });
       await dbRevertMeetingDeduction(meetingId);
       revalidatePath('/reserve-fund');
     }
+    revalidatePath(`/meetings/${meetingId}`);
     return { success: true, expense: updatedExpense };
   } catch (error) {
     console.error("updateExpenseAction Error:", error);
-    const errorMessage = error instanceof Error ? error.message : 'Failed to update expense';
+    const errorMessage = error instanceof Error ? error.message : '지출 항목 수정에 실패했습니다.';
     return { success: false, error: errorMessage };
   }
 }
 
-export async function deleteExpenseAction(meetingId: string, expenseId: string, currentUserId?: string | null) {
+export async function deleteExpenseAction(expenseId: string, meetingId: string, currentUserId?: string | null) {
   if (!currentUserId) {
     return { success: false, error: "인증되지 않은 사용자입니다. 로그인이 필요합니다." };
+  }
+   if (!meetingId || !expenseId) {
+    return { success: false, error: "잘못된 요청입니다. 모임 ID 또는 지출 ID가 없습니다."};
   }
   try {
     const meeting = await dbGetMeetingById(meetingId);
@@ -262,17 +274,17 @@ export async function deleteExpenseAction(meetingId: string, expenseId: string, 
     }
 
     await dbDeleteExpense(meetingId, expenseId);
-    revalidatePath(`/meetings/${meetingId}`);
 
     if (meeting.isSettled) {
       await dbUpdateMeeting(meetingId, { isSettled: false });
       await dbRevertMeetingDeduction(meetingId);
       revalidatePath('/reserve-fund');
     }
+    revalidatePath(`/meetings/${meetingId}`);
     return { success: true };
   } catch (error) {
     console.error("deleteExpenseAction Error:", error);
-    const errorMessage = error instanceof Error ? error.message : 'Failed to delete expense';
+    const errorMessage = error instanceof Error ? error.message : '지출 항목 삭제에 실패했습니다.';
     return { success: false, error: errorMessage };
   }
 }
@@ -290,7 +302,7 @@ export async function setReserveFundBalanceAction(newBalance: number, descriptio
   try {
     await dbSetReserveFundBalance(newBalance, description || "수동 잔액 조정");
     revalidatePath('/reserve-fund');
-    revalidatePath('/');
+    revalidatePath('/'); // Dashboard shows reserve balance
     return { success: true, newBalance };
   } catch (error) {
     console.error("setReserveFundBalanceAction Error:", error);
@@ -304,7 +316,7 @@ export async function finalizeMeetingSettlementAction(meetingId: string, current
     return { success: false, error: "인증되지 않은 사용자입니다. 로그인이 필요합니다." };
   }
   const callingUser = await dbGetUserById(currentUserId);
-  if (!callingUser || callingUser.role !== 'admin') {
+  if (!callingUser || callingUser.role !== 'admin') { // Only admins can finalize settlement now
     return { success: false, error: "정산 확정 권한이 없습니다." };
   }
 
@@ -312,38 +324,54 @@ export async function finalizeMeetingSettlementAction(meetingId: string, current
     const meeting = await dbGetMeetingById(meetingId);
     if (!meeting) return { success: false, error: '모임을 찾을 수 없습니다.' };
     if (meeting.isSettled) return { success: true, meeting, message: "이미 정산이 확정된 모임입니다." };
-
-    let message = `모임 (${meeting.name}) 정산이 확정되었습니다.`;
-
-    if (meeting.useReserveFund && meeting.partialReserveFundAmount && meeting.partialReserveFundAmount > 0) {
-      const expenses = await dbGetExpensesByMeetingId(meetingId);
-      if (expenses.length === 0) {
-         message = `모임 (${meeting.name}) 정산 확정. 지출 내역이 없어 회비는 사용되지 않았습니다.`;
-      } else {
-        const currentReserveBalance = await getReserveFundBalance();
-        const amountToDeduct = meeting.partialReserveFundAmount;
-        const actualDeduction = Math.min(amountToDeduct, currentReserveBalance);
-
-        await dbRevertMeetingDeduction(meeting.id);
-
-        if (actualDeduction > 0.001) {
-          await dbRecordMeetingDeduction(meeting.id, meeting.name, actualDeduction, meeting.dateTime instanceof Timestamp ? meeting.dateTime.toDate() : new Date(meeting.dateTime) );
-          message = `모임 (${meeting.name}) 정산 확정. 회비에서 ${actualDeduction.toLocaleString()}원 사용.`;
-          if (actualDeduction < amountToDeduct) {
-            message += ` (회비 잔액 부족으로 부분 사용)`;
-          }
-        } else if (amountToDeduct > 0 && currentReserveBalance <= 0.001) {
-          message = `모임 (${meeting.name}) 정산 확정. 회비 잔액 부족으로 설정된 금액을 사용할 수 없습니다.`;
-        } else {
-           message = `모임 (${meeting.name}) 정산 확정. 설정된 회비 사용액이 없거나 0원입니다.`;
-        }
-      }
-    } else {
-      message = `모임 (${meeting.name}) 정산 확정. 회비 사용 설정이 되어있지 않습니다.`;
+    if (!meeting.useReserveFund || !meeting.partialReserveFundAmount || meeting.partialReserveFundAmount <= 0) {
+      // If not using reserve fund or amount is zero, just mark as settled
+      const updatedMeeting = await dbUpdateMeeting(meetingId, { isSettled: true });
+      if (!updatedMeeting) return { success: false, error: '정산 상태 업데이트에 실패했습니다.' };
+      revalidatePath(`/meetings/${meetingId}`);
+      revalidatePath('/');
+      return { success: true, meeting: updatedMeeting, message: `모임 (${meeting.name}) 정산이 확정되었습니다. (회비 사용 없음)` };
     }
+
+    const expenses = await dbGetExpensesByMeetingId(meetingId);
+    if (expenses.length === 0) {
+       const updatedMeeting = await dbUpdateMeeting(meetingId, { isSettled: true });
+       if (!updatedMeeting) return { success: false, error: '정산 상태 업데이트에 실패했습니다.' };
+       revalidatePath(`/meetings/${meetingId}`);
+       revalidatePath('/');
+       return { success: true, meeting: updatedMeeting, message: `모임 (${meeting.name}) 정산 확정. 지출 내역이 없어 회비는 사용되지 않았습니다.` };
+    }
+    
+    const currentReserveBalance = await getReserveFundBalance();
+    const amountToDeduct = meeting.partialReserveFundAmount; // Already a number or undefined
+    
+    let message = "";
+    let actualDeduction = 0;
+
+    if (amountToDeduct && amountToDeduct > 0) {
+        actualDeduction = Math.min(amountToDeduct, currentReserveBalance);
+        if (actualDeduction > 0.001) {
+            // Revert any previous deduction for this meeting before recording a new one to prevent duplicates if action is retried
+            await dbRevertMeetingDeduction(meeting.id); 
+            await dbRecordMeetingDeduction(meeting.id, meeting.name, actualDeduction, meeting.dateTime); // Pass meeting.dateTime as JS Date
+            message = `모임 (${meeting.name}) 정산 확정. 회비에서 ${actualDeduction.toLocaleString()}원 사용.`;
+            if (actualDeduction < amountToDeduct) {
+                message += ` (설정된 금액보다 회비 잔액이 부족하여 부분 사용)`;
+            }
+        } else if (amountToDeduct > 0 && currentReserveBalance <= 0.001) {
+             message = `모임 (${meeting.name}) 정산 확정. 회비 잔액 부족으로 설정된 금액을 사용할 수 없습니다.`;
+        } else {
+            message = `모임 (${meeting.name}) 정산 확정. 설정된 회비 사용액이 없거나 0원입니다.`;
+        }
+    } else {
+        message = `모임 (${meeting.name}) 정산 확정. 회비 사용 설정이 없거나 금액이 0원입니다.`;
+    }
+
 
     const updatedMeeting = await dbUpdateMeeting(meetingId, { isSettled: true });
     if (!updatedMeeting) {
+      // Attempt to revert deduction if settlement marking failed
+      if(actualDeduction > 0.001) await dbRevertMeetingDeduction(meeting.id);
       return { success: false, error: '정산 상태 업데이트에 실패했습니다.' };
     }
 
@@ -354,13 +382,19 @@ export async function finalizeMeetingSettlementAction(meetingId: string, current
 
   } catch (error) {
     console.error("finalizeMeetingSettlementAction Error:", error);
-    const errorMessage = error instanceof Error ? error.message : '정산 확정 중 예기치 않은 오류가 발생했습니다.';
+    // Attempt to revert and unsettle if error occurs mid-process
     try {
+        const meetingOnError = await dbGetMeetingById(meetingId);
+        if (meetingOnError && meetingOnError.useReserveFund && meetingOnError.partialReserveFundAmount && meetingOnError.partialReserveFundAmount > 0) {
+            await dbRevertMeetingDeduction(meetingId);
+        }
         await dbUpdateMeeting(meetingId, {isSettled: false});
-        await dbRevertMeetingDeduction(meetingId);
+        revalidatePath(`/meetings/${meetingId}`);
+        revalidatePath('/reserve-fund');
     } catch (revertError) {
         console.error("Failed to revert settlement status after error:", revertError);
     }
+    const errorMessage = error instanceof Error ? error.message : '정산 확정 중 예기치 않은 오류가 발생했습니다.';
     return { success: false, error: errorMessage };
   }
 }
@@ -405,7 +439,7 @@ export async function toggleMeetingShareAction(meetingId: string, currentUserId:
       return { success: false, error: "모임을 찾을 수 없습니다." };
     }
 
-    const user = await dbGetUserById(currentUserId);
+    const user = await dbGetUserById(currentUserId); // Fetch user data from Firestore
     const isCreator = meeting.creatorId === currentUserId;
     const isAdmin = user?.role === 'admin';
 
@@ -416,7 +450,7 @@ export async function toggleMeetingShareAction(meetingId: string, currentUserId:
     let updates: Partial<Omit<Meeting, 'id' | 'createdAt'>>;
 
     if (enable) {
-      const shareToken = nanoid(16); // Generate a 16-character token
+      const shareToken = nanoid(16);
       const shareExpiryDate = addDays(new Date(), expiryDays);
       updates = {
         isShareEnabled: true,
@@ -426,7 +460,7 @@ export async function toggleMeetingShareAction(meetingId: string, currentUserId:
     } else {
       updates = {
         isShareEnabled: false,
-        shareToken: null, // Use null to remove from Firestore
+        shareToken: null,
         shareExpiryDate: null,
       };
     }
@@ -437,7 +471,8 @@ export async function toggleMeetingShareAction(meetingId: string, currentUserId:
     }
 
     revalidatePath(`/meetings/${meetingId}`);
-    return { success: true, meeting: updatedMeeting, shareToken: enable ? updatedMeeting.shareToken : null };
+    // Return the updated meeting object, which now includes JS Date for shareExpiryDate if set
+    return { success: true, meeting: updatedMeeting };
 
   } catch (error) {
     console.error("toggleMeetingShareAction Error:", error);

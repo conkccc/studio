@@ -1,3 +1,4 @@
+
 'use client';
 
 import React, { useState, useTransition } from 'react';
@@ -21,6 +22,7 @@ import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover
 import { Check, ChevronsUpDown, Loader2 } from 'lucide-react';
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { cn } from '@/lib/utils';
+import { useAuth } from '@/contexts/AuthContext'; // For currentUserId
 
 const expenseSchema = z.object({
   description: z.string().min(1, '설명을 입력해주세요.').max(100, '설명은 100자 이내여야 합니다.'),
@@ -30,15 +32,15 @@ const expenseSchema = z.object({
   ),
   paidById: z.string().min(1, '결제자를 선택해주세요.'),
   splitType: z.enum(['equally', 'custom'], { required_error: '분배 방식을 선택해주세요.' }),
-  splitAmongIds: z.array(z.string()).optional(), // Used for 'equally'
+  splitAmongIds: z.array(z.string()).optional(), 
   customSplits: z.array(z.object({
     friendId: z.string(),
     amount: z.preprocess(
       (val) => (typeof val === 'string' ? parseFloat(val.replace(/,/g, '')) : val),
       z.number().min(0, '금액은 0 이상이어야 합니다.')
     ),
-  })).optional(), // Used for 'custom'
-}).refine(data => { // Ensure participants are selected for equal split
+  })).optional(), 
+}).refine(data => { 
   if (data.splitType === 'equally' && (!data.splitAmongIds || data.splitAmongIds.length === 0)) {
     return false;
   }
@@ -46,11 +48,10 @@ const expenseSchema = z.object({
 }, {
   message: '균등 분배 시 최소 1명의 참여자를 선택해야 합니다.',
   path: ['splitAmongIds'],
-}).refine(data => { // Ensure custom split amounts sum up to totalAmount
+}).refine(data => { 
   if (data.splitType === 'custom') {
-    if (!data.customSplits || data.customSplits.length === 0) return false; // Must have custom splits
+    if (!data.customSplits || data.customSplits.length === 0) return false; 
     const sum = data.customSplits.reduce((acc, split) => acc + split.amount, 0);
-    // Allow for small floating point discrepancies
     return Math.abs(sum - data.totalAmount) < 0.01;
   }
   return true;
@@ -63,7 +64,7 @@ type ExpenseFormData = z.infer<typeof expenseSchema>;
 
 interface AddExpenseDialogProps {
   meetingId: string;
-  participants: Friend[]; // Participants of the current meeting
+  participants: Friend[]; 
   onExpenseAdded: (expense: Expense) => void;
   triggerButton?: React.ReactNode;
 }
@@ -73,6 +74,7 @@ export function AddExpenseDialog({ meetingId, participants, onExpenseAdded, trig
   const [isPending, startTransition] = useTransition();
   const { toast } = useToast();
   const [payerSearchOpen, setPayerSearchOpen] = useState(false);
+  const { currentUser } = useAuth(); // For currentUserId
 
   const form = useForm<ExpenseFormData>({
     resolver: zodResolver(expenseSchema),
@@ -90,12 +92,17 @@ export function AddExpenseDialog({ meetingId, participants, onExpenseAdded, trig
   const watchTotalAmount = form.watch('totalAmount');
 
   React.useEffect(() => {
-    if (watchSplitType === 'equally') {
-      form.setValue('splitAmongIds', participants.map(p => p.id));
-    } else if (watchSplitType === 'custom') {
-       form.setValue('customSplits', participants.map(p => ({ friendId: p.id, amount: 0 })));
+    if (open) { // Reset/reinitialize form when dialog opens
+        form.reset({
+            description: '',
+            totalAmount: 0,
+            paidById: participants.length > 0 ? participants[0].id : '',
+            splitType: 'equally',
+            splitAmongIds: participants.map(p => p.id),
+            customSplits: participants.map(p => ({ friendId: p.id, amount: 0 })),
+        });
     }
-  }, [watchSplitType, participants, form.setValue, form]);
+  }, [open, participants, form]);
 
 
   const onSubmit = (data: ExpenseFormData) => {
@@ -109,18 +116,11 @@ export function AddExpenseDialog({ meetingId, participants, onExpenseAdded, trig
         ...(data.splitType === 'equally' && { splitAmongIds: data.splitAmongIds }),
         ...(data.splitType === 'custom' && { customSplits: data.customSplits }),
       };
-      const result = await createExpenseAction(payload);
+      const result = await createExpenseAction(payload, currentUser?.uid || null);
       if (result.success && result.expense) {
         toast({ title: '성공', description: '새로운 지출 항목이 추가되었습니다.' });
         onExpenseAdded(result.expense);
-        form.reset({
-          description: '',
-          totalAmount: 0,
-          paidById: participants.length > 0 ? participants[0].id : '',
-          splitType: 'equally',
-          splitAmongIds: participants.map(p => p.id),
-          customSplits: participants.map(p => ({ friendId: p.id, amount: 0 })),
-        });
+        // Form reset is now handled by useEffect on 'open' state change
         setOpen(false);
       } else {
         toast({
@@ -142,7 +142,7 @@ export function AddExpenseDialog({ meetingId, participants, onExpenseAdded, trig
   return (
     <Dialog open={open} onOpenChange={(isOpen) => {
       setOpen(isOpen);
-      if (!isOpen) form.reset(); // Reset form on close
+      // No explicit form.reset() needed here, useEffect handles it on 'open'
     }}>
       <DialogTrigger asChild>
         {triggerButton ? triggerButton : <Button>새 지출 추가</Button>}
@@ -153,7 +153,7 @@ export function AddExpenseDialog({ meetingId, participants, onExpenseAdded, trig
           <DialogDescription>지출 내역을 입력하고 정산 방식을 선택하세요.</DialogDescription>
         </DialogHeader>
         <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
-          <ScrollArea className="h-[60vh] p-1 pr-3"> {/* Adjusted height */}
+          <ScrollArea className="h-[60vh] p-1 pr-3"> 
             <div className="space-y-4 p-2">
               <div>
                 <Label htmlFor="description">설명 <span className="text-destructive">*</span></Label>
@@ -173,7 +173,7 @@ export function AddExpenseDialog({ meetingId, participants, onExpenseAdded, trig
                         value={formatNumber(field.value)}
                         onChange={(e) => {
                           const rawValue = e.target.value.replace(/,/g, '');
-                          field.onChange(rawValue === '' ? '' : parseFloat(rawValue));
+                          field.onChange(rawValue === '' ? 0 : parseFloat(rawValue));
                         }}
                         onBlur={field.onBlur}
                         disabled={isPending} 
@@ -289,7 +289,7 @@ export function AddExpenseDialog({ meetingId, participants, onExpenseAdded, trig
                         <Controller
                           name={`customSplits.${index}.amount`}
                           control={form.control}
-                          defaultValue={0}
+                          defaultValue={0} // Default value for each amount field
                           render={({ field }) => (
                              <Input 
                                 type="text" 
@@ -299,9 +299,10 @@ export function AddExpenseDialog({ meetingId, participants, onExpenseAdded, trig
                                 onChange={(e) => {
                                   const rawValue = e.target.value.replace(/,/g, '');
                                   const newAmount = rawValue === '' ? 0 : parseFloat(rawValue);
-                                  // Update specific custom split
                                   const currentCustomSplits = form.getValues('customSplits') || [];
-                                  const updatedSplits = currentCustomSplits.map(cs => cs.friendId === participant.id ? {...cs, amount: newAmount} : cs);
+                                  const updatedSplits = currentCustomSplits.map((cs, i) => 
+                                      i === index ? { ...cs, friendId: participant.id, amount: newAmount } : cs
+                                  );
                                   form.setValue('customSplits', updatedSplits, { shouldValidate: true });
                                 }}
                                 onBlur={field.onBlur}
@@ -309,8 +310,7 @@ export function AddExpenseDialog({ meetingId, participants, onExpenseAdded, trig
                               />
                           )}
                         />
-                         {/* Hidden input to store friendId, important for react-hook-form array structure */}
-                        <input type="hidden" {...form.register(`customSplits.${index}.friendId`)} value={participant.id} />
+                        <Controller name={`customSplits.${index}.friendId`} control={form.control} defaultValue={participant.id} render={({field}) => <input type="hidden" {...field} />} />
                       </div>
                     ))}
                   </div>
@@ -334,4 +334,3 @@ export function AddExpenseDialog({ meetingId, participants, onExpenseAdded, trig
     </Dialog>
   );
 }
-

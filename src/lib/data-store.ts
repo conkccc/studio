@@ -42,6 +42,9 @@ const convertTimestampsToDates = (data: DocumentData): DocumentData => {
   for (const field of dateFields) {
     if (processedData.hasOwnProperty(field) && processedData[field] instanceof Timestamp) {
       processedData[field] = (processedData[field] as Timestamp).toDate();
+    } else if (processedData.hasOwnProperty(field) && processedData[field] === null) {
+      // Ensure null timestamps remain null dates
+      processedData[field] = null;
     }
   }
   return processedData;
@@ -77,16 +80,22 @@ export const addUserOnLogin = async (userData: { id: string; email?: string | nu
   const userDocRef = doc(db, USERS_COLLECTION, userData.id);
   const userSnap = await getDoc(userDocRef);
   if (!userSnap.exists()) {
-    const newUser: Omit<User, 'id'> = {
+    const newUser: User = {
+      id: userData.id,
       email: userData.email || null,
       name: userData.name || null,
       role: 'none',
-      createdAt: Timestamp.now(), // Store as Timestamp
+      createdAt: new Date(), // Store as JS Date
     };
+    // Firestore will convert JS Date to Timestamp automatically
     await setDoc(userDocRef, newUser);
-    return { ...newUser, id: userData.id, createdAt: (newUser.createdAt as Timestamp).toDate() } as User;
+    return newUser;
   }
-  return dataFromSnapshot<User>(userSnap)!; // Should exist or be newly created
+  const existingUser = dataFromSnapshot<User>(userSnap);
+  if (!existingUser) { // Should not happen if userSnap.exists()
+    throw new Error("Failed to process existing user data after login.");
+  }
+  return existingUser;
 };
 
 export const updateUser = async (userId: string, updates: Partial<Omit<User, 'id' | 'createdAt'>>): Promise<User | null> => {
@@ -98,7 +107,7 @@ export const updateUser = async (userId: string, updates: Partial<Omit<User, 'id
 
 export const getUsers = async (): Promise<User[]> => {
   const usersCollectionRef = collection(db, USERS_COLLECTION);
-  const q = query(usersCollectionRef, orderBy('name', 'asc')); // Or orderBy email, createdAt
+  const q = query(usersCollectionRef, orderBy('name', 'asc'));
   const snapshot = await getDocs(q);
   return arrayFromSnapshot<User>(snapshot);
 };
@@ -112,13 +121,13 @@ export const getFriends = async (): Promise<Friend[]> => {
 };
 
 export const addFriend = async (friendData: Omit<Friend, 'id' | 'createdAt'>): Promise<Friend> => {
-  const dataToStore = {
+  const newFriendData: Omit<Friend, 'id'> = {
     ...friendData,
-    createdAt: Timestamp.now(),
+    createdAt: new Date(),
   };
   const friendsCollectionRef = collection(db, FRIENDS_COLLECTION);
-  const docRef = await addDoc(friendsCollectionRef, dataToStore);
-  return { ...friendData, id: docRef.id, createdAt: (dataToStore.createdAt as Timestamp).toDate() };
+  const docRef = await addDoc(friendsCollectionRef, newFriendData);
+  return { ...newFriendData, id: docRef.id };
 };
 
 export const updateFriend = async (id: string, updates: Partial<Omit<Friend, 'id' | 'createdAt'>>): Promise<Friend | null> => {
@@ -165,12 +174,17 @@ export const getMeetings = async ({
 }: GetMeetingsParams = {}): Promise<GetMeetingsResult> => {
   const meetingsCollectionRef = collection(db, MEETINGS_COLLECTION);
 
-  const allMeetingsSnapForYears = await getDocs(query(meetingsCollectionRef, orderBy('dateTime', 'desc')));
-  const allMeetingsForYears = arrayFromSnapshot<Meeting>(allMeetingsSnapForYears);
+  // Fetch all meeting start dates once to determine available years efficiently.
+  // This is still not perfectly optimal for very large datasets but better than fetching all docs.
+  const allMeetingsDatesQuery = query(meetingsCollectionRef, orderBy('dateTime', 'desc'));
+  const allMeetingsDatesSnap = await getDocs(allMeetingsDatesQuery);
   const yearsSet = new Set<number>();
-  allMeetingsForYears.forEach(m => {
-    if (m.dateTime && m.dateTime instanceof Date && !isNaN(m.dateTime.getTime())) {
-      yearsSet.add(m.dateTime.getFullYear());
+  allMeetingsDatesSnap.docs.forEach(docSnap => {
+    const meetingData = docSnap.data();
+    if (meetingData.dateTime && meetingData.dateTime instanceof Timestamp) {
+      yearsSet.add(meetingData.dateTime.toDate().getFullYear());
+    } else if (meetingData.dateTime && meetingData.dateTime instanceof Date) { // Already a Date
+      yearsSet.add(meetingData.dateTime.getFullYear());
     }
   });
   const availableYears = Array.from(yearsSet).sort((a, b) => b - a);
@@ -186,29 +200,29 @@ export const getMeetings = async ({
   const totalCountSnapshot = await getCountFromServer(countQuery);
   const totalCount = totalCountSnapshot.data().count;
 
+
   let qConstraints = [orderBy('dateTime', 'desc')];
   if (year) {
     const startOfYear = Timestamp.fromDate(new Date(year, 0, 1));
     const endOfYear = Timestamp.fromDate(new Date(year + 1, 0, 1));
-    qConstraints.push(where('dateTime', '>=', startOfYear));
-    qConstraints.push(where('dateTime', '<', endOfYear));
+    qConstraints.push(where('dateTime', '>=', startOfYear) as any); // Added 'as any' to bypass type issue if any
+    qConstraints.push(where('dateTime', '<', endOfYear) as any);
   }
 
   let finalQuery = query(meetingsCollectionRef, ...qConstraints);
 
-  if (limitParam) {
-    if (page > 1) {
-      const docsToSkip = (page - 1) * limitParam;
-      if (docsToSkip > 0) {
-        let skipperQueryConstraints = [...qConstraints, firestoreLimit(docsToSkip)];
-        const skipperSnapshot = await getDocs(query(meetingsCollectionRef, ...skipperQueryConstraints));
-        if (skipperSnapshot.docs.length === docsToSkip && skipperSnapshot.docs.length > 0) {
-          finalQuery = query(finalQuery, firestoreStartAfter(skipperSnapshot.docs[skipperSnapshot.docs.length - 1]));
-        } else if (skipperSnapshot.docs.length < docsToSkip) {
-          return { meetings: [], totalCount, availableYears };
-        }
-      }
+  if (limitParam && page > 1) {
+    const docsToSkip = (page - 1) * limitParam;
+    let skipperQuery = query(meetingsCollectionRef, ...qConstraints, firestoreLimit(docsToSkip));
+    const skipperSnapshot = await getDocs(skipperQuery);
+    if (skipperSnapshot.docs.length > 0 && skipperSnapshot.docs.length === docsToSkip) {
+      finalQuery = query(finalQuery, firestoreStartAfter(skipperSnapshot.docs[skipperSnapshot.docs.length - 1]));
+    } else if (skipperSnapshot.docs.length < docsToSkip) { // Not enough items to skip to this page
+        return { meetings: [], totalCount, availableYears };
     }
+  }
+
+  if (limitParam) {
     finalQuery = query(finalQuery, firestoreLimit(limitParam));
   }
 
@@ -218,6 +232,7 @@ export const getMeetings = async ({
   return { meetings, totalCount, availableYears };
 };
 
+
 export const getMeetingById = async (id: string): Promise<Meeting | undefined> => {
   if (!id) return undefined;
   const meetingDocRef = doc(db, MEETINGS_COLLECTION, id);
@@ -225,29 +240,25 @@ export const getMeetingById = async (id: string): Promise<Meeting | undefined> =
   return dataFromSnapshot<Meeting>(snapshot);
 };
 
-export const addMeeting = async (meetingData: Omit<Meeting, 'id' | 'createdAt' | 'isSettled'>): Promise<Meeting> => {
-  const dataToStore: any = {
+export const addMeeting = async (meetingData: Omit<Meeting, 'id' | 'createdAt' | 'isSettled' | 'isShareEnabled' | 'shareToken' | 'shareExpiryDate'>): Promise<Meeting> => {
+  const dataToStore: Omit<Meeting, 'id'> = {
     ...meetingData,
-    dateTime: Timestamp.fromDate(new Date(meetingData.dateTime as Date)),
-    createdAt: Timestamp.now(),
+    dateTime: Timestamp.fromDate(meetingData.dateTime as Date), // Ensure it's Firestore Timestamp
+    endTime: meetingData.endTime ? Timestamp.fromDate(meetingData.endTime as Date) : null,
+    createdAt: Timestamp.now(), // Firestore Timestamp for creation
     isSettled: false,
-    nonReserveFundParticipants: meetingData.nonReserveFundParticipants || [],
-    useReserveFund: meetingData.useReserveFund || false,
-    partialReserveFundAmount: meetingData.partialReserveFundAmount === undefined ? undefined : Number(meetingData.partialReserveFundAmount),
     isShareEnabled: false,
     shareToken: null,
     shareExpiryDate: null,
+    nonReserveFundParticipants: meetingData.nonReserveFundParticipants || [],
+    useReserveFund: meetingData.useReserveFund || false,
+    partialReserveFundAmount: meetingData.partialReserveFundAmount === undefined ? undefined : Number(meetingData.partialReserveFundAmount),
   };
-  if (meetingData.endTime) {
-    dataToStore.endTime = Timestamp.fromDate(new Date(meetingData.endTime as Date));
-  } else {
-    dataToStore.endTime = null;
-  }
 
   const meetingsCollectionRef = collection(db, MEETINGS_COLLECTION);
   const docRef = await addDoc(meetingsCollectionRef, dataToStore);
-  const snapshot = await getDoc(docRef);
-  return dataFromSnapshot<Meeting>(snapshot)!;
+  const newMeetingDocSnap = await getDoc(docRef);
+  return dataFromSnapshot<Meeting>(newMeetingDocSnap)!; // Should exist
 };
 
 export const updateMeeting = async (id: string, updates: Partial<Omit<Meeting, 'id' | 'createdAt'>>): Promise<Meeting | null> => {
@@ -257,7 +268,7 @@ export const updateMeeting = async (id: string, updates: Partial<Omit<Meeting, '
   if (updates.dateTime) {
     updateData.dateTime = Timestamp.fromDate(new Date(updates.dateTime as Date));
   }
-  if (updates.hasOwnProperty('endTime')) {
+  if (updates.hasOwnProperty('endTime')) { // Check if endTime is explicitly being set (even to null)
     updateData.endTime = updates.endTime ? Timestamp.fromDate(new Date(updates.endTime as Date)) : null;
   }
   if (updates.hasOwnProperty('partialReserveFundAmount')) {
@@ -266,8 +277,8 @@ export const updateMeeting = async (id: string, updates: Partial<Omit<Meeting, '
   if (updates.hasOwnProperty('shareExpiryDate')) {
     updateData.shareExpiryDate = updates.shareExpiryDate ? Timestamp.fromDate(new Date(updates.shareExpiryDate as Date)) : null;
   }
-  if (updates.hasOwnProperty('shareToken')) {
-    updateData.shareToken = updates.shareToken || null;
+   if (updates.hasOwnProperty('shareToken')) {
+    updateData.shareToken = updates.shareToken === undefined ? null : updates.shareToken;
   }
 
 
@@ -284,7 +295,7 @@ export const deleteMeeting = async (id: string): Promise<void> => {
   const expensesSnapshot = await getDocs(expensesCollectionRef);
   expensesSnapshot.forEach(expenseDoc => batch.delete(expenseDoc.ref));
 
-  await dbRevertMeetingDeduction(id, batch);
+  await dbRevertMeetingDeduction(id, batch); // Pass batch
 
   batch.delete(meetingDocRef);
   await batch.commit();
@@ -302,17 +313,13 @@ export const getMeetingByShareToken = async (token: string): Promise<Meeting | u
   const meeting = dataFromSnapshot<Meeting>(meetingDoc);
 
   if (meeting && meeting.shareExpiryDate) {
-    const expiry = meeting.shareExpiryDate instanceof Timestamp ? meeting.shareExpiryDate.toDate() : new Date(meeting.shareExpiryDate);
-    if (expiry < new Date()) {
+    // shareExpiryDate is already a JS Date due to dataFromSnapshot
+    if (meeting.shareExpiryDate < new Date()) {
       // console.log(`Share token ${token} for meeting ${meeting.id} has expired.`);
       // Optionally, update isShareEnabled to false here
       // await updateMeeting(meeting.id, { isShareEnabled: false, shareToken: null, shareExpiryDate: null });
       return undefined; // Expired
     }
-  } else if (meeting && !meeting.shareExpiryDate && meeting.isShareEnabled) {
-    // No expiry date but share is enabled - this might be an old share link or unintended state
-    // Depending on policy, you might want to treat this as valid or invalid.
-    // For now, let's assume if no expiry, it's valid if isShareEnabled is true.
   }
   return meeting;
 };
@@ -335,14 +342,14 @@ export const getExpenseById = async (meetingId: string, expenseId: string): Prom
 };
 
 export const addExpense = async (expenseData: Omit<Expense, 'id' | 'createdAt'>): Promise<Expense> => {
-  const dataToStore = {
+  const dataToStore: Omit<Expense, 'id'> = {
     ...expenseData,
-    createdAt: Timestamp.now(),
+    createdAt: Timestamp.now(), // Store as Timestamp
   };
   const expensesCollectionRef = collection(db, MEETINGS_COLLECTION, expenseData.meetingId, EXPENSES_SUBCOLLECTION);
   const docRef = await addDoc(expensesCollectionRef, dataToStore);
-  const snapshot = await getDoc(docRef);
-  return dataFromSnapshot<Expense>(snapshot)!;
+  const newExpenseDocSnap = await getDoc(docRef);
+  return dataFromSnapshot<Expense>(newExpenseDocSnap)!;
 };
 
 export const updateExpense = async (meetingId: string, expenseId: string, updates: Partial<Omit<Expense, 'id' | 'createdAt' | 'meetingId'>>): Promise<Expense | null> => {
@@ -369,13 +376,15 @@ export const getReserveFundBalance = async (): Promise<number> => {
     return balanceSnap.data().balance;
   }
   try {
+    // Initialize if it doesn't exist
     await setDoc(balanceDocRef, { balance: 0 }, { merge: true });
   } catch (error) {
       console.error("Error initializing reserve fund balance:", error);
-      return 0;
+      return 0; // Return 0 if initialization fails
   }
-  return 0;
+  return 0; // Default to 0 if not found or after initialization error
 };
+
 
 export const getLoggedReserveFundTransactions = async (): Promise<ReserveFundTransaction[]> => {
   const transactionsCollectionRef = collection(db, RESERVE_FUND_TRANSACTIONS_COLLECTION);
@@ -388,6 +397,7 @@ export const dbSetReserveFundBalance = async (newBalance: number, description?: 
   const batch = writeBatch(db);
   const balanceDocRef = getReserveFundBalanceDocRef();
 
+  // Ensure the document exists before trying to update, or set it if it doesn't
   const balanceSnap = await getDoc(balanceDocRef);
   if (!balanceSnap.exists()) {
     batch.set(balanceDocRef, { balance: newBalance });
@@ -397,25 +407,29 @@ export const dbSetReserveFundBalance = async (newBalance: number, description?: 
 
   const logEntry: Omit<ReserveFundTransaction, 'id'> = {
     type: 'balance_update',
-    amount: newBalance,
+    amount: newBalance, // For 'balance_update', amount is the new balance itself.
     description: description || `잔액 ${newBalance.toLocaleString()}원으로 설정됨`,
-    date: Timestamp.now().toDate(),
+    date: new Date(), // Store as JS Date, Firestore converts to Timestamp
   };
-  const newLogDocRef = doc(collection(db, RESERVE_FUND_TRANSACTIONS_COLLECTION));
+  const newLogDocRef = doc(collection(db, RESERVE_FUND_TRANSACTIONS_COLLECTION)); // Auto-generate ID
   batch.set(newLogDocRef, logEntry);
   await batch.commit();
 };
 
 export const dbRecordMeetingDeduction = async (meetingId: string, meetingName: string, amountDeducted: number, date: Date, batch?: any): Promise<void> => {
-  if (amountDeducted <= 0.001) return;
+  if (amountDeducted <= 0.001) return; // No need to record zero or negligible deductions
 
   const useExistingBatch = !!batch;
   const currentBatch = useExistingBatch ? batch : writeBatch(db);
   const balanceDocRef = getReserveFundBalanceDocRef();
 
+  // Ensure the balance document exists if not using an existing batch
   if (!useExistingBatch) {
     const balanceSnap = await getDoc(balanceDocRef);
     if (!balanceSnap.exists()) {
+       // Initialize balance if it doesn't exist. This should ideally be handled
+       // by a separate initialization step or by ensuring getReserveFundBalance is called first.
+       // For robustness, setting it here if it's missing.
        currentBatch.set(balanceDocRef, { balance: 0 });
     }
   }
@@ -423,9 +437,9 @@ export const dbRecordMeetingDeduction = async (meetingId: string, meetingName: s
 
   const logEntry: Omit<ReserveFundTransaction, 'id'> = {
     type: 'meeting_deduction',
-    amount: -amountDeducted,
+    amount: -amountDeducted, // Store deduction as a negative value
     description: `모임 (${meetingName}) 회비 사용`,
-    date: date, // Already a JS Date
+    date: date, // JS Date, Firestore will convert
     meetingId: meetingId,
   };
   const newLogDocRef = doc(collection(db, RESERVE_FUND_TRANSACTIONS_COLLECTION));
@@ -446,24 +460,25 @@ export const dbRevertMeetingDeduction = async (meetingId: string, batch?: any): 
 
   if (!snapshot.empty) {
     snapshot.forEach(txDoc => {
-      const txData = txDoc.data() as Partial<ReserveFundTransaction>;
+      const txData = txDoc.data() as Partial<ReserveFundTransaction>; // Already a JS object
       if (txData.amount && typeof txData.amount === 'number') {
-        totalRevertedAmount += Math.abs(txData.amount);
+        totalRevertedAmount += Math.abs(txData.amount); // Amount is stored negative, so abs for reverting
       }
       currentBatch.delete(txDoc.ref);
     });
 
     if (totalRevertedAmount > 0.001) {
       const balanceDocRef = getReserveFundBalanceDocRef();
-      if (!useExistingBatch) {
+       if (!useExistingBatch) {
         const balanceSnap = await getDoc(balanceDocRef);
         if (!balanceSnap.exists()) {
-           currentBatch.set(balanceDocRef, { balance: 0 });
+           currentBatch.set(balanceDocRef, { balance: 0 }); // Should not happen if app is used normally
         }
       }
       currentBatch.update(balanceDocRef, { balance: increment(totalRevertedAmount) });
     }
   }
+  // Only commit if we created the batch and there was something to revert
   if (!useExistingBatch && totalRevertedAmount > 0.001) {
     await currentBatch.commit();
   }

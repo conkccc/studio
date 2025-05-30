@@ -11,10 +11,10 @@ import { useAuth } from '@/contexts/AuthContext';
 import type { Meeting, Friend } from '@/lib/types';
 import { useSearchParams } from 'next/navigation';
 
-const ITEMS_PER_PAGE = 5;
+const ITEMS_PER_PAGE = 10; // Updated to 10
 
 export default function MeetingsPage() {
-  const { currentUser, isAdmin, loading: authLoading } = useAuth();
+  const { currentUser, isAdmin, userRole, loading: authLoading } = useAuth();
   const searchParams = useSearchParams();
   const yearParam = searchParams.get('year');
   const pageParam = searchParams.get('page');
@@ -23,7 +23,7 @@ export default function MeetingsPage() {
   const [allFriends, setAllFriends] = useState<Friend[]>([]);
   const [availableYears, setAvailableYears] = useState<number[]>([]);
   const [selectedYear, setSelectedYear] = useState<number | undefined>(undefined);
-  const [meetingsLoading, setMeetingsLoading] = useState(true);
+  const [dataLoading, setDataLoading] = useState(true); // Changed from meetingsLoading for clarity
   const [totalMeetingCount, setTotalMeetingCount] = useState(0);
 
   const currentPage = useMemo(() => {
@@ -32,26 +32,42 @@ export default function MeetingsPage() {
   }, [pageParam]);
 
   useEffect(() => {
-    setSelectedYear(yearParam ? parseInt(yearParam) : undefined);
+    if (yearParam === null || yearParam === "all") {
+      setSelectedYear(undefined);
+    } else {
+      const parsedYear = parseInt(yearParam, 10);
+      if (!isNaN(parsedYear)) {
+        setSelectedYear(parsedYear);
+      } else {
+        setSelectedYear(undefined); // Invalid year param
+      }
+    }
   }, [yearParam]);
 
  useEffect(() => {
+    if (authLoading && process.env.NEXT_PUBLIC_DEV_MODE_SKIP_AUTH !== "true") {
+      setDataLoading(true);
+      return;
+    }
+
+    // Allow if dev mode skip auth, or if not loading and (user is admin/user OR page is public - meetings list can be public)
+    const canFetchData = process.env.NEXT_PUBLIC_DEV_MODE_SKIP_AUTH === "true" ||
+                         (!authLoading && (userRole === 'admin' || userRole === 'user' || !currentUser)); // Allows public viewing if no user
+
+    if (!canFetchData) {
+      setDataLoading(false);
+      setMeetings([]);
+      setTotalMeetingCount(0);
+      setAvailableYears([]);
+      return;
+    }
+    
     const fetchData = async () => {
-      // Wait for auth to load, but proceed if user is not logged in (for public view)
-      // Proceed if auth is done or if not logged in (public can see meetings)
-      if (authLoading && currentUser) { 
-        // If auth is still loading AND there's a current user, it might mean admin status isn't confirmed.
-        // However, getMeetings itself doesn't differentiate by admin for fetching, only UI does.
-        // So, we can proceed. If authLoading is true and currentUser is null, middleware handles redirect.
-      }
-
-
-      setMeetingsLoading(true);
+      setDataLoading(true);
       try {
-        // Firestore version of getMeetings returns an object { meetings, totalCount, availableYears }
         const fetchedMeetingsData = await getMeetings({
           page: currentPage,
-          limitParam: ITEMS_PER_PAGE, // Corrected parameter name
+          limitParam: ITEMS_PER_PAGE,
           year: selectedYear,
         });
 
@@ -59,60 +75,47 @@ export default function MeetingsPage() {
         setTotalMeetingCount(fetchedMeetingsData.totalCount);
         setAvailableYears(fetchedMeetingsData.availableYears);
 
-        if (allFriends.length === 0) { // Fetch friends only if not already fetched
+        if (allFriends.length === 0 && (isAdmin || userRole === 'user')) { // Fetch friends only if needed and authorized
              const fetchedFriends = await getFriends();
              setAllFriends(fetchedFriends);
         }
       } catch (error) {
         console.error("Failed to fetch meetings:", error);
-        // Optionally set an error state here
+        setMeetings([]);
+        setTotalMeetingCount(0);
       } finally {
-        setMeetingsLoading(false);
+        setDataLoading(false);
       }
     };
 
-    // Only run fetchData if auth is not loading OR if there's no current user (public access)
-    if (!authLoading || !currentUser) {
-        fetchData();
-    } else if (authLoading && !currentUser) {
-        // If still loading auth and no user, likely to be redirected by middleware or show login prompt
-        // We might not want to fetch data yet, or let public pages fetch regardless of user.
-        // For now, if auth is loading AND there's no user, we also don't fetch to avoid premature calls.
-        // But typically, public pages should fetch data regardless of auth state.
-        // Let's adjust to fetch if not authLoading, OR if authLoading but it's for a public view (no user yet)
-        // Simplified: If auth is done, fetch. Or if it's loading but for a public view, allow.
-        // The condition "(!authLoading || !currentUser)" covers most cases.
-        // If authLoading is true and currentUser is also true, implies admin check might be pending.
-        // If authLoading is true and currentUser is false, implies public or about to be redirected.
-        setMeetingsLoading(false); // Stop meetings loading if auth is determining user state for protected view.
-    }
+    fetchData();
 
-
-  }, [authLoading, currentUser, isAdmin, currentPage, selectedYear, allFriends.length]);
+  }, [authLoading, currentUser, isAdmin, userRole, currentPage, selectedYear, allFriends.length]); // yearParam removed, selectedYear used
 
   const totalPages = useMemo(() => {
     return Math.ceil(totalMeetingCount / ITEMS_PER_PAGE);
   }, [totalMeetingCount]);
 
-  const dataLoading = authLoading || meetingsLoading;
 
-  if (dataLoading && currentUser) { // Only show full page loader if user is logged in and waiting for data
+  if (authLoading && process.env.NEXT_PUBLIC_DEV_MODE_SKIP_AUTH !== "true") {
     return (
       <div className="flex justify-center items-center min-h-[calc(100vh-150px)]">
         <p className="text-xl text-muted-foreground">모임 목록 로딩 중...</p>
       </div>
     );
   }
-  
-  // Fallback for when data might be loading but for a public view, or quick flicker
-  if (meetingsLoading && !currentUser && !authLoading){
-     return (
-      <div className="flex justify-center items-center min-h-[calc(100vh-150px)]">
-        <p className="text-xl text-muted-foreground">모임 목록 로딩 중...</p>
-      </div>
-    );
-  }
 
+  if (!currentUser && process.env.NEXT_PUBLIC_DEV_MODE_SKIP_AUTH !== "true" && (userRole !== 'none' && userRole !== null ) ) { // 'none' or null role can see public page
+     // This should ideally be caught by middleware but as a fallback if a user is logged out
+     // while on a page that normally requires auth.
+     // However, meetings list can be public.
+  }
+  
+  // Role 'none' can still view meetings if this page is public
+  if (userRole === 'none' && currentUser && process.env.NEXT_PUBLIC_DEV_MODE_SKIP_AUTH !== "true") {
+      // UI for 'none' role if they can see meetings (e.g. read-only view)
+      // Or they are redirected by middleware
+  }
 
   return (
     <div className="space-y-6">
@@ -133,15 +136,20 @@ export default function MeetingsPage() {
         )}
       </div>
       
-      <MeetingListClient 
-        initialMeetings={meetings}
-        allFriends={allFriends}
-        availableYears={availableYears}
-        selectedYear={selectedYear}
-        currentPage={currentPage}
-        totalPages={totalPages}
-      />
+      {dataLoading && (isAdmin || userRole === 'user') ? ( // Show loading indicator if data is loading for admin/user
+         <div className="flex justify-center items-center min-h-[200px]">
+            <p className="text-muted-foreground">모임 정보 로딩 중...</p>
+         </div>
+      ) : (
+        <MeetingListClient 
+          initialMeetings={meetings}
+          allFriends={allFriends} // Pass allFriends for participant name resolution
+          availableYears={availableYears}
+          selectedYear={selectedYear}
+          currentPage={currentPage}
+          totalPages={totalPages}
+        />
+      )}
     </div>
   );
 }
-

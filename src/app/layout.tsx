@@ -1,6 +1,5 @@
 
 import type { Metadata, Viewport } from 'next';
-// GeistSans and GeistMono imports removed
 import './globals.css';
 import { AuthProvider } from '@/contexts/AuthContext';
 import { AppShell } from '@/components/layout/AppShell';
@@ -30,10 +29,9 @@ export default function RootLayout({
 }: {
   children: React.ReactNode;
 }) {
-  // ADMIN_EMAIL logic removed
   return (
-    <html lang="ko" className='h-full'> {/* Apply h-full to html */}
-      <body className="h-full antialiased"> {/* Apply h-full to body, removed font variables */}
+    <html lang="ko" className='h-full'>
+      <body className="h-full antialiased">
         <AuthProvider>
           <SidebarProvider>
             <AppShell>{children}</AppShell>

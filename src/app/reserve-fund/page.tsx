@@ -2,7 +2,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { getReserveFundBalance, getLoggedReserveFundTransactions } from '@/lib/data-store'; // Now async
+import { getReserveFundBalance, getLoggedReserveFundTransactions } from '@/lib/data-store';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { ReserveFundClient } from '@/components/reserve-fund/ReserveFundClient';
 import { useAuth } from '@/contexts/AuthContext';
@@ -11,35 +11,47 @@ import { Button } from '@/components/ui/button';
 import type { ReserveFundTransaction } from '@/lib/types';
 
 export default function ReserveFundPage() {
-  const { currentUser, isAdmin, loading: authLoading } = useAuth();
+  const { currentUser, isAdmin, userRole, loading: authLoading } = useAuth();
   const [balance, setBalance] = useState<number>(0);
   const [transactions, setTransactions] = useState<ReserveFundTransaction[]>([]);
   const [dataLoading, setDataLoading] = useState(true);
 
   useEffect(() => {
-    if (!authLoading && currentUser && isAdmin) {
-      const fetchData = async () => {
-        try {
-          const [fetchedBalance, fetchedTransactions] = await Promise.all([
-            getReserveFundBalance(),
-            getLoggedReserveFundTransactions()
-          ]);
-          setBalance(fetchedBalance);
-          setTransactions(fetchedTransactions);
-        } catch (error) {
-          console.error("Failed to fetch reserve fund data:", error);
-        } finally {
-          setDataLoading(false);
-        }
-      };
-      fetchData();
-    } else if (!authLoading && (!currentUser || !isAdmin)) {
-      setDataLoading(false);
+    if (authLoading && process.env.NEXT_PUBLIC_DEV_MODE_SKIP_AUTH !== "true") {
+      setDataLoading(true);
+      return;
     }
-  }, [currentUser, isAdmin, authLoading]);
+
+    if (!currentUser || !isAdmin) { // Only admin can access reserve fund page
+      setDataLoading(false);
+      setBalance(0);
+      setTransactions([]);
+      return;
+    }
+
+    const fetchData = async () => {
+      setDataLoading(true);
+      try {
+        const [fetchedBalance, fetchedTransactions] = await Promise.all([
+          getReserveFundBalance(),
+          getLoggedReserveFundTransactions()
+        ]);
+        setBalance(fetchedBalance);
+        setTransactions(fetchedTransactions);
+      } catch (error) {
+        console.error("Failed to fetch reserve fund data:", error);
+        setBalance(0);
+        setTransactions([]);
+      } finally {
+        setDataLoading(false);
+      }
+    };
+    fetchData();
+
+  }, [authLoading, currentUser, isAdmin]);
 
 
-  if (authLoading || dataLoading) {
+  if (authLoading || (isAdmin && dataLoading)) {
     return (
       <div className="flex justify-center items-center min-h-[calc(100vh-150px)]">
         <p className="text-xl text-muted-foreground">회비 정보 로딩 중...</p>
@@ -47,7 +59,7 @@ export default function ReserveFundPage() {
     );
   }
 
-  if (!currentUser) {
+  if (!currentUser && process.env.NEXT_PUBLIC_DEV_MODE_SKIP_AUTH !== "true") { // Should be caught by middleware
     return (
       <div className="container mx-auto py-8 text-center">
         <h1 className="text-2xl font-bold mb-4">로그인 필요</h1>
@@ -59,7 +71,7 @@ export default function ReserveFundPage() {
     );
   }
 
-  if (!isAdmin) {
+  if (!isAdmin) { // Covers 'user' and 'none' roles
      return (
       <div className="container mx-auto py-8 text-center">
         <h1 className="text-2xl font-bold mb-4">접근 권한 없음</h1>
@@ -71,6 +83,7 @@ export default function ReserveFundPage() {
     );
   }
 
+  // Admin view
   return (
     <div className="space-y-6">
       <div>
@@ -89,7 +102,11 @@ export default function ReserveFundPage() {
         </CardContent>
       </Card>
       
-      <ReserveFundClient initialTransactions={transactions} initialBalance={balance} />
+      <ReserveFundClient 
+        initialTransactions={transactions} 
+        initialBalance={balance} 
+        currentUserId={currentUser?.uid || ''} // Pass currentUserId for actions
+      />
 
     </div>
   );

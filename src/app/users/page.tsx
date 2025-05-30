@@ -17,14 +17,17 @@ export default function UsersPage() {
 
   useEffect(() => {
     if (authLoading) {
-      return; // Wait for auth context to load
-    }
-
-    if (!currentUser || !isAdmin || userRole === 'none') {
-      setDataLoading(false); // No need to load data if not admin or not proper role
+      setDataLoading(true); // Explicitly set data loading if auth is loading
       return;
     }
 
+    if (!currentUser || !isAdmin) { // Stricter check: only admin can fetch users
+      setDataLoading(false);
+      setUsers([]); // Clear users if not admin
+      return;
+    }
+
+    // At this point, currentUser is an admin
     const fetchUsers = async () => {
       setDataLoading(true);
       try {
@@ -32,18 +35,17 @@ export default function UsersPage() {
         setUsers(fetchedUsers);
       } catch (error) {
         console.error("Failed to fetch users:", error);
-        // Optionally set an error state to display
+        setUsers([]);
       } finally {
         setDataLoading(false);
       }
     };
 
-    if (isAdmin) {
-      fetchUsers();
-    }
-  }, [authLoading, currentUser, isAdmin, userRole]);
+    fetchUsers();
+    
+  }, [authLoading, currentUser, isAdmin]);
 
-  if (authLoading || dataLoading) {
+  if (authLoading || (isAdmin && dataLoading)) { // Show loader if auth is loading OR if admin and data is loading
     return (
       <div className="flex justify-center items-center min-h-[calc(100vh-150px)]">
         <p className="text-xl text-muted-foreground">사용자 목록 로딩 중...</p>
@@ -51,7 +53,7 @@ export default function UsersPage() {
     );
   }
 
-  if (!currentUser && process.env.NEXT_PUBLIC_DEV_MODE_SKIP_AUTH !== "true") {
+  if (!currentUser && process.env.NEXT_PUBLIC_DEV_MODE_SKIP_AUTH !== "true") { // Should be caught by middleware
      return (
       <div className="container mx-auto py-8 text-center">
         <h1 className="text-2xl font-bold mb-4">로그인 필요</h1>
@@ -63,7 +65,7 @@ export default function UsersPage() {
     );
   }
 
-  if (!isAdmin || userRole === 'none') {
+  if (!isAdmin) { // If not an admin (includes role 'user' and 'none')
     return (
       <div className="container mx-auto py-8 text-center">
         <h1 className="text-2xl font-bold mb-4">접근 권한 없음</h1>
@@ -75,6 +77,7 @@ export default function UsersPage() {
     );
   }
 
+  // Admin view
   return (
     <div className="space-y-6">
       <Card>
@@ -85,7 +88,7 @@ export default function UsersPage() {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <UserListClient initialUsers={users} currentAdminId={currentUser?.uid || null} />
+          <UserListClient initialUsers={users} currentAdminId={currentUser?.uid || ''} />
         </CardContent>
       </Card>
     </div>
