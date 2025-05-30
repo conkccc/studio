@@ -12,7 +12,7 @@ export default function LoginPage() {
   const router = useRouter();
 
   useEffect(() => {
-    if (!loading && currentUser && userRole !== null) {
+    if (!loading && currentUser && userRole !== null && userRole !== 'none') {
       router.push('/');
     }
   }, [currentUser, loading, router, userRole]);
@@ -29,6 +29,18 @@ export default function LoginPage() {
     return (
       <div className="flex flex-col justify-center items-center min-h-screen text-center">
         <p className="text-xl text-muted-foreground mb-4">사용자 정보 확인 중...</p>
+        <Button variant="outline" onClick={async () => { await signOut(); }}>로그아웃</Button>
+      </div>
+    );
+  }
+
+  if (!loading && currentUser && userRole === 'none') {
+    return (
+      <div className="flex flex-col justify-center items-center min-h-screen text-center">
+        <p className="text-xl text-muted-foreground mb-4">
+          아직 권한이 부여되지 않은 계정입니다.<br />
+          관리자의 승인을 기다려주세요.
+        </p>
         <Button variant="outline" onClick={async () => { await signOut(); }}>로그아웃</Button>
       </div>
     );

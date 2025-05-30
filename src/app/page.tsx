@@ -139,10 +139,10 @@ export default function DashboardPage() {
                   <h3 className="font-semibold mb-2 text-lg">회비 잔액</h3>
                   {dataLoading ? (
                     <p className="text-3xl font-bold text-primary">잔액 로딩 중...</p>
-                  ) : reserveBalance !== null ? (
-                    <p className="text-3xl font-bold text-primary">₩{reserveBalance.toLocaleString()}</p>
+                  ) : reserveBalance === null ? (
+                    <p className="text-3xl font-bold text-primary">잔액 정보 없음</p>
                   ) : (
-                    <p className="text-3xl font-bold text-primary">잔액 정보를 불러올 수 없습니다.</p>
+                    <p className="text-3xl font-bold text-primary">₩{reserveBalance.toLocaleString()}</p>
                   )}
                   <p className="text-sm text-muted-foreground">다음 모임을 위해 충분한 잔액이 남아있습니다.</p>
                   <Button asChild variant="secondary" className="mt-4">

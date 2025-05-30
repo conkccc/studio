@@ -374,19 +374,25 @@ export const deleteExpense = async (meetingId: string, expenseId: string ): Prom
 // --- Reserve Fund Functions ---
 const getReserveFundBalanceDocRef = () => doc(db, RESERVE_FUND_CONFIG_COLLECTION, RESERVE_FUND_BALANCE_DOC_ID);
 
-export const getReserveFundBalance = async (): Promise<number> => {
+export const getReserveFundBalance = async (): Promise<number|null> => {
   const balanceDocRef = getReserveFundBalanceDocRef();
   const balanceSnap = await getDoc(balanceDocRef);
-  if (balanceSnap.exists() && typeof balanceSnap.data()?.balance === 'number') {
-    return balanceSnap.data().balance;
+  if (balanceSnap.exists()) {
+    const data = balanceSnap.data();
+    if (typeof data?.balance === 'number') {
+      return data.balance;
+    } else {
+      // balance 필드가 아예 없을 때 null 반환
+      return null;
+    }
   }
   try {
     await setDoc(balanceDocRef, { balance: 0 }, { merge: true });
   } catch (error) {
       console.error("Error initializing reserve fund balance:", error);
-      return 0;
+      return null;
   }
-  return 0;
+  return null;
 };
 
 export const getLoggedReserveFundTransactions = async (): Promise<ReserveFundTransaction[]> => {
