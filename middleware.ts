@@ -4,10 +4,13 @@ import type { NextRequest } from 'next/server';
 // Define public paths that do not require authentication
 const publicPaths = ['/login', '/share/meeting', '/img', '/favicon.ico', '/api/auth']; 
 
+// --- 간단한 메모리 기반 Rate Limiting (IP 기준) ---
+const rateLimitMap = new Map<string, { count: number; last: number }>();
+const WINDOW = 60 * 1000; // 1분
+const LIMIT = 20; // 1분에 20회
+
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
-
-  // Check if the current path is one of the public paths or an internal Next.js path
   const isPublicPath = publicPaths.some(path => pathname.startsWith(path));
   const isNextInternal = pathname.startsWith('/_next/') || pathname.startsWith('/static/') || /\.(.*)$/.test(pathname);
 
@@ -15,7 +18,24 @@ export function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
-  // 항상 다음으로 진행
+  // --- Rate Limiting 적용 ---
+  // Next.js Edge 환경에서는 request.ip가 없으므로 x-forwarded-for만 사용
+  const ip = request.headers.get('x-forwarded-for') || 'unknown';
+  const now = Date.now();
+  const entry = rateLimitMap.get(ip) || { count: 0, last: now };
+
+  if (now - entry.last > WINDOW) {
+    entry.count = 1;
+    entry.last = now;
+  } else {
+    entry.count += 1;
+  }
+  rateLimitMap.set(ip, entry);
+
+  if (entry.count > LIMIT) {
+    return new NextResponse('Too Many Requests (rate limited)', { status: 429 });
+  }
+
   return NextResponse.next();
 }
 
