@@ -1,18 +1,22 @@
 
 'use client';
 
-import type { Meeting, Expense, Friend } from '@/lib/types';
-import React, { useState, useTransition, useEffect, useMemo } from 'react';
+import type { Meeting, Expense, Friend, User } from '@/lib/types';
+import React, { useState, useTransition, useEffect, useMemo, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
-import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
+import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { format, differenceInCalendarDays, isValid } from 'date-fns';
+import { format, differenceInCalendarDays, isValid, addDays } from 'date-fns';
 import { ko } from 'date-fns/locale';
-import { deleteMeetingAction, finalizeMeetingSettlementAction } from '@/lib/actions';
+import { deleteMeetingAction, finalizeMeetingSettlementAction, toggleMeetingShareAction } from '@/lib/actions';
 import { useToast } from '@/hooks/use-toast';
-import { CalendarDays, MapPin, Users, Edit3, Trash2, PlusCircle, Loader2, ExternalLink, PiggyBank, CheckCircle2, AlertCircle, Info } from 'lucide-react';
+import {
+  CalendarDays, MapPin, Users as UsersIcon, Edit3, Trash2, PlusCircle, Loader2, ExternalLink, Eye,
+  PiggyBank, CheckCircle2, AlertCircle, Info, Settings, Link2, Copy, Share2, ArrowLeft
+} from 'lucide-react';
 import { AddExpenseDialog } from './AddExpenseDialog';
+import { EditExpenseDialog } from './EditExpenseDialog';
 import { ExpenseItem } from './ExpenseItem';
 import { PaymentSummary } from './PaymentSummary';
 import {
@@ -28,46 +32,91 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Badge } from '@/components/ui/badge';
 import { useAuth } from '@/contexts/AuthContext';
+import { Label } from '@/components/ui/label';
+import { Switch } from '@/components/ui/switch';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Input } from '@/components/ui/input';
+import { cn } from '@/lib/utils';
+import { googleMapsMapId } from '@/lib/firebase'; // Import mapId
 
 interface MeetingDetailsClientProps {
   initialMeeting: Meeting;
   initialExpenses: Expense[];
   allFriends: Friend[];
+  isReadOnlyShare?: boolean; // For shared, read-only view
 }
 
 export function MeetingDetailsClient({
   initialMeeting,
   initialExpenses,
   allFriends,
+  isReadOnlyShare = false,
 }: MeetingDetailsClientProps) {
   const [meeting, setMeeting] = useState<Meeting>(initialMeeting);
-  const [expenses, setExpenses] = useState<Expense[]>(initialExpenses.sort((a,b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()));
+  const [expenses, setExpenses] = useState<Expense[]>(initialExpenses.sort((a,b) => (b.createdAt instanceof Date ? b.createdAt.getTime() : (b.createdAt as any).toDate().getTime()) - (a.createdAt instanceof Date ? a.createdAt.getTime() : (a.createdAt as any).toDate().getTime())));
   const [isDeleting, setIsDeleting] = useState(false);
   const [isFinalizing, setIsFinalizing] = useState(false);
   const [formattedMeetingDateTime, setFormattedMeetingDateTime] = useState<string | null>(null);
 
+  // Share settings state
+  const [shareEnabled, setShareEnabled] = useState(meeting.isShareEnabled || false);
+  const [selectedExpiryDays, setSelectedExpiryDays] = useState<string>("7");
+  const [currentShareLink, setCurrentShareLink] = useState<string | null>(null);
+  const [isShareSettingsSaving, setIsShareSettingsSaving] = useState(false);
+
   const { toast } = useToast();
   const router = useRouter();
-  const { currentUser, isAdmin } = useAuth(); 
+  const { currentUser, isAdmin, userRole } = useAuth();
   const isCreator = currentUser?.uid === meeting.creatorId;
+
+  const mapContainerRef = useRef<HTMLDivElement>(null);
+  const mapInstanceRef = useRef<google.maps.Map | null>(null);
+  const markerInstanceRef = useRef<google.maps.marker.AdvancedMarkerElement | null>(null);
+  const [isMapsJsApiLoaded, setIsMapsJsApiLoaded] = useState(false);
+  const [showMap, setShowMap] = useState(false);
+
+  const isMapFeatureAvailable = isMapsJsApiLoaded && meeting.locationCoordinates;
+
+  useEffect(() => {
+    // Check if Google Maps API is already loaded
+    if (window.google && window.google.maps && window.google.maps.Map && window.google.maps.marker) {
+      setIsMapsJsApiLoaded(true);
+    } else {
+      // If not, you might need a more robust way to ensure it loads if this component
+      // is rendered without the main form's loader. For now, we assume it's loaded elsewhere or rely on this check.
+      console.warn("MeetingDetailsClient: Google Maps API not fully loaded.");
+    }
+  }, []);
+
 
   useEffect(() => {
     setMeeting(initialMeeting);
+    setShareEnabled(initialMeeting.isShareEnabled || false);
+    if (initialMeeting.isShareEnabled && initialMeeting.shareToken) {
+      setCurrentShareLink(`${window.location.origin}/share/meeting/${initialMeeting.shareToken}`);
+    } else {
+      setCurrentShareLink(null);
+    }
   }, [initialMeeting]);
 
   useEffect(() => {
-    setExpenses(initialExpenses.sort((a,b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()));
+    setExpenses(initialExpenses.sort((a,b) => (b.createdAt instanceof Date ? b.createdAt.getTime() : (b.createdAt as any).toDate().getTime()) - (a.createdAt instanceof Date ? a.createdAt.getTime() : (a.createdAt as any).toDate().getTime())));
   }, [initialExpenses]);
-
 
   useEffect(() => {
     if (meeting?.dateTime) {
       let localFormattedString;
-      const startTime = meeting.dateTime; 
-      if (meeting.endTime && isValid(new Date(meeting.endTime))) { 
-        const endTime = new Date(meeting.endTime); 
-        const duration = differenceInCalendarDays(endTime, startTime);
-        localFormattedString = `${format(startTime, 'yyyy년 M월 d일 HH:mm', { locale: ko })} (${Math.max(0, duration) + 1}일)`;
+      const startTime = meeting.dateTime instanceof Timestamp ? meeting.dateTime.toDate() : new Date(meeting.dateTime);
+      if (meeting.endTime) {
+        const endTime = meeting.endTime instanceof Timestamp ? meeting.endTime.toDate() : new Date(meeting.endTime);
+        if (isValid(startTime) && isValid(endTime)) {
+           const duration = differenceInCalendarDays(endTime, startTime);
+           localFormattedString = `${format(startTime, 'yyyy년 M월 d일 HH:mm', { locale: ko })} (${Math.max(0, duration) + 1}일)`;
+        } else if (isValid(startTime)) {
+           localFormattedString = format(startTime, 'yyyy년 M월 d일 (EEE) HH:mm', { locale: ko });
+        } else {
+           localFormattedString = '날짜 정보 없음';
+        }
       } else if (isValid(startTime)) {
         localFormattedString = format(startTime, 'yyyy년 M월 d일 (EEE) HH:mm', { locale: ko });
       } else {
@@ -76,6 +125,43 @@ export function MeetingDetailsClient({
       setFormattedMeetingDateTime(localFormattedString);
     }
   }, [meeting?.dateTime, meeting?.endTime]);
+
+   useEffect(() => {
+    if (showMap && isMapFeatureAvailable && mapContainerRef.current && window.google?.maps?.Map && window.google?.maps?.marker?.AdvancedMarkerElement) {
+      const { AdvancedMarkerElement } = window.google.maps.marker;
+      const currentCoords = meeting.locationCoordinates!; // Assert not null due to isMapFeatureAvailable
+
+      if (!mapInstanceRef.current) {
+        mapInstanceRef.current = new window.google.maps.Map(mapContainerRef.current, {
+          center: currentCoords,
+          zoom: 15,
+          disableDefaultUI: true,
+          zoomControl: true,
+          mapId: googleMapsMapId, // Use imported mapId
+        });
+      } else {
+        mapInstanceRef.current.setCenter(currentCoords);
+        mapInstanceRef.current.setZoom(15);
+      }
+
+      if (!markerInstanceRef.current) {
+        markerInstanceRef.current = new AdvancedMarkerElement({
+          map: mapInstanceRef.current,
+          position: currentCoords,
+          title: meeting.locationName || '선택된 장소',
+        });
+      } else {
+        markerInstanceRef.current.position = currentCoords;
+        markerInstanceRef.current.title = meeting.locationName || '선택된 장소';
+        markerInstanceRef.current.map = mapInstanceRef.current; // Ensure marker is on map
+      }
+    } else if (markerInstanceRef.current) {
+      markerInstanceRef.current.map = null; // Hide marker if showMap is false or map not available
+    }
+    // No explicit cleanup needed for mapInstanceRef in this simplified setup if DOM node is removed
+    // However, if mapInstanceRef.current is persisted across showMap toggles without re-init,
+    // you might need more sophisticated cleanup or re-attachment logic.
+  }, [showMap, isMapFeatureAvailable, meeting.locationCoordinates, meeting.locationName]);
 
 
   const participants = useMemo(() =>
@@ -89,25 +175,27 @@ export function MeetingDetailsClient({
     if (currentUser && meeting.creatorId === currentUser.uid && isAdmin) {
       return '관리자 (나)';
     }
-    const creatorFriend = allFriends.find(f => f.id === meeting.creatorId);
-    return creatorFriend?.nickname || '관리자';
+    const creatorUser = allFriends.find(f => f.id === meeting.creatorId); // Try finding in friends first
+    if (creatorUser) return creatorUser.nickname;
+
+    // Fallback to check if creator is the current admin user (if not in friends list)
+    if (currentUser && meeting.creatorId === currentUser.uid) return currentUser.displayName || currentUser.email || '알 수 없는 생성자';
+
+    return '관리자'; // Default if not found
   }, [meeting.creatorId, allFriends, currentUser, isAdmin]);
 
-
   const handleExpenseAdded = (newExpense: Expense) => {
-    const newExpenses = [newExpense, ...expenses].sort((a,b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    const newExpenses = [newExpense, ...expenses].sort((a,b) => (b.createdAt instanceof Date ? b.createdAt.getTime() : (b.createdAt as any).toDate().getTime()) - (a.createdAt instanceof Date ? a.createdAt.getTime() : (a.createdAt as any).toDate().getTime()));
     setExpenses(newExpenses);
     if (meeting.isSettled) {
-      // If meeting was settled, adding an expense should make it unsettled
       setMeeting(prev => ({ ...prev, isSettled: false }));
     }
   };
 
   const handleExpenseUpdated = (updatedExpense: Expense) => {
-    const newExpenses = expenses.map(e => e.id === updatedExpense.id ? updatedExpense : e).sort((a,b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    const newExpenses = expenses.map(e => e.id === updatedExpense.id ? updatedExpense : e).sort((a,b) => (b.createdAt instanceof Date ? b.createdAt.getTime() : (b.createdAt as any).toDate().getTime()) - (a.createdAt instanceof Date ? a.createdAt.getTime() : (a.createdAt as any).toDate().getTime()));
     setExpenses(newExpenses);
      if (meeting.isSettled) {
-       // If meeting was settled, updating an expense should make it unsettled
         setMeeting(prev => ({ ...prev, isSettled: false }));
     }
   };
@@ -115,23 +203,25 @@ export function MeetingDetailsClient({
   const handleExpenseDeleted = (deletedExpenseId: string) => {
     setExpenses(prev => prev.filter(e => e.id !== deletedExpenseId));
      if (meeting.isSettled) {
-        // If meeting was settled, deleting an expense should make it unsettled
         setMeeting(prev => ({ ...prev, isSettled: false }));
     }
   };
 
   const handleDeleteMeeting = async () => {
-    if (!isAdmin && !isCreator) {
-      toast({ title: '권한 없음', description: '모임 삭제는 관리자 또는 모임 생성자만 가능합니다.', variant: 'destructive'});
+    if (!currentUser?.uid) {
+        toast({ title: '오류', description: '로그인이 필요합니다.', variant: 'destructive' });
+        return;
+    }
+    if (!canManageMeetingActions) {
+      toast({ title: '권한 없음', description: '모임 삭제 권한이 없습니다.', variant: 'destructive'});
       return;
     }
     setIsDeleting(true);
-    // startTransition not defined here, should wrap startTransition around this function if needed
-    const result = await deleteMeetingAction(meeting.id);
+    const result = await deleteMeetingAction(meeting.id, currentUser.uid);
     if (result.success) {
       toast({ title: '성공', description: '모임이 삭제되었습니다.' });
       router.push('/meetings');
-      router.refresh(); 
+      router.refresh();
     } else {
       toast({ title: '오류', description: result.error || '모임 삭제에 실패했습니다.', variant: 'destructive' });
       setIsDeleting(false);
@@ -139,46 +229,84 @@ export function MeetingDetailsClient({
   };
 
   const handleFinalizeSettlement = async () => {
-    if (!isAdmin) {
-      toast({ title: '권한 없음', description: '정산 확정은 관리자만 가능합니다.', variant: 'destructive'});
+    if (!currentUser?.uid) {
+        toast({ title: '오류', description: '로그인이 필요합니다.', variant: 'destructive' });
+        return;
+    }
+    if (!canFinalize) {
+      toast({ title: '권한 없음 또는 조건 미충족', description: '정산 확정 권한이 없거나 조건이 충족되지 않았습니다.', variant: 'destructive'});
       return;
     }
     setIsFinalizing(true);
-    // startTransition not defined here
-    const result = await finalizeMeetingSettlementAction(meeting.id);
+    const result = await finalizeMeetingSettlementAction(meeting.id, currentUser.uid);
     if (result.success && result.meeting) {
-      setMeeting(result.meeting); 
+      setMeeting(result.meeting);
       toast({ title: '성공', description: result.message || '모임 정산이 확정되고 회비 사용 내역이 기록되었습니다.' });
-      router.refresh(); 
+      router.refresh();
     } else {
       toast({ title: '오류', description: result.error || '정산 확정에 실패했습니다.', variant: 'destructive' });
     }
     setIsFinalizing(false);
   };
 
-  const mapLink = meeting.locationCoordinates 
+  const handleSaveShareSettings = async () => {
+    if (!currentUser?.uid) {
+      toast({ title: "오류", description: "로그인이 필요합니다.", variant: "destructive" });
+      return;
+    }
+    setIsShareSettingsSaving(true);
+    const result = await toggleMeetingShareAction(meeting.id, currentUser.uid, shareEnabled, parseInt(selectedExpiryDays));
+    if (result.success && result.meeting) {
+      toast({ title: "성공", description: "공유 설정이 저장되었습니다." });
+      setMeeting(result.meeting); // Update local meeting state with new share info
+      if (result.meeting.isShareEnabled && result.meeting.shareToken) {
+        setCurrentShareLink(`${window.location.origin}/share/meeting/${result.meeting.shareToken}`);
+      } else {
+        setCurrentShareLink(null);
+      }
+    } else {
+      toast({ title: "오류", description: result.error || "공유 설정 저장에 실패했습니다.", variant: "destructive" });
+    }
+    setIsShareSettingsSaving(false);
+  };
+
+  const handleCopyShareLink = () => {
+    if (currentShareLink) {
+      navigator.clipboard.writeText(currentShareLink)
+        .then(() => toast({ title: "성공", description: "공유 링크가 클립보드에 복사되었습니다." }))
+        .catch(() => toast({ title: "오류", description: "링크 복사에 실패했습니다.", variant: "destructive" }));
+    }
+  };
+
+  const mapLink = meeting.locationCoordinates
     ? `https://www.google.com/maps/search/?api=1&query=${meeting.locationCoordinates.lat},${meeting.locationCoordinates.lng}`
     : `https://maps.google.com/?q=${encodeURIComponent(meeting.locationName)}`;
 
-
-  const canFinalizeSettlement = meeting.useReserveFund && 
-                                 meeting.partialReserveFundAmount && 
-                                 meeting.partialReserveFundAmount > 0 && 
-                                 !meeting.isSettled && 
-                                 expenses.length > 0 &&
-                                 isAdmin; 
-
-  const canManageMeeting = isAdmin || isCreator;
+  const canManageMeetingActions = (isAdmin || isCreator) && !isReadOnlyShare;
+  const canManageExpenses = (isAdmin || isCreator) && !isReadOnlyShare;
+  const canFinalize = isAdmin && meeting.useReserveFund && meeting.partialReserveFundAmount && meeting.partialReserveFundAmount > 0 && !meeting.isSettled && expenses.length > 0 && !isReadOnlyShare;
 
   return (
     <div className="space-y-6">
+      {!isReadOnlyShare && (
+        <div className="flex items-center justify-between">
+          <Button variant="outline" asChild>
+            <Link href="/meetings">
+              <ArrowLeft className="mr-2 h-4 w-4" />
+              모든 모임 목록
+            </Link>
+          </Button>
+          {/* "모임 정보 다시 보기" 버튼 삭제됨 */}
+        </div>
+      )}
+
       <Card className="overflow-hidden">
         <CardHeader className="bg-muted/30 p-6">
           <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
             <div>
               <div className="flex items-center gap-2 flex-wrap">
                 <CardTitle className="text-3xl font-bold">{meeting.name}</CardTitle>
-                {meeting.useReserveFund && meeting.partialReserveFundAmount && meeting.partialReserveFundAmount > 0 ? (
+                {meeting.useReserveFund && meeting.partialReserveFundAmount && meeting.partialReserveFundAmount > 0 && !isReadOnlyShare ? (
                     meeting.isSettled ? (
                     <Badge variant="default" className="bg-green-600 hover:bg-green-700 shrink-0">
                         <CheckCircle2 className="h-4 w-4 mr-1.5" /> 정산 확정됨
@@ -192,17 +320,22 @@ export function MeetingDetailsClient({
                         <Info className="h-4 w-4 mr-1.5" /> 회비 사용 예정
                     </Badge>
                     )
-                ) : meeting.useReserveFund ? (
+                ) : meeting.useReserveFund && !isReadOnlyShare ? (
                      <Badge variant="outline" className="border-yellow-500 text-yellow-600 shrink-0">
                         <Info className="h-4 w-4 mr-1.5" /> 회비 사용 예정 (금액 미설정)
                     </Badge>
                 ): null}
+                 {isReadOnlyShare && (
+                    <Badge variant="secondary" className="shrink-0">
+                        <Eye className="h-4 w-4 mr-1.5" /> 공유된 페이지 (읽기 전용)
+                    </Badge>
+                )}
               </div>
               <CardDescription className="text-base mt-1">
                 만든이: {creatorName}
               </CardDescription>
             </div>
-            {canManageMeeting && (
+            {canManageMeetingActions && (
               <div className="flex space-x-2 shrink-0">
                 <Button variant="outline" size="sm" onClick={() => router.push(`/meetings/${meeting.id}/edit`)} disabled={isDeleting || isFinalizing || (meeting.isSettled && !isAdmin) }>
                   <Edit3 className="mr-2 h-4 w-4" /> 수정
@@ -250,14 +383,14 @@ export function MeetingDetailsClient({
                 <span className="font-medium">장소:</span>
                 <p className="text-muted-foreground">{meeting.locationName}
                   <a href={mapLink} target="_blank" rel="noopener noreferrer" className="ml-2 text-primary hover:underline">
-                    <ExternalLink className="inline-block h-3 w-3" /> 지도 보기
+                    <ExternalLink className="inline-block h-3 w-3" /> 외부 지도 보기
                   </a>
                 </p>
               </div>
             </div>
           </div>
            <div className="flex items-start gap-2">
-            <Users className="h-5 w-5 mt-0.5 text-primary flex-shrink-0" />
+            <UsersIcon className="h-5 w-5 mt-0.5 text-primary flex-shrink-0" />
             <div>
                 <span className="font-medium">참여자 ({participants.length}명):</span>
                 <p className="text-muted-foreground">{participants.map(p => p.nickname).join(', ')}</p>
@@ -285,22 +418,108 @@ export function MeetingDetailsClient({
                     <PiggyBank className="h-4 w-4 text-primary" />
                     <span className="font-medium">회비 사용 설정:</span>
                 </div>
-                <p className="text-muted-foreground pl-6">회비 사용하도록 설정되었으나, 사용할 금액이 지정되지 않았습니다. 모임 수정을 통해 금액을 설정해주세요.</p>
+                <p className="text-muted-foreground pl-6">회비 사용하도록 설정되었으나, 사용할 금액이 지정되지 않았습니다. {!isReadOnlyShare && "모임 수정을 통해 금액을 설정해주세요."}</p>
             </div>
           ) : (
             <div className="p-3 bg-secondary/30 rounded-md border text-sm space-y-1">
                 <div className="flex items-center gap-2">
-                    <PiggyBank className="h-4 w-4" /> {/* No text-primary if not used */}
+                    <PiggyBank className="h-4 w-4" />
                     <span className="font-medium">회비 사용 설정:</span>
                 </div>
                 <p className="text-muted-foreground pl-6">사용 안함</p>
             </div>
           )}
+          {isMapFeatureAvailable && (
+             <div className="mt-4">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setShowMap(prev => !prev)}
+                >
+                  <Eye className="mr-2 h-4 w-4" />
+                  {showMap ? '지도 숨기기' : '지도 보기'}
+                </Button>
+             </div>
+          )}
+          <div
+            ref={mapContainerRef}
+            className={cn(
+                "w-full mt-1 h-64 rounded-md border",
+                (showMap && isMapFeatureAvailable) ? 'block' : 'hidden'
+            )}
+          >
+            {(!meeting.locationCoordinates && showMap && isMapsJsApiLoaded) && <p className="flex items-center justify-center h-full text-muted-foreground">표시할 좌표가 없습니다.</p>}
+            {(!isMapsJsApiLoaded && showMap) && <p className="flex items-center justify-center h-full text-muted-foreground">지도 API 로딩 중...</p>}
+          </div>
         </CardContent>
       </Card>
 
+      {!isReadOnlyShare && (isAdmin || isCreator) && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2"><Share2 className="h-5 w-5"/>모임 공유 설정</CardTitle>
+            <CardDescription>이 모임의 정산 내역을 다른 사람과 공유할 수 있습니다.</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="flex items-center space-x-2">
+              <Switch
+                id="share-enable"
+                checked={shareEnabled}
+                onCheckedChange={setShareEnabled}
+                disabled={isShareSettingsSaving}
+              />
+              <Label htmlFor="share-enable">공유 활성화</Label>
+            </div>
+            {shareEnabled && (
+              <>
+                <div>
+                  <Label htmlFor="share-expiry">공유 만료 기간</Label>
+                  <Select
+                    value={selectedExpiryDays}
+                    onValueChange={setSelectedExpiryDays}
+                    disabled={isShareSettingsSaving}
+                  >
+                    <SelectTrigger id="share-expiry" className="w-[180px] mt-1">
+                      <SelectValue placeholder="기간 선택" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="7">7일 후 만료</SelectItem>
+                      <SelectItem value="30">30일 후 만료</SelectItem>
+                      <SelectItem value="90">90일 후 만료</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                {currentShareLink && (
+                  <div className="space-y-2">
+                    <Label>공유 링크 (읽기 전용)</Label>
+                    <div className="flex items-center space-x-2">
+                      <Input type="text" value={currentShareLink} readOnly className="text-xs" />
+                      <Button type="button" variant="outline" size="icon" onClick={handleCopyShareLink}>
+                        <Copy className="h-4 w-4" />
+                      </Button>
+                    </div>
+                    {meeting.shareExpiryDate && (
+                       <p className="text-xs text-muted-foreground">
+                         만료일: {format(meeting.shareExpiryDate instanceof Timestamp ? meeting.shareExpiryDate.toDate() : new Date(meeting.shareExpiryDate), 'yyyy년 M월 d일 HH:mm', { locale: ko })}
+                       </p>
+                    )}
+                  </div>
+                )}
+              </>
+            )}
+          </CardContent>
+          <CardFooter>
+            <Button onClick={handleSaveShareSettings} disabled={isShareSettingsSaving}>
+              {isShareSettingsSaving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              공유 설정 저장
+            </Button>
+          </CardFooter>
+        </Card>
+      )}
+
       <Tabs defaultValue="expenses" className="w-full">
-        <TabsList className="grid w-full grid-cols-2"> 
+        <TabsList className="grid w-full grid-cols-2">
           <TabsTrigger value="expenses">지출 내역</TabsTrigger>
           <TabsTrigger value="summary">정산 요약</TabsTrigger>
         </TabsList>
@@ -310,7 +529,7 @@ export function MeetingDetailsClient({
             <CardHeader>
               <div className="flex items-center justify-between">
                 <CardTitle>지출 내역</CardTitle>
-                {(isAdmin || isCreator) && ( 
+                {canManageExpenses && (
                   <AddExpenseDialog
                     meetingId={meeting.id}
                     participants={participants}
@@ -327,18 +546,18 @@ export function MeetingDetailsClient({
             </CardHeader>
             <CardContent>
               {expenses.length > 0 ? (
-                  <ul className="space-y-4"> 
+                  <ul className="space-y-4">
                     {expenses.map(expense => (
                       <ExpenseItem
                         key={expense.id}
                         expense={expense}
-                        meetingId={meeting.id} // Pass meetingId
+                        meetingId={meeting.id}
                         allFriends={allFriends}
                         participants={participants}
                         onExpenseUpdated={handleExpenseUpdated}
                         onExpenseDeleted={handleExpenseDeleted}
                         isMeetingSettled={meeting.isSettled || false}
-                        canManage={isAdmin || (isCreator && currentUser?.uid === expense.paidById) || (isCreator && !expense.paidById) } // Creator can manage their own expenses or unassigned ones
+                        canManage={canManageExpenses && !meeting.isSettled}
                       />
                     ))}
                   </ul>
@@ -353,21 +572,21 @@ export function MeetingDetailsClient({
           <Card>
             <CardHeader>
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-                <CardTitle>정산 요약</CardTitle>
-                {canFinalizeSettlement && (
+                {/* CardTitle "정산 요약"은 여기서 제거됨 (탭 이름으로 충분) */}
+                {canFinalize && (
                   <Button onClick={handleFinalizeSettlement} disabled={isFinalizing || isDeleting} size="sm">
                     {isFinalizing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <CheckCircle2 className="mr-2 h-4 w-4" />}
                     정산 확정 및 회비 사용 기록
                   </Button>
                 )}
               </div>
-              {meeting.useReserveFund && meeting.isSettled && expenses.length > 0 && (
-                 <CardDescription className="text-green-600 flex items-center gap-1">
+              {meeting.useReserveFund && meeting.isSettled && expenses.length > 0 && !isReadOnlyShare && (
+                 <CardDescription className="text-green-600 flex items-center gap-1 mt-2">
                     <CheckCircle2 className="h-4 w-4"/> 이 모임의 회비 사용 정산이 확정되어 회비 내역에 기록되었습니다.
                  </CardDescription>
               )}
-               {meeting.useReserveFund && !meeting.isSettled && expenses.length === 0 && meeting.partialReserveFundAmount && meeting.partialReserveFundAmount > 0 && (
-                 <CardDescription className="text-muted-foreground flex items-center gap-1">
+               {meeting.useReserveFund && !meeting.isSettled && expenses.length === 0 && meeting.partialReserveFundAmount && meeting.partialReserveFundAmount > 0 && !isReadOnlyShare &&(
+                 <CardDescription className="text-muted-foreground flex items-center gap-1 mt-2">
                     <AlertCircle className="h-4 w-4"/> 지출 내역이 없어 회비 사용을 확정할 수 없습니다.
                  </CardDescription>
               )}
@@ -379,5 +598,3 @@ export function MeetingDetailsClient({
     </div>
   );
 }
-
-    

@@ -2,7 +2,7 @@
 'use client';
 
 import type { Friend } from '@/lib/types';
-import React, { useState, useTransition, Fragment, useEffect } from 'react'; // Added useEffect
+import React, { useState, useTransition, Fragment, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useToast } from '@/hooks/use-toast';
@@ -32,7 +32,6 @@ export function FriendListClient({ initialFriends }: FriendListClientProps) {
   const { toast } = useToast();
   const [isPending, startTransition] = useTransition();
 
-  // Add useEffect to update friends state when initialFriends prop changes
   useEffect(() => {
     setFriends(initialFriends);
   }, [initialFriends]);
@@ -52,7 +51,8 @@ export function FriendListClient({ initialFriends }: FriendListClientProps) {
       return;
     }
     startTransition(async () => {
-      const result = await updateFriendAction(id, editForm);
+      // 'role' is no longer part of the friend update
+      const result = await updateFriendAction(id, { nickname: editForm.nickname, name: editForm.name });
       if (result.success && result.friend) {
         setFriends(prev => prev.map(f => (f.id === id ? result.friend! : f)));
         setEditingFriendId(null);
@@ -93,7 +93,7 @@ export function FriendListClient({ initialFriends }: FriendListClientProps) {
                   />
                   <Input
                     type="text"
-                    value={editForm.name}
+                    value={editForm.name || ''}
                     onChange={(e) => setEditForm({ ...editForm, name: e.target.value })}
                     className="h-8 text-sm"
                     placeholder="이름 (선택)"
