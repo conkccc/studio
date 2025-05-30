@@ -1,4 +1,3 @@
-
 "use client";
 
 import type { ReactNode } from 'react';
@@ -99,7 +98,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       {navItems
         .filter(item => {
           if (loading) return false;
-          if (userRole === 'none') return item.href === '/'; // 'none' role only sees Dashboard
+          // 'none' 분기 제거, 인증 우회 분기 제거
           if (item.adminOnly) return isAdmin;
           if (item.userOrAdmin) return isAdmin || userRole === 'user';
           return true;
@@ -141,36 +140,45 @@ export function AppShell({ children }: { children: ReactNode }) {
     </SidebarMenu>
   );
 
-  if ((loading && process.env.NEXT_PUBLIC_DEV_MODE_SKIP_AUTH !== "true") || !isClient) {
+  // --- 인증/권한 리디렉션 useEffect로 일원화 ---
+  useEffect(() => {
+    // 로그인 페이지, 공유 페이지는 예외
+    if (
+      typeof window !== 'undefined' &&
+      (!currentUser || userRole === 'none') &&
+      pathname !== '/login' &&
+      !pathname.startsWith('/share/meeting')
+    ) {
+      window.location.replace('/login'); // push 대신 replace로 히스토리 방지
+    }
+  }, [currentUser, userRole, pathname]);
+
+  if (loading || !isClient) {
     return (
       <div className="flex justify-center items-center min-h-screen bg-muted/40">
         <p className="text-xl text-muted-foreground">앱 로딩 중...</p>
       </div>
     );
   }
-  
-  // If dev mode skip auth is on, or if user is logged in and has a role, show the app shell
-  const canShowAppShell = process.env.NEXT_PUBLIC_DEV_MODE_SKIP_AUTH === "true" || (currentUser && userRole !== null);
+
+  const canShowAppShell = currentUser && userRole !== null;
 
   if (pathname === '/login' && !canShowAppShell) {
     return <main className="flex-1">{children}</main>; // Render login page without shell
   }
-  
-  if (!canShowAppShell && pathname !== '/login' && !pathname.startsWith('/share/meeting')) {
-     // This case should ideally be handled by middleware redirecting to /login
-     // If middleware is not perfectly catching all, this is a fallback.
-     // Or, if a user with role 'none' tries to access a non-dashboard page.
-     return (
-        <div className="flex justify-center items-center min-h-screen">
-            <p>리디렉션 중...</p>
-        </div>
-     );
-  }
 
+  if (!canShowAppShell && pathname !== '/login' && !pathname.startsWith('/share/meeting')) {
+    // 미들웨어에서 인증 처리 못할 때만 fallback
+    return (
+      <div className="flex justify-center items-center min-h-screen">
+        <p>리디렉션 중...</p>
+      </div>
+    );
+  }
 
   return (
     <div className="flex min-h-screen w-full bg-muted/40">
-      {!isMobile && canShowAppShell && userRole !== 'none' && (
+      {!isMobile && canShowAppShell && (
         <Sidebar collapsible="icon" variant="sidebar" side="left" className="border-r group/sidebar">
           <SidebarHeader className="p-4">
             <Link href="/" className="flex items-center gap-2 font-semibold group-data-[collapsible=icon]:justify-center">
@@ -186,7 +194,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               <SidebarMenu>
                 <SidebarMenuItem>
                   <SidebarMenuButton
-                    variant="ghost"
+                    variant="outline"
                     size="sm"
                     className="w-full justify-start text-left h-auto py-1.5 px-2 cursor-default hover:bg-transparent focus-visible:ring-0"
                     asChild={false}
@@ -278,11 +286,11 @@ export function AppShell({ children }: { children: ReactNode }) {
               </SheetContent>
             </Sheet>
           )}
-           {(!currentUser && !loading && process.env.NEXT_PUBLIC_DEV_MODE_SKIP_AUTH !== "true") && isMobile && pathname !== '/login' && !pathname.startsWith('/share/meeting') && (
-             <Button asChild variant="outline" size="sm">
-               <Link href="/login">로그인</Link>
-             </Button>
-           )}
+          {(!currentUser && !loading && isMobile && pathname !== '/login' && !pathname.startsWith('/share/meeting')) && (
+            <Button asChild variant="outline" size="sm">
+              <Link href="/login">로그인</Link>
+            </Button>
+          )}
           <div className="flex-1">
             {/* Potential header content for desktop if needed */}
           </div>

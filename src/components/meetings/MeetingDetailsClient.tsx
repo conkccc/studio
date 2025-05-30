@@ -1,4 +1,3 @@
-
 'use client';
 
 import type { Meeting, Expense, Friend } from '@/lib/types';
@@ -39,7 +38,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Input } from '@/components/ui/input';
 import Link from 'next/link';
 import { cn } from '@/lib/utils';
-import { googleMapsMapId } from '@/lib/firebase';
+import { Loader } from '@googlemaps/js-api-loader';
+
+const googleMapsLibraries: ("places" | "maps" | "marker")[] = ["places", "maps", "marker"];
 
 interface MeetingDetailsClientProps {
   initialMeeting: Meeting;
@@ -77,20 +78,32 @@ export function MeetingDetailsClient({
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<google.maps.Map | null>(null);
   const markerInstanceRef = useRef<google.maps.marker.AdvancedMarkerElement | null>(null);
-  const [isMapsJsApiLoaded, setIsMapsJsApiLoaded] = useState(false);
-  const [showMap, setShowMap] = useState(true);
+  const [isMapsLoaded, setIsMapsLoaded] = useState(false);
+  const [mapsLoadError, setMapsLoadError] = useState<Error | null>(null);
+  const [showMap, setShowMap] = useState(false);
 
   useEffect(() => {
-    if (window.google && window.google.maps && window.google.maps.Map && window.google.maps.marker) {
-      setIsMapsJsApiLoaded(true);
-    } else {
-      console.warn("MeetingDetailsClient: Google Maps API not fully loaded. Map features might be limited.");
-      setIsMapsJsApiLoaded(false);
+    const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
+    if (!apiKey) {
+      setMapsLoadError(new Error("Google Maps API key is not configured."));
+      setIsMapsLoaded(false);
+      return;
     }
+    const loader = new Loader({
+      apiKey,
+      version: "weekly",
+      libraries: googleMapsLibraries,
+    });
+    loader.load()
+      .then(() => {
+        setIsMapsLoaded(true);
+        setMapsLoadError(null);
+      })
+      .catch(e => {
+        setMapsLoadError(e as Error);
+        setIsMapsLoaded(false);
+      });
   }, []);
-  
-  const isMapFeatureAvailable = isMapsJsApiLoaded && meeting.locationCoordinates && googleMapsMapId;
-
 
   useEffect(() => {
     setMeeting(initialMeeting);
@@ -140,38 +153,34 @@ export function MeetingDetailsClient({
   }, [meeting?.dateTime, meeting?.endTime]);
 
   useEffect(() => {
-    if (showMap && isMapFeatureAvailable && mapContainerRef.current && window.google?.maps?.Map && window.google?.maps?.marker?.AdvancedMarkerElement) {
+    if (showMap && isMapsLoaded && mapContainerRef.current && window.google?.maps?.Map && window.google?.maps?.marker?.AdvancedMarkerElement) {
       const { AdvancedMarkerElement } = window.google.maps.marker;
       const currentCoords = meeting.locationCoordinates!;
 
-      if (!mapInstanceRef.current) {
-        mapInstanceRef.current = new window.google.maps.Map(mapContainerRef.current, {
-          center: currentCoords,
-          zoom: 15,
-          disableDefaultUI: true,
-          zoomControl: true,
-          mapId: googleMapsMapId,
-        });
-      } else {
-        mapInstanceRef.current.setCenter(currentCoords);
-        mapInstanceRef.current.setZoom(15);
+      // 항상 새로 생성
+      mapInstanceRef.current = new window.google.maps.Map(mapContainerRef.current, {
+        center: currentCoords,
+        zoom: 15,
+        disableDefaultUI: true,
+        zoomControl: true,
+        mapId: 'NBBANG_MAP_ID_CREATE_FORM',
+      });
+      markerInstanceRef.current = new AdvancedMarkerElement({
+        map: mapInstanceRef.current,
+        position: currentCoords,
+        title: meeting.locationName || '선택된 장소',
+      });
+    } else if (!showMap) {
+      // 숨길 때 ref 초기화
+      if (markerInstanceRef.current) {
+        markerInstanceRef.current.map = null;
+        markerInstanceRef.current = null;
       }
-
-      if (markerInstanceRef.current) { // If marker exists, update its position and map
-        markerInstanceRef.current.position = currentCoords;
-        markerInstanceRef.current.title = meeting.locationName || '선택된 장소';
-        markerInstanceRef.current.map = mapInstanceRef.current;
-      } else { // If marker doesn't exist, create it
-        markerInstanceRef.current = new AdvancedMarkerElement({
-          map: mapInstanceRef.current,
-          position: currentCoords,
-          title: meeting.locationName || '선택된 장소',
-        });
+      if (mapInstanceRef.current) {
+        mapInstanceRef.current = null;
       }
-    } else if (markerInstanceRef.current) {
-      markerInstanceRef.current.map = null; // Hide marker if showMap is false or map not available
     }
-  }, [showMap, isMapFeatureAvailable, meeting.locationCoordinates, meeting.locationName]);
+  }, [showMap, isMapsLoaded, meeting.locationCoordinates, meeting.locationName]);
 
   const participants = useMemo(() =>
     meeting.participantIds
@@ -292,10 +301,6 @@ export function MeetingDetailsClient({
     }
   };
   
-  const mapLink = meeting.locationCoordinates
-  ? `https://www.google.com/maps/search/?api=1&query=${meeting.locationCoordinates.lat},${meeting.locationCoordinates.lng}`
-  : `https://maps.google.com/?q=${encodeURIComponent(meeting.locationName)}`;
-
 
   return (
     <div className="space-y-6">
@@ -391,11 +396,53 @@ export function MeetingDetailsClient({
               <MapPin className="h-5 w-5 mt-0.5 text-primary flex-shrink-0" />
               <div>
                 <span className="font-medium">장소:</span>
-                <p className="text-muted-foreground">{meeting.locationName}
-                  <a href={mapLink} target="_blank" rel="noopener noreferrer" className="ml-2 text-primary hover:underline">
-                    <ExternalLink className="inline-block h-3 w-3" /> 외부 지도 보기
-                  </a>
-                </p>
+                <p className="text-muted-foreground">{meeting.locationName}</p>
+                {meeting.locationCoordinates && (
+                  <div className="flex gap-2 mt-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="sm:w-auto"
+                      onClick={() => setShowMap(prev => !prev)}
+                    >
+                      <Eye className="mr-2 h-4 w-4" />{showMap ? '지도 숨기기' : '지도 보기'}
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="sm:w-auto"
+                      onClick={() => {
+                        const coords = meeting.locationCoordinates!;
+                        const url = `https://www.google.com/maps/search/?api=1&query=${coords.lat},${coords.lng}`;
+                        window.open(url, '_blank', 'noopener,noreferrer');
+                      }}
+                    >
+                      <ExternalLink className="mr-2 h-4 w-4" />외부 지도에서 보기
+                    </Button>
+                  </div>
+                )}
+                {/* 지도 보기 토글 시 지도 표시 */}
+                {meeting.locationCoordinates && showMap && (
+                  <div
+                    ref={mapContainerRef}
+                    className={cn(
+                      'w-full mt-2 h-64 rounded-md border',
+                      isMapsLoaded ? 'block' : 'hidden'
+                    )}
+                  >
+                    {(!meeting.locationCoordinates && showMap && isMapsLoaded) && (
+                      <p className="flex items-center justify-center h-full text-muted-foreground">표시할 좌표가 없습니다.</p>
+                    )}
+                    {(!isMapsLoaded && showMap) && (
+                      <p className="flex items-center justify-center h-full text-muted-foreground">지도 API 로딩 중...</p>
+                    )}
+                    {(mapsLoadError && showMap) && (
+                      <p className="flex items-center justify-center h-full text-muted-foreground">지도 API 로드 실패: {mapsLoadError.message}</p>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -439,29 +486,6 @@ export function MeetingDetailsClient({
                 <p className="text-muted-foreground pl-6">사용 안함</p>
             </div>
           )}
-          {isMapFeatureAvailable && !isReadOnlyShare && (
-             <div className="mt-4">
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setShowMap(prev => !prev)}
-                >
-                  <Eye className="mr-2 h-4 w-4" />
-                  {showMap ? '지도 숨기기' : '지도 보기'}
-                </Button>
-             </div>
-          )}
-          <div
-            ref={mapContainerRef}
-            className={cn(
-                "w-full mt-1 h-64 rounded-md border block", // Always show the map container
-                (showMap && isMapFeatureAvailable) ? 'block' : 'hidden'
-            )}
-          >
-            {(!meeting.locationCoordinates && showMap && isMapsJsApiLoaded) && <p className="flex items-center justify-center h-full text-muted-foreground">표시할 좌표가 없습니다.</p>}
-            {(!isMapsJsApiLoaded && showMap) && <p className="flex items-center justify-center h-full text-muted-foreground">지도 API 로딩 중...</p>}
-          </div>
         </CardContent>
       </Card>
 

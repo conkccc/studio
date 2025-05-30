@@ -1,4 +1,3 @@
-
 'use client';
 
 import Link from 'next/link';
@@ -21,20 +20,16 @@ export default function DashboardPage() {
       setDataLoading(true); // If auth is loading, dashboard data also waits
       return;
     }
-
     const fetchDashboardData = async () => {
       if (currentUser && (isAdmin || userRole === 'user')) {
         setDataLoading(true);
         try {
           const balancePromise = isAdmin ? getReserveFundBalance() : Promise.resolve(0); // Only admin fetches balance
           const meetingsPromise = getMeetings({ limitParam: 1 }); // Fetch most recent meeting for all roles (user/admin)
-
           const [balance, recentMeetingsData] = await Promise.all([balancePromise, meetingsPromise]);
-          
           if (isAdmin) {
             setReserveBalance(balance);
           }
-
           if (recentMeetingsData.meetings.length > 0) {
             const latestMeeting = recentMeetingsData.meetings[0];
             const expenses = await getExpensesByMeetingId(latestMeeting.id);
@@ -42,8 +37,7 @@ export default function DashboardPage() {
             const perPersonCost = latestMeeting.participantIds.length > 0 
               ? totalSpent / latestMeeting.participantIds.length 
               : 0;
-            
-            let summary = `최근 모임 '${latestMeeting.name}'에서 ${latestMeeting.participantIds.length}명이 총 ${totalSpent.toLocaleString()}원 지출, 1인당 ${perPersonCost.toLocaleString(undefined, {maximumFractionDigits: 0})}원`;
+            let summary = `최근 모임 '${latestMeeting.name}'에서 ${latestMeeting.participantIds.length}명 이 총 ${totalSpent.toLocaleString()}원 지출, 1인당 ${perPersonCost.toLocaleString(undefined, {maximumFractionDigits: 0})}원`;
             if (latestMeeting.isSettled) {
               summary += " 정산 완료.";
             } else if (expenses.length > 0) {
@@ -63,7 +57,6 @@ export default function DashboardPage() {
           setDataLoading(false);
         }
       } else {
-        // Not admin or 'user', or not logged in
         setReserveBalance(null);
         setRecentMeetingSummary(null);
         setDataLoading(false);
@@ -72,7 +65,6 @@ export default function DashboardPage() {
     fetchDashboardData();
   }, [authLoading, currentUser, isAdmin, userRole]);
 
-
   const quickLinks = [
     { href: '/friends', label: '친구 관리', icon: UsersRound, description: '친구 목록을 보고 새 친구를 추가하세요.', adminOnly: true },
     { href: '/meetings', label: '모임 관리', icon: CalendarCheck, description: '모임을 만들고 지난 모임을 확인하세요.', userOrAdmin: true },
@@ -80,7 +72,7 @@ export default function DashboardPage() {
     { href: '/users', label: '사용자 관리', icon: Briefcase, description: '사용자 역할을 관리합니다.', adminOnly: true },
   ];
 
-  if (authLoading || dataLoading && (isAdmin || userRole === 'user')) { // Show loader if auth or relevant data is loading
+  if (authLoading || (isAdmin || userRole === 'user') && dataLoading) {
     return (
       <div className="flex justify-center items-center min-h-[calc(100vh-150px)]">
         <p className="text-xl text-muted-foreground">대시보드 로딩 중...</p>
@@ -88,37 +80,8 @@ export default function DashboardPage() {
     );
   }
 
-  if (!currentUser && process.env.NEXT_PUBLIC_DEV_MODE_SKIP_AUTH !== "true") {
-    return (
-      <div className="container mx-auto py-8 text-center">
-        <h1 className="text-3xl font-bold mb-4">N빵친구 에 오신 것을 환영합니다!</h1>
-        <p className="text-lg text-muted-foreground mb-6">모임 정산을 관리하려면 로그인해주세요(관리자만 가능).</p>
-        <Button asChild>
-          <Link href="/login">로그인 페이지로 이동</Link>
-        </Button>
-      </div>
-    );
-  }
-
-  if (userRole === 'none' && process.env.NEXT_PUBLIC_DEV_MODE_SKIP_AUTH !== "true") {
-    return (
-      <div className="container mx-auto py-8 text-center">
-        <h1 className="text-3xl font-bold mb-4">환영합니다, {appUser?.name || appUser?.email || '사용자님'}!</h1>
-        <p className="text-lg text-muted-foreground mb-6">
-          현재 할당된 역할이 없습니다. 관리자에게 문의하여 역할을 할당받으세요.
-        </p>
-        <p className="text-sm text-muted-foreground">
-          (역할이 할당되기 전까지는 제한된 기능만 사용 가능합니다.)
-        </p>
-         <Button asChild className="mt-6">
-          <Link href="/meetings">모임 목록 보기 (읽기 전용)</Link>
-        </Button>
-      </div>
-    );
-  }
-  
   const visibleQuickLinks = quickLinks.filter(link => {
-    if (userRole === 'none') return false; 
+    if (userRole === null) return false; 
     if (link.adminOnly) return isAdmin;
     if (link.userOrAdmin) return isAdmin || userRole === 'user';
     return true;

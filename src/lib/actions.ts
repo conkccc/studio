@@ -1,4 +1,3 @@
-
 'use server';
 
 import { revalidatePath } from 'next/cache';
@@ -455,7 +454,7 @@ export async function toggleMeetingShareAction(meetingId: string, currentUserId:
       updates = {
         isShareEnabled: true,
         shareToken: shareToken,
-        shareExpiryDate: Timestamp.fromDate(shareExpiryDate),
+        shareExpiryDate: shareExpiryDate, // Date 타입
       };
     } else {
       updates = {
@@ -471,7 +470,6 @@ export async function toggleMeetingShareAction(meetingId: string, currentUserId:
     }
 
     revalidatePath(`/meetings/${meetingId}`);
-    // Return the updated meeting object, which now includes JS Date for shareExpiryDate if set
     return { success: true, meeting: updatedMeeting };
 
   } catch (error) {

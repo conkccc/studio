@@ -1,19 +1,18 @@
-
 'use client';
 
-import { useEffect, useState } from 'react';
+import { use, useEffect, useState } from 'react';
 import { getMeetingById, getExpensesByMeetingId, getFriends } from '@/lib/data-store';
 import { MeetingDetailsClient } from '@/components/meetings/MeetingDetailsClient';
 import { Button } from '@/components/ui/button';
 import Link from 'next/link';
-import { useParams, useRouter } from 'next/navigation';
+import { useRouter } from 'next/navigation';
 import type { Meeting, Expense, Friend } from '@/lib/types';
 import { useAuth } from '@/contexts/AuthContext';
 
-export default function MeetingDetailPage({ params }: { params: { meetingId: string } }) {
+export default function MeetingDetailPage({ params }: { params: Promise<{ meetingId: string }> }) {
   const { currentUser, userRole, loading: authLoading } = useAuth();
-
-  const meetingId = typeof params.meetingId === 'string' ? params.meetingId : undefined;
+  // Next.js 14: params는 Promise이므로 use()로 언래핑
+  const { meetingId } = use(params);
 
   const [meeting, setMeeting] = useState<Meeting | null | undefined>(undefined);
   const [expenses, setExpenses] = useState<Expense[]>([]);
@@ -103,25 +102,23 @@ export default function MeetingDetailPage({ params }: { params: { meetingId: str
 
   return (
     <div className="space-y-6">
-      <MeetingDetailsClient
-        initialMeeting={meeting!}
-        initialExpenses={expenses}
-        allFriends={allFriends}
-      />
+      {meeting && (
+        <MeetingDetailsClient
+          initialMeeting={meeting}
+          initialExpenses={expenses}
+          allFriends={allFriends}
+        />
+      )}
 
       {/* Ensure the button container is explicitly displayed and visible */}
       <div className="flex justify-center gap-4 mt-8" style={{ display: 'flex', visibility: 'visible' }}>
-        {meeting.locationLink && (
+        {meeting && meeting.locationLink && (
           <Button asChild>
             <a href={meeting.locationLink} target="_blank" rel="noopener noreferrer">
-              
               외부 지도 보기
             </a>
           </Button>
         )}
-        {/* Placeholder for internal map view functionality */}
-        {/* Removed meeting.locationLink condition to always show the button */}
-        <Button>지도 보기</Button>
       </div>
     </div>
   );

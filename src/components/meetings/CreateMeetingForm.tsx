@@ -1,4 +1,3 @@
-
 'use client';
 
 import React, { useState, useTransition, useEffect, useCallback, useRef } from 'react';
@@ -373,7 +372,7 @@ export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, 
       };
 
       if (isEditMode && initialData) {
-        const result = await updateMeetingAction(initialData.id, payload);
+        const result = await updateMeetingAction(initialData.id, payload, currentUserId);
         if (result.success && result.meeting) {
           toast({ title: '성공', description: '모임 정보가 수정되었습니다.' });
           router.push(`/meetings/${result.meeting.id}`);
@@ -812,4 +811,3 @@ export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, 
   );
 }
 
-    

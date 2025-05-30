@@ -1,4 +1,3 @@
-
 'use client';
 
 import { useEffect, useState } from 'react';
@@ -17,18 +16,16 @@ export default function ReserveFundPage() {
   const [dataLoading, setDataLoading] = useState(true);
 
   useEffect(() => {
-    if (authLoading && process.env.NEXT_PUBLIC_DEV_MODE_SKIP_AUTH !== "true") {
+    if (authLoading) {
       setDataLoading(true);
       return;
     }
-
-    if (!currentUser || !isAdmin) { 
+    if (!isAdmin) { // 관리자가 아니면 데이터 패치 X
       setDataLoading(false);
       setBalance(0);
       setTransactions([]);
       return;
     }
-
     const fetchData = async () => {
       setDataLoading(true);
       try {
@@ -47,9 +44,7 @@ export default function ReserveFundPage() {
       }
     };
     fetchData();
-
-  }, [authLoading, currentUser, isAdmin]);
-
+  }, [authLoading, isAdmin]);
 
   if (authLoading || (isAdmin && dataLoading)) {
     return (
@@ -59,19 +54,7 @@ export default function ReserveFundPage() {
     );
   }
 
-  if (!currentUser && process.env.NEXT_PUBLIC_DEV_MODE_SKIP_AUTH !== "true") { 
-    return (
-      <div className="container mx-auto py-8 text-center">
-        <h1 className="text-2xl font-bold mb-4">로그인 필요</h1>
-        <p className="text-muted-foreground mb-6">회비 관리 페이지를 보려면 로그인이 필요합니다.</p>
-        <Button asChild>
-          <Link href="/login">로그인 페이지로 이동</Link>
-        </Button>
-      </div>
-    );
-  }
-
-  if (!isAdmin) { 
+  if (!isAdmin) {
      return (
       <div className="container mx-auto py-8 text-center">
         <h1 className="text-2xl font-bold mb-4">접근 권한 없음</h1>
@@ -104,7 +87,6 @@ export default function ReserveFundPage() {
       <ReserveFundClient 
         initialTransactions={transactions} 
         initialBalance={balance}
-        currentUserId={currentUser?.uid || ''} 
       />
 
     </div>

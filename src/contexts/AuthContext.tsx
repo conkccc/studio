@@ -1,4 +1,3 @@
-
 'use client';
 
 import React, { createContext, useContext, useEffect, useState, ReactNode } from 'react';
@@ -35,31 +34,6 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const pathname = usePathname();
 
   useEffect(() => {
-    if (process.env.NEXT_PUBLIC_DEV_MODE_SKIP_AUTH === "true") {
-      console.log("AuthContext: DEV MODE - Skipping Firebase Auth, mocking admin user.");
-      const devFirebaseUser: FirebaseUser = {
-        uid: 'dev-admin-uid',
-        email: 'dev-admin@example.com',
-        displayName: '개발 관리자',
-        emailVerified: true, isAnonymous: false, metadata: {},
-        providerData: [], refreshToken: 'dev-token', tenantId: null,
-        delete: async () => {}, getIdToken: async () => 'dev-id-token',
-        getIdTokenResult: async () => ({ token: 'dev-id-token', claims: { admin: true }, expirationTime: '', issuedAtTime: '', signInProvider: null, signInSecondFactor: null }),
-        reload: async () => {}, toJSON: () => ({}),
-        photoURL: null, phoneNumber: null, providerId: 'password'
-      };
-      const devAppUser: User = {
-        id: 'dev-admin-uid', email: 'dev-admin@example.com', name: '개발 관리자',
-        role: 'admin', createdAt: new Date(),
-      };
-      setCurrentUser(devFirebaseUser);
-      setAppUser(devAppUser);
-      setIsAdmin(true);
-      setUserRole('admin');
-      setLoading(false);
-      return;
-    }
-
     setLoading(true);
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       try {
@@ -78,7 +52,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
               createdAt: fetchedDBUser.createdAt instanceof Timestamp ? fetchedDBUser.createdAt.toDate() : new Date(fetchedDBUser.createdAt || Date.now()),
             };
             setAppUser(processedAppUser);
-            setUserRole(processedAppUser.role);
+            setUserRole(processedAppUser.role); // 'admin' | 'user' | 'none' 모두 허용
             setIsAdmin(processedAppUser.role === 'admin');
           } else {
             const newAppUser = await addUserOnLogin({
@@ -87,7 +61,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
               name: user.displayName,
             });
             setAppUser(newAppUser);
-            setUserRole(newAppUser.role); // Should be 'none'
+            setUserRole(newAppUser.role); // 'admin' | 'user' | 'none' 모두 허용
             setIsAdmin(newAppUser.role === 'admin'); // Will be false
           }
         } else {
@@ -98,7 +72,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
         }
       } catch (error) {
         console.error("AuthContext: Error processing auth state:", error);
-        setCurrentUser(null); // Reset on error
+        setCurrentUser(null);
         setAppUser(null);
         setIsAdmin(false);
         setUserRole(null);
@@ -110,18 +84,12 @@ export function AuthProvider({ children }: AuthProviderProps) {
   }, []);
 
   const signOut = async () => {
-    if (process.env.NEXT_PUBLIC_DEV_MODE_SKIP_AUTH === "true") {
-      console.log("AuthContext: DEV MODE - Simulating sign out.");
-      setCurrentUser(null); setAppUser(null); setIsAdmin(false); setUserRole(null); setLoading(false);
-      if (!pathname.startsWith('/login')) router.push('/login');
-      return;
-    }
     try {
       await firebaseSignOut(auth);
       // States will be reset by onAuthStateChanged
       const publicPathsForSignOut = ['/login', '/share/meeting'];
       if (!publicPathsForSignOut.some(p => pathname.startsWith(p))) {
-         router.push('/login');
+        router.push('/login');
       }
     } catch (error) {
       console.error("AuthContext: Error signing out: ", error);

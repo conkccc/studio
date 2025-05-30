@@ -1,4 +1,3 @@
-
 'use client';
 import { useEffect, useState } from 'react';
 import { getFriends } from '@/lib/data-store';
@@ -21,13 +20,11 @@ export default function FriendsPage() {
       setDataLoading(true);
       return;
     }
-
-    if (!currentUser || !isAdmin) { 
+    if (!isAdmin) { // 관리자가 아니면 데이터 패치 X
       setDataLoading(false);
       setFriends([]);
       return;
     }
-    
     const fetchFriends = async () => {
       setDataLoading(true);
       try {
@@ -41,8 +38,7 @@ export default function FriendsPage() {
       }
     };
     fetchFriends();
-
-  }, [authLoading, currentUser, isAdmin]);
+  }, [authLoading, isAdmin]);
 
   if (authLoading || (isAdmin && dataLoading)) {
     return (
@@ -52,24 +48,12 @@ export default function FriendsPage() {
     );
   }
 
-  if (!currentUser && process.env.NEXT_PUBLIC_DEV_MODE_SKIP_AUTH !== "true") {
-    return (
-      <div className="container mx-auto py-8 text-center">
-        <h1 className="text-2xl font-bold mb-4">로그인 필요</h1>
-        <p className="text-muted-foreground mb-6">친구 목록을 보려면 로그인이 필요합니다.</p>
-        <Button asChild>
-          <Link href="/login">로그인 페이지로 이동</Link>
-        </Button>
-      </div>
-    );
-  }
-
-  if (!isAdmin) { 
+  if (!isAdmin) {
     return (
       <div className="container mx-auto py-8 text-center">
         <h1 className="text-2xl font-bold mb-4">접근 권한 없음</h1>
         <p className="text-muted-foreground">이 페이지는 관리자만 접근할 수 있습니다.</p>
-         <Button asChild className="mt-4">
+        <Button asChild className="mt-4">
           <Link href="/">대시보드로 돌아가기</Link>
         </Button>
       </div>

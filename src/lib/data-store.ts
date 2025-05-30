@@ -1,4 +1,4 @@
-
+import type { User, Friend, Meeting, Expense, ReserveFundTransaction } from './types';
 import {
   collection,
   doc,
@@ -24,17 +24,24 @@ import {
   DocumentSnapshot,
 } from 'firebase/firestore';
 import { db } from './firebase';
-import type { Friend, Meeting, Expense, ReserveFundTransaction, User } from './types';
+// 서버 환경에서만 adminDb import
+let adminDb: import('firebase-admin/firestore').Firestore | undefined = undefined;
+if (typeof window === 'undefined') {
+  // 서버에서만 동적 import
+  adminDb = require('./firebase-admin').adminDb;
+}
 
-// Collection Names
-const FRIENDS_COLLECTION = 'friends';
-const MEETINGS_COLLECTION = 'meetings';
-const USERS_COLLECTION = 'users';
-const EXPENSES_SUBCOLLECTION = 'expenses';
-const RESERVE_FUND_CONFIG_COLLECTION = 'config';
-const RESERVE_FUND_BALANCE_DOC_ID = 'reserveBalance';
-const RESERVE_FUND_TRANSACTIONS_COLLECTION = 'reserveFundTransactions';
+// Firestore 인스턴스 선택 (서버: adminDb, 클라이언트: db)
+export const firestore = typeof window === 'undefined' && adminDb ? adminDb : db;
 
+// Firestore 컬렉션/서브컬렉션 상수 직접 선언 (types.ts에 없을 경우)
+export const USERS_COLLECTION = 'users';
+export const FRIENDS_COLLECTION = 'friends';
+export const MEETINGS_COLLECTION = 'meetings';
+export const EXPENSES_SUBCOLLECTION = 'expenses';
+export const RESERVE_FUND_CONFIG_COLLECTION = 'reserveFundConfig';
+export const RESERVE_FUND_BALANCE_DOC_ID = 'balance';
+export const RESERVE_FUND_TRANSACTIONS_COLLECTION = 'reserveFundTransactions';
 
 // Helper function to convert Firestore Timestamps to JS Dates in an object
 const convertTimestampsToDates = (data: DocumentData): DocumentData => {

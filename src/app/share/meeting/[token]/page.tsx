@@ -1,17 +1,53 @@
-
+"use client";
+import { use, useEffect, useState } from 'react';
 import { getMeetingByShareToken, getExpensesByMeetingId, getFriends } from '@/lib/data-store';
 import { MeetingDetailsClient } from '@/components/meetings/MeetingDetailsClient';
 import { Button } from '@/components/ui/button';
 import { AlertTriangle, ArrowLeft } from 'lucide-react';
 import Link from 'next/link';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import type { Meeting, Expense, Friend } from '@/lib/types';
 
-interface SharedMeetingPageProps {
-  params: { token: string };
-}
+export default function SharedMeetingPage({ params }: { params: Promise<{ token: string }> }) {
+  const { token } = use(params);
+  const [meeting, setMeeting] = useState<Meeting | null>(null);
+  const [expenses, setExpenses] = useState<Expense[]>([]);
+  const [allFriends, setAllFriends] = useState<Friend[]>([]);
+  const [loading, setLoading] = useState(true);
 
-export default async function SharedMeetingPage({ params }: SharedMeetingPageProps) {
-  const { token } = params;
+  useEffect(() => {
+    if (!token) {
+      setLoading(false);
+      setMeeting(null);
+      return;
+    }
+    const fetchData = async () => {
+      setLoading(true);
+      const m = await getMeetingByShareToken(token);
+      if (!m) {
+        setMeeting(null);
+        setLoading(false);
+        return;
+      }
+      setMeeting(m);
+      const [e, f] = await Promise.all([
+        getExpensesByMeetingId(m.id),
+        getFriends()
+      ]);
+      setExpenses(e);
+      setAllFriends(f);
+      setLoading(false);
+    };
+    fetchData();
+  }, [token]);
+
+  if (loading) {
+    return (
+      <div className="flex justify-center items-center min-h-[calc(100vh-150px)]">
+        <p className="text-xl text-muted-foreground">공유 모임 정보 로딩 중...</p>
+      </div>
+    );
+  }
 
   if (!token) {
     return (
@@ -34,8 +70,6 @@ export default async function SharedMeetingPage({ params }: SharedMeetingPagePro
     );
   }
 
-  const meeting = await getMeetingByShareToken(token);
-
   if (!meeting) {
     return (
       <div className="container mx-auto py-8 text-center">
@@ -57,18 +91,13 @@ export default async function SharedMeetingPage({ params }: SharedMeetingPagePro
     );
   }
 
-  // Fetch additional data needed by MeetingDetailsClient
-  // These calls should ideally be efficient and not fetch unnecessary data.
-  const expenses = await getExpensesByMeetingId(meeting.id);
-  const allFriends = await getFriends(); // For mapping participant IDs to names
-
   return (
     <div className="container mx-auto py-8">
       <MeetingDetailsClient
         initialMeeting={meeting}
         initialExpenses={expenses}
         allFriends={allFriends}
-        isReadOnlyShare={true} // Explicitly set to true for shared page
+        isReadOnlyShare={true}
       />
     </div>
   );

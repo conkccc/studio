@@ -1,4 +1,3 @@
-
 'use client';
 
 import React, { useEffect, useState } from 'react';
@@ -16,17 +15,15 @@ export default function UsersPage() {
   const [dataLoading, setDataLoading] = useState(true);
 
   useEffect(() => {
-    if (authLoading && process.env.NEXT_PUBLIC_DEV_MODE_SKIP_AUTH !== "true") {
+    if (authLoading) {
       setDataLoading(true); 
       return;
     }
-
-    if (!currentUser || !isAdmin) { 
+    if (!isAdmin) { // 관리자가 아니면 데이터 패치 X
       setDataLoading(false);
       setUsers([]); 
       return;
     }
-
     const fetchUsers = async () => {
       setDataLoading(true);
       try {
@@ -39,27 +36,13 @@ export default function UsersPage() {
         setDataLoading(false);
       }
     };
-
     fetchUsers();
-    
-  }, [authLoading, currentUser, isAdmin]);
+  }, [authLoading, isAdmin]);
 
   if (authLoading || (isAdmin && dataLoading)) { 
     return (
       <div className="flex justify-center items-center min-h-[calc(100vh-150px)]">
         <p className="text-xl text-muted-foreground">사용자 목록 로딩 중...</p>
-      </div>
-    );
-  }
-
-  if (!currentUser && process.env.NEXT_PUBLIC_DEV_MODE_SKIP_AUTH !== "true") { 
-     return (
-      <div className="container mx-auto py-8 text-center">
-        <h1 className="text-2xl font-bold mb-4">로그인 필요</h1>
-        <p className="text-muted-foreground mb-6">사용자 목록을 보려면 로그인이 필요합니다.</p>
-        <Button asChild>
-          <Link href="/login">로그인 페이지로 이동</Link>
-        </Button>
       </div>
     );
   }

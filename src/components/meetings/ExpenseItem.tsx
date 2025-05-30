@@ -1,4 +1,3 @@
-
 'use client';
 
 import type { Expense, Friend } from '@/lib/types';
@@ -62,9 +61,9 @@ export function ExpenseItem({
   
   const getSplitDetails = () => { 
     if (expense.splitType === 'equally') {
-      const involved = expense.splitAmongIds
+      const involved = (expense.splitAmongIds
         ?.map(id => allFriends.find(f => f.id === id)?.nickname)
-        .filter(Boolean) || [];
+        .filter(Boolean) || []) as string[];
       
       // Check if all *meeting* participants are involved in this specific equal split
       const meetingParticipantNicknames = new Set(participants.map(p => p.nickname));

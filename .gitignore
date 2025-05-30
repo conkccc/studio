@@ -41,5 +41,6 @@ next-env.d.ts
 .env*
 
 # firebase
+serviceAccountKey.json
 firebase-debug.log
 firestore-debug.log
