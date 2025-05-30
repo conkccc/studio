@@ -22,7 +22,7 @@ export default function FriendsPage() {
       return;
     }
 
-    if (!currentUser || !isAdmin) { // Only admin can fetch/see friends
+    if (!currentUser || !isAdmin) { 
       setDataLoading(false);
       setFriends([]);
       return;
@@ -64,7 +64,7 @@ export default function FriendsPage() {
     );
   }
 
-  if (!isAdmin) { // Covers 'user' and 'none' roles
+  if (!isAdmin) { 
     return (
       <div className="container mx-auto py-8 text-center">
         <h1 className="text-2xl font-bold mb-4">접근 권한 없음</h1>

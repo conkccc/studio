@@ -5,16 +5,13 @@ import { useEffect, useState } from 'react';
 import { getMeetingById, getExpensesByMeetingId, getFriends } from '@/lib/data-store';
 import { MeetingDetailsClient } from '@/components/meetings/MeetingDetailsClient';
 import { Button } from '@/components/ui/button';
-import { ArrowLeft } from 'lucide-react';
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import type { Meeting, Expense, Friend } from '@/lib/types';
 import { useAuth } from '@/contexts/AuthContext';
 
-export default function MeetingDetailPage() {
-  const params = useParams();
-  const router = useRouter();
-  const { currentUser, isAdmin, userRole, loading: authLoading } = useAuth();
+export default function MeetingDetailPage({ params }: { params: { meetingId: string } }) {
+  const { currentUser, userRole, loading: authLoading } = useAuth();
 
   const meetingId = typeof params.meetingId === 'string' ? params.meetingId : undefined;
 
@@ -22,6 +19,7 @@ export default function MeetingDetailPage() {
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [allFriends, setAllFriends] = useState<Friend[]>([]);
   const [dataLoading, setDataLoading] = useState(true);
+  const router = useRouter();
 
   useEffect(() => {
     if (authLoading && process.env.NEXT_PUBLIC_DEV_MODE_SKIP_AUTH !== "true") {
@@ -29,17 +27,17 @@ export default function MeetingDetailPage() {
       return;
     }
     if (!meetingId) {
-        setMeeting(null); // No meetingId, treat as not found
+        setMeeting(null);
         setDataLoading(false);
         return;
     }
-    // Allow data fetching if dev mode skip auth, or not auth loading and (user has role or no current user for public view)
-    const canFetch = process.env.NEXT_PUBLIC_DEV_MODE_SKIP_AUTH === "true" || 
-                     (!authLoading && (userRole !== null || !currentUser));
-    
-    if (!canFetch) {
+
+    const canFetchPublicData = process.env.NEXT_PUBLIC_DEV_MODE_SKIP_AUTH === "true" || !authLoading;
+    const canFetchUserData = currentUser && (userRole === 'admin' || userRole === 'user');
+
+    if (!canFetchPublicData && !canFetchUserData) {
       setDataLoading(false);
-      // Potentially set meeting to null or keep undefined to show appropriate message
+      setMeeting(undefined); // Or null to indicate no access or data
       return;
     }
 
@@ -55,10 +53,10 @@ export default function MeetingDetailPage() {
         setMeeting(fetchedMeeting);
 
         // Fetch expenses and friends regardless of user role for public viewing capability
-        // If restricted, these fetches would also need role checks or rely on Firestore rules.
+        // Firestore rules should be the primary gatekeeper for sensitive data.
         const [fetchedExpenses, fetchedFriends] = await Promise.all([
           getExpensesByMeetingId(meetingId),
-          getFriends(), // getFriends might be restricted to admin/user by Firestore rules
+          getFriends(), 
         ]);
         setExpenses(fetchedExpenses);
         setAllFriends(fetchedFriends);
@@ -71,7 +69,7 @@ export default function MeetingDetailPage() {
       }
     };
     fetchData();
-  }, [meetingId, authLoading, currentUser, userRole]); // Removed isAdmin from deps as data fetching might be public
+  }, [meetingId, authLoading, currentUser, userRole]);
 
 
   if ((authLoading && process.env.NEXT_PUBLIC_DEV_MODE_SKIP_AUTH !== "true") || dataLoading) {
@@ -82,17 +80,9 @@ export default function MeetingDetailPage() {
     );
   }
   
-  // This check is for after loading completes
-  if (userRole === 'none' && currentUser && process.env.NEXT_PUBLIC_DEV_MODE_SKIP_AUTH !== "true") {
-    return (
-      <div className="container mx-auto py-8 text-center">
-        <h1 className="text-2xl font-bold mb-4">접근 권한 없음</h1>
-        <p className="text-muted-foreground mb-6">이 모임의 상세 정보를 보려면 역할 할당이 필요합니다. 관리자에게 문의하세요.</p>
-        <Button asChild>
-          <Link href="/">대시보드로 돌아가기</Link>
-        </Button>
-      </div>
-    );
+  // Redirect to login if user is authenticated but has no role (and not in dev mode skipping auth)
+  if (!authLoading && userRole === 'none' && currentUser && process.env.NEXT_PUBLIC_DEV_MODE_SKIP_AUTH !== "true") {
+    router.push('/login');
   }
   
   if (meeting === null) {
@@ -107,19 +97,32 @@ export default function MeetingDetailPage() {
     );
   }
   
-  if (!meeting && !dataLoading) { // If meeting is undefined after loading (should be caught by null check above)
+  if (!meeting && !dataLoading) { 
     return <div className="text-center py-10">모임 정보를 불러올 수 없습니다.</div>;
   }
 
-
   return (
     <div className="space-y-6">
-      {/* "All Meetings" button is now inside MeetingDetailsClient and conditional */}
       <MeetingDetailsClient
-        initialMeeting={meeting!} // Assert meeting is not null/undefined here
+        initialMeeting={meeting!}
         initialExpenses={expenses}
         allFriends={allFriends}
       />
+
+      {/* Ensure the button container is explicitly displayed and visible */}
+      <div className="flex justify-center gap-4 mt-8" style={{ display: 'flex', visibility: 'visible' }}>
+        {meeting.locationLink && (
+          <Button asChild>
+            <a href={meeting.locationLink} target="_blank" rel="noopener noreferrer">
+              
+              외부 지도 보기
+            </a>
+          </Button>
+        )}
+        {/* Placeholder for internal map view functionality */}
+        {/* Removed meeting.locationLink condition to always show the button */}
+        <Button>지도 보기</Button>
+      </div>
     </div>
   );
 }

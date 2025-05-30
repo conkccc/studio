@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation';
 import { LoginForm } from '@/components/auth/LoginForm';
 import { useAuth } from '@/contexts/AuthContext';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
-import { Button } from '@/components/ui/button'; // For logout button
+import { Button } from '@/components/ui/button';
 
 export default function LoginPage() {
   const { currentUser, isAdmin, userRole, loading, signOut } = useAuth();
@@ -17,20 +17,21 @@ export default function LoginPage() {
 
     if (process.env.NEXT_PUBLIC_DEV_MODE_SKIP_AUTH === "true") {
       console.log("LoginPage: Dev mode skip auth is ON, redirecting to / from login page if user is mocked.");
-      router.push('/'); // In dev mode, always try to push to dashboard as user is mocked
+      router.push('/');
       return;
     }
 
     if (!loading && currentUser) {
-      if (userRole !== null) { // Firestore에서 역할 정보를 가져온 후
+      if (userRole !== null) { 
         console.log('LoginPage: Redirecting to / with userRole:', userRole);
         router.push('/');
       } else {
-        // userRole is still null, AuthContext is likely still fetching it
-        console.log('LoginPage: CurrentUser exists, but userRole is still null. Waiting...');
+        console.log('LoginPage: CurrentUser exists, but userRole is still null. Waiting for role from AuthContext...');
       }
     } else if (!loading && !currentUser) {
       console.log('LoginPage: User not logged in, staying on login page.');
+    } else if (loading) {
+      console.log('LoginPage: AuthContext is loading...');
     }
   }, [currentUser, loading, router, userRole, isAdmin]);
 
@@ -48,9 +49,8 @@ export default function LoginPage() {
       <div className="flex flex-col justify-center items-center min-h-screen text-center">
         <p className="text-xl text-muted-foreground mb-4">사용자 정보 확인 중...</p>
         <Button variant="outline" onClick={async () => {
-            console.log("LoginPage: Manual sign-out initiated.");
+            console.log("LoginPage: Manual sign-out initiated due to stuck state.");
             await signOut();
-            // signOut should trigger AuthContext update and then this useEffect will re-evaluate
         }}>
           로그아웃
         </Button>
@@ -58,11 +58,7 @@ export default function LoginPage() {
     );
   }
   
-  // If user is logged in and role is determined (and not dev skip mode), they should have been redirected.
-  // If we are here, it means user is not logged in (or dev skip is on but redirect failed, though unlikely)
-  // or loading is still true for some reason (but caught above).
-  // So, show login form if not logged in.
-  if (!currentUser || process.env.NEXT_PUBLIC_DEV_MODE_SKIP_AUTH === "true" && !currentUser) { // Ensure login form shows in dev skip mode if somehow currentUser is not mocked yet
+  if (!currentUser || (process.env.NEXT_PUBLIC_DEV_MODE_SKIP_AUTH === "true" && !currentUser) ) {
      return (
         <div className="min-h-screen flex items-center justify-center bg-muted/40 py-12 px-4 sm:px-6 lg:px-8">
           <div className="w-full max-w-md space-y-8">
@@ -77,7 +73,7 @@ export default function LoginPage() {
             <Card>
               <CardHeader>
                 <CardTitle>로그인</CardTitle>
-                <CardDescription>관리자로 지정된 Google 계정으로 로그인하거나, 역할 할당을 위해 로그인하세요.</CardDescription>
+                <CardDescription>관리자 역할을 부여받으려면 지정된 Google 계정으로 로그인하세요.</CardDescription>
               </CardHeader>
               <CardContent>
                 <LoginForm />
@@ -88,11 +84,12 @@ export default function LoginPage() {
       );
   }
 
-  // Fallback for any other state, e.g. currentUser exists but redirect hasn't happened (should be brief)
+  // Fallback for any other state, e.g. currentUser exists but redirect hasn't happened
+  // This also includes the "대시보드로 이동 중..." scenario if role is determined
   return (
       <div className="flex flex-col justify-center items-center min-h-screen text-center">
         <p className="text-xl text-muted-foreground">대시보드로 이동 중...</p>
-         {currentUser && ( // Show logout if stuck with a user object
+         {currentUser && (
             <Button variant="outline" onClick={signOut} className="mt-4">
                 로그아웃 (이동 문제 발생 시)
             </Button>

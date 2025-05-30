@@ -16,18 +16,17 @@ export default function UsersPage() {
   const [dataLoading, setDataLoading] = useState(true);
 
   useEffect(() => {
-    if (authLoading) {
-      setDataLoading(true); // Explicitly set data loading if auth is loading
+    if (authLoading && process.env.NEXT_PUBLIC_DEV_MODE_SKIP_AUTH !== "true") {
+      setDataLoading(true); 
       return;
     }
 
-    if (!currentUser || !isAdmin) { // Stricter check: only admin can fetch users
+    if (!currentUser || !isAdmin) { 
       setDataLoading(false);
-      setUsers([]); // Clear users if not admin
+      setUsers([]); 
       return;
     }
 
-    // At this point, currentUser is an admin
     const fetchUsers = async () => {
       setDataLoading(true);
       try {
@@ -45,7 +44,7 @@ export default function UsersPage() {
     
   }, [authLoading, currentUser, isAdmin]);
 
-  if (authLoading || (isAdmin && dataLoading)) { // Show loader if auth is loading OR if admin and data is loading
+  if (authLoading || (isAdmin && dataLoading)) { 
     return (
       <div className="flex justify-center items-center min-h-[calc(100vh-150px)]">
         <p className="text-xl text-muted-foreground">사용자 목록 로딩 중...</p>
@@ -53,7 +52,7 @@ export default function UsersPage() {
     );
   }
 
-  if (!currentUser && process.env.NEXT_PUBLIC_DEV_MODE_SKIP_AUTH !== "true") { // Should be caught by middleware
+  if (!currentUser && process.env.NEXT_PUBLIC_DEV_MODE_SKIP_AUTH !== "true") { 
      return (
       <div className="container mx-auto py-8 text-center">
         <h1 className="text-2xl font-bold mb-4">로그인 필요</h1>
@@ -65,7 +64,7 @@ export default function UsersPage() {
     );
   }
 
-  if (!isAdmin) { // If not an admin (includes role 'user' and 'none')
+  if (!isAdmin) { 
     return (
       <div className="container mx-auto py-8 text-center">
         <h1 className="text-2xl font-bold mb-4">접근 권한 없음</h1>
@@ -77,7 +76,6 @@ export default function UsersPage() {
     );
   }
 
-  // Admin view
   return (
     <div className="space-y-6">
       <Card>

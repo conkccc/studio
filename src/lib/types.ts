@@ -38,6 +38,7 @@ export type Meeting = {
   name: string;
   dateTime: Date;
   endTime?: Date | null;
+  locationLink?: string | null | undefined;
   locationName: string;
   locationCoordinates?: { lat: number; lng: number };
   creatorId: string; // User ID

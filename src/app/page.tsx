@@ -8,28 +8,33 @@ import { UsersRound, CalendarCheck, PiggyBank, ArrowRight, LineChart, Briefcase 
 import { useAuth } from '@/contexts/AuthContext';
 import { useEffect, useState } from 'react';
 import { getReserveFundBalance, getMeetings, getExpensesByMeetingId } from '@/lib/data-store';
-import type { Meeting, Expense } from '@/lib/types';
+import type { Meeting } from '@/lib/types';
 
 export default function DashboardPage() {
   const { currentUser, appUser, isAdmin, userRole, loading: authLoading } = useAuth();
   const [reserveBalance, setReserveBalance] = useState<number | null>(null);
   const [recentMeetingSummary, setRecentMeetingSummary] = useState<string | null>(null);
-  const [isClient, setIsClient] = useState(false);
+  const [dataLoading, setDataLoading] = useState(true); // Separate loading state for dashboard data
 
   useEffect(() => {
-    setIsClient(true);
-  }, []);
-
-  useEffect(() => {
-    if (authLoading || !isClient) return;
+    if (authLoading) {
+      setDataLoading(true); // If auth is loading, dashboard data also waits
+      return;
+    }
 
     const fetchDashboardData = async () => {
-      if (currentUser && (isAdmin || userRole === 'user')) { // Admin or 'user' can see this data
+      if (currentUser && (isAdmin || userRole === 'user')) {
+        setDataLoading(true);
         try {
-          const balance = await getReserveFundBalance();
-          setReserveBalance(balance);
+          const balancePromise = isAdmin ? getReserveFundBalance() : Promise.resolve(0); // Only admin fetches balance
+          const meetingsPromise = getMeetings({ limitParam: 1 }); // Fetch most recent meeting for all roles (user/admin)
 
-          const recentMeetingsData = await getMeetings({ limitParam: 1 });
+          const [balance, recentMeetingsData] = await Promise.all([balancePromise, meetingsPromise]);
+          
+          if (isAdmin) {
+            setReserveBalance(balance);
+          }
+
           if (recentMeetingsData.meetings.length > 0) {
             const latestMeeting = recentMeetingsData.meetings[0];
             const expenses = await getExpensesByMeetingId(latestMeeting.id);
@@ -52,17 +57,20 @@ export default function DashboardPage() {
           }
         } catch (error) {
           console.error("Failed to fetch dashboard data:", error);
-          setReserveBalance(0); // Default to 0 or some error state
+          if (isAdmin) setReserveBalance(0);
           setRecentMeetingSummary("요약 정보를 가져오는 데 실패했습니다.");
+        } finally {
+          setDataLoading(false);
         }
       } else {
-        // Not admin or 'user', or not logged in (for cases where this might still run)
+        // Not admin or 'user', or not logged in
         setReserveBalance(null);
         setRecentMeetingSummary(null);
+        setDataLoading(false);
       }
     };
     fetchDashboardData();
-  }, [authLoading, currentUser, isAdmin, userRole, isClient]);
+  }, [authLoading, currentUser, isAdmin, userRole]);
 
 
   const quickLinks = [
@@ -72,7 +80,7 @@ export default function DashboardPage() {
     { href: '/users', label: '사용자 관리', icon: Briefcase, description: '사용자 역할을 관리합니다.', adminOnly: true },
   ];
 
-  if (authLoading || !isClient) {
+  if (authLoading || dataLoading && (isAdmin || userRole === 'user')) { // Show loader if auth or relevant data is loading
     return (
       <div className="flex justify-center items-center min-h-[calc(100vh-150px)]">
         <p className="text-xl text-muted-foreground">대시보드 로딩 중...</p>
@@ -80,11 +88,11 @@ export default function DashboardPage() {
     );
   }
 
-  if (!currentUser && process.env.NEXT_PUBLIC_DEV_MODE_SKIP_AUTH !== "true") { // Should be caught by middleware
+  if (!currentUser && process.env.NEXT_PUBLIC_DEV_MODE_SKIP_AUTH !== "true") {
     return (
       <div className="container mx-auto py-8 text-center">
-        <h1 className="text-3xl font-bold mb-4">N빵친구에 오신 것을 환영합니다!</h1>
-        <p className="text-lg text-muted-foreground mb-6">모임 정산을 관리하려면 로그인해주세요.</p>
+        <h1 className="text-3xl font-bold mb-4">N빵친구 에 오신 것을 환영합니다!</h1>
+        <p className="text-lg text-muted-foreground mb-6">모임 정산을 관리하려면 로그인해주세요(관리자만 가능).</p>
         <Button asChild>
           <Link href="/login">로그인 페이지로 이동</Link>
         </Button>
@@ -109,16 +117,15 @@ export default function DashboardPage() {
     );
   }
   
-  // Admin or User view
   const visibleQuickLinks = quickLinks.filter(link => {
-    if (userRole === 'none') return false; // 'none' role sees no quick links here
+    if (userRole === 'none') return false; 
     if (link.adminOnly) return isAdmin;
     if (link.userOrAdmin) return isAdmin || userRole === 'user';
     return true;
   });
 
   return (
-    <div className="container mx-auto py-8">
+    <div className="container mx-auto py-8" style={{ maxWidth: '1000px' }}>
       <header className="mb-12 text-center">
         <h1 className="text-4xl font-bold tracking-tight text-primary mb-3">N빵친구 {isAdmin ? '(관리자 대시보드)' : userRole === 'user' ? '(사용자 대시보드)' : ''}</h1>
         <p className="text-xl text-muted-foreground">친구들과의 정산을 스마트하게 관리하세요!</p>
@@ -147,7 +154,7 @@ export default function DashboardPage() {
         </section>
       )}
       
-      {(isAdmin || userRole === 'user') && ( // Show summary only for admin or user
+      {(isAdmin || userRole === 'user') && (
         <section className="mb-12">
           <Card>
             <CardHeader>
@@ -161,16 +168,18 @@ export default function DashboardPage() {
               <div>
                 <h3 className="font-semibold mb-2 text-lg">지난 모임 정산 현황</h3>
                 <p className="text-sm text-muted-foreground">
-                  {recentMeetingSummary === null ? "요약 로딩 중..." : recentMeetingSummary}
+                  {dataLoading ? "요약 로딩 중..." : recentMeetingSummary || "최근 모임 내역이 없습니다."}
                 </p>
               </div>
-              {isAdmin && ( // Reserve balance only for admin
+              {isAdmin && (
                 <div>
                   <h3 className="font-semibold mb-2 text-lg">회비 잔액</h3>
-                  {reserveBalance !== null ? (
+                  {dataLoading ? (
+                    <p className="text-3xl font-bold text-primary">잔액 로딩 중...</p>
+                  ) : reserveBalance !== null ? (
                     <p className="text-3xl font-bold text-primary">₩{reserveBalance.toLocaleString()}</p>
                   ) : (
-                    <p className="text-3xl font-bold text-primary">잔액 로딩 중...</p>
+                    <p className="text-3xl font-bold text-primary">잔액 정보를 불러올 수 없습니다.</p>
                   )}
                   <p className="text-sm text-muted-foreground">다음 모임을 위해 충분한 잔액이 남아있습니다.</p>
                   <Button asChild variant="secondary" className="mt-4">

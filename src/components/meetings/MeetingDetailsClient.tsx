@@ -78,7 +78,7 @@ export function MeetingDetailsClient({
   const mapInstanceRef = useRef<google.maps.Map | null>(null);
   const markerInstanceRef = useRef<google.maps.marker.AdvancedMarkerElement | null>(null);
   const [isMapsJsApiLoaded, setIsMapsJsApiLoaded] = useState(false);
-  const [showMap, setShowMap] = useState(false);
+  const [showMap, setShowMap] = useState(true);
 
   useEffect(() => {
     if (window.google && window.google.maps && window.google.maps.Map && window.google.maps.marker) {
@@ -455,7 +455,7 @@ export function MeetingDetailsClient({
           <div
             ref={mapContainerRef}
             className={cn(
-                "w-full mt-1 h-64 rounded-md border",
+                "w-full mt-1 h-64 rounded-md border block", // Always show the map container
                 (showMap && isMapFeatureAvailable) ? 'block' : 'hidden'
             )}
           >

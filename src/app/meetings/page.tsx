@@ -11,7 +11,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import type { Meeting, Friend } from '@/lib/types';
 import { useSearchParams } from 'next/navigation';
 
-const ITEMS_PER_PAGE = 10; // Updated to 10
+const ITEMS_PER_PAGE = 10;
 
 export default function MeetingsPage() {
   const { currentUser, isAdmin, userRole, loading: authLoading } = useAuth();
@@ -23,7 +23,7 @@ export default function MeetingsPage() {
   const [allFriends, setAllFriends] = useState<Friend[]>([]);
   const [availableYears, setAvailableYears] = useState<number[]>([]);
   const [selectedYear, setSelectedYear] = useState<number | undefined>(undefined);
-  const [dataLoading, setDataLoading] = useState(true); // Changed from meetingsLoading for clarity
+  const [dataLoading, setDataLoading] = useState(true);
   const [totalMeetingCount, setTotalMeetingCount] = useState(0);
 
   const currentPage = useMemo(() => {
@@ -39,7 +39,7 @@ export default function MeetingsPage() {
       if (!isNaN(parsedYear)) {
         setSelectedYear(parsedYear);
       } else {
-        setSelectedYear(undefined); // Invalid year param
+        setSelectedYear(undefined); 
       }
     }
   }, [yearParam]);
@@ -50,9 +50,9 @@ export default function MeetingsPage() {
       return;
     }
 
-    // Allow if dev mode skip auth, or if not loading and (user is admin/user OR page is public - meetings list can be public)
-    const canFetchData = process.env.NEXT_PUBLIC_DEV_MODE_SKIP_AUTH === "true" ||
-                         (!authLoading && (userRole === 'admin' || userRole === 'user' || !currentUser)); // Allows public viewing if no user
+    const canFetchData = process.env.NEXT_PUBLIC_DEV_MODE_SKIP_AUTH === "true" || 
+                         (!authLoading && (currentUser && (userRole === 'admin' || userRole === 'user')) || !currentUser) ; // Allow if dev mode, or (logged in and admin/user), or not logged in (public view)
+
 
     if (!canFetchData) {
       setDataLoading(false);
@@ -75,9 +75,12 @@ export default function MeetingsPage() {
         setTotalMeetingCount(fetchedMeetingsData.totalCount);
         setAvailableYears(fetchedMeetingsData.availableYears);
 
-        if (allFriends.length === 0 && (isAdmin || userRole === 'user')) { // Fetch friends only if needed and authorized
+        if (allFriends.length === 0 && currentUser && (isAdmin || userRole === 'user')) { 
              const fetchedFriends = await getFriends();
              setAllFriends(fetchedFriends);
+        } else if (!currentUser && allFriends.length === 0) { // For public view, fetch friends if not already fetched
+            const fetchedFriends = await getFriends(); // Assumes getFriends() is publicly accessible or handles auth internally
+            setAllFriends(fetchedFriends);
         }
       } catch (error) {
         console.error("Failed to fetch meetings:", error);
@@ -90,7 +93,7 @@ export default function MeetingsPage() {
 
     fetchData();
 
-  }, [authLoading, currentUser, isAdmin, userRole, currentPage, selectedYear, allFriends.length]); // yearParam removed, selectedYear used
+  }, [authLoading, currentUser, isAdmin, userRole, currentPage, selectedYear, allFriends.length]);
 
   const totalPages = useMemo(() => {
     return Math.ceil(totalMeetingCount / ITEMS_PER_PAGE);
@@ -104,17 +107,17 @@ export default function MeetingsPage() {
       </div>
     );
   }
-
-  if (!currentUser && process.env.NEXT_PUBLIC_DEV_MODE_SKIP_AUTH !== "true" && (userRole !== 'none' && userRole !== null ) ) { // 'none' or null role can see public page
-     // This should ideally be caught by middleware but as a fallback if a user is logged out
-     // while on a page that normally requires auth.
-     // However, meetings list can be public.
-  }
   
-  // Role 'none' can still view meetings if this page is public
   if (userRole === 'none' && currentUser && process.env.NEXT_PUBLIC_DEV_MODE_SKIP_AUTH !== "true") {
-      // UI for 'none' role if they can see meetings (e.g. read-only view)
-      // Or they are redirected by middleware
+    return (
+      <div className="container mx-auto py-8 text-center">
+        <h1 className="text-2xl font-bold mb-4">접근 권한 없음</h1>
+        <p className="text-muted-foreground mb-6">모임 목록을 보려면 역할 할당이 필요합니다. 관리자에게 문의하세요.</p>
+        <Button asChild>
+          <Link href="/">대시보드로 돌아가기</Link>
+        </Button>
+      </div>
+    );
   }
 
   return (
@@ -136,14 +139,14 @@ export default function MeetingsPage() {
         )}
       </div>
       
-      {dataLoading && (isAdmin || userRole === 'user') ? ( // Show loading indicator if data is loading for admin/user
+      {dataLoading ? ( 
          <div className="flex justify-center items-center min-h-[200px]">
             <p className="text-muted-foreground">모임 정보 로딩 중...</p>
          </div>
       ) : (
         <MeetingListClient 
           initialMeetings={meetings}
-          allFriends={allFriends} // Pass allFriends for participant name resolution
+          allFriends={allFriends}
           availableYears={availableYears}
           selectedYear={selectedYear}
           currentPage={currentPage}

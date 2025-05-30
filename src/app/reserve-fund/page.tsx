@@ -22,7 +22,7 @@ export default function ReserveFundPage() {
       return;
     }
 
-    if (!currentUser || !isAdmin) { // Only admin can access reserve fund page
+    if (!currentUser || !isAdmin) { 
       setDataLoading(false);
       setBalance(0);
       setTransactions([]);
@@ -59,7 +59,7 @@ export default function ReserveFundPage() {
     );
   }
 
-  if (!currentUser && process.env.NEXT_PUBLIC_DEV_MODE_SKIP_AUTH !== "true") { // Should be caught by middleware
+  if (!currentUser && process.env.NEXT_PUBLIC_DEV_MODE_SKIP_AUTH !== "true") { 
     return (
       <div className="container mx-auto py-8 text-center">
         <h1 className="text-2xl font-bold mb-4">로그인 필요</h1>
@@ -71,7 +71,7 @@ export default function ReserveFundPage() {
     );
   }
 
-  if (!isAdmin) { // Covers 'user' and 'none' roles
+  if (!isAdmin) { 
      return (
       <div className="container mx-auto py-8 text-center">
         <h1 className="text-2xl font-bold mb-4">접근 권한 없음</h1>
@@ -83,7 +83,6 @@ export default function ReserveFundPage() {
     );
   }
 
-  // Admin view
   return (
     <div className="space-y-6">
       <div>
@@ -104,8 +103,8 @@ export default function ReserveFundPage() {
       
       <ReserveFundClient 
         initialTransactions={transactions} 
-        initialBalance={balance} 
-        currentUserId={currentUser?.uid || ''} // Pass currentUserId for actions
+        initialBalance={balance}
+        currentUserId={currentUser?.uid || ''} 
       />
 
     </div>

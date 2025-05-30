@@ -9,11 +9,10 @@ import { useAuth } from '@/contexts/AuthContext';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import type { Meeting, Friend } from '@/lib/types';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams } from 'next/navigation';
 
 export default function EditMeetingPage() {
   const params = useParams();
-  const router = useRouter();
   const { currentUser, isAdmin, userRole, loading: authLoading } = useAuth();
   const meetingId = typeof params.meetingId === 'string' ? params.meetingId : undefined;
 
@@ -27,9 +26,9 @@ export default function EditMeetingPage() {
       return;
     }
 
-    if (!currentUser || !isAdmin) { // Only admin can access edit page
+    if (!currentUser || !isAdmin) { 
       setDataLoading(false);
-      setMeeting(undefined); // Or null to trigger not found/access denied more explicitly below
+      setMeeting(undefined); 
       setFriends([]);
       return;
     }
@@ -45,19 +44,12 @@ export default function EditMeetingPage() {
       try {
         const [fetchedMeeting, fetchedFriends] = await Promise.all([
           getMeetingById(meetingId),
-          getFriends() // Friends list for the form
+          getFriends()
         ]);
         
         if (!fetchedMeeting) {
           setMeeting(null);
         } else {
-          // Ensure creatorId check for editing, though Firestore rules are primary
-          if (fetchedMeeting.creatorId !== currentUser.uid && !isAdmin) {
-            // This check is secondary; primary check is isAdmin above
-            // and Firestore rules for the update action.
-            // console.warn("User is not creator or admin, but somehow accessed edit page for this meeting.");
-            // setMeeting(null); // Or redirect
-          }
           setMeeting(fetchedMeeting);
         }
         setFriends(fetchedFriends);
@@ -73,7 +65,7 @@ export default function EditMeetingPage() {
   }, [authLoading, currentUser, isAdmin, meetingId]);
 
 
-  if (authLoading || (isAdmin && dataLoading && meetingId)) { // Show loader if auth loading OR if admin and data is loading for a valid meetingId
+  if (authLoading || (isAdmin && dataLoading && meetingId)) { 
     return (
       <div className="flex justify-center items-center min-h-[calc(100vh-150px)]">
         <p className="text-xl text-muted-foreground">페이지 로딩 중...</p>
@@ -81,7 +73,7 @@ export default function EditMeetingPage() {
     );
   }
 
-  if (!currentUser && process.env.NEXT_PUBLIC_DEV_MODE_SKIP_AUTH !== "true") { // Should be caught by middleware
+  if (!currentUser && process.env.NEXT_PUBLIC_DEV_MODE_SKIP_AUTH !== "true") {
     return (
       <div className="container mx-auto py-8 text-center">
         <h1 className="text-2xl font-bold mb-4">로그인 필요</h1>
@@ -93,7 +85,7 @@ export default function EditMeetingPage() {
     );
   }
 
-  if (!isAdmin) { // Covers 'user' and 'none' roles
+  if (!isAdmin) { 
     return (
       <div className="container mx-auto py-8 text-center">
         <h1 className="text-2xl font-bold mb-4">접근 권한 없음</h1>
@@ -105,7 +97,7 @@ export default function EditMeetingPage() {
     );
   }
 
-  if (meeting === null) { // Meeting not found
+  if (meeting === null) { 
     return (
       <div className="container mx-auto py-8 text-center">
         <h1 className="text-2xl font-bold mb-4">모임을 찾을 수 없습니다.</h1>
@@ -117,14 +109,11 @@ export default function EditMeetingPage() {
     );
   }
   
-  if (!meeting && !dataLoading) { // Fallback if meeting is undefined after loading (error or no meetingId)
+  if (!meeting && !dataLoading) { 
     return <div className="text-center py-10">모임 정보를 불러올 수 없습니다.</div>;
   }
   
-  // Admin and meeting data is available (meeting is not null or undefined)
-  // currentUser is also guaranteed by isAdmin check
   const currentUserIdForForm = currentUser!.uid;
-
 
   return (
     <div className="max-w-2xl mx-auto">
@@ -135,7 +124,7 @@ export default function EditMeetingPage() {
         </CardHeader>
         <CardContent>
            <CreateMeetingForm
-            initialData={meeting!} // Assert meeting is not null/undefined
+            initialData={meeting!} 
             friends={friends}
             currentUserId={currentUserIdForForm}
             isEditMode={true}

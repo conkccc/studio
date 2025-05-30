@@ -21,7 +21,7 @@ export default function NewMeetingPage() {
       return;
     }
 
-    if (!currentUser || !isAdmin) { // Only admin can access to create new meeting
+    if (!currentUser || !isAdmin) { 
       setDataLoading(false);
       setFriends([]);
       return;
@@ -52,7 +52,7 @@ export default function NewMeetingPage() {
     );
   }
 
-  if (!currentUser && process.env.NEXT_PUBLIC_DEV_MODE_SKIP_AUTH !== "true") { // Should be caught by middleware
+  if (!currentUser && process.env.NEXT_PUBLIC_DEV_MODE_SKIP_AUTH !== "true") { 
     return (
       <div className="container mx-auto py-8 text-center">
         <h1 className="text-2xl font-bold mb-4">로그인 필요</h1>
@@ -64,7 +64,7 @@ export default function NewMeetingPage() {
     );
   }
   
-  if (!isAdmin) { // Covers 'user' and 'none' roles
+  if (!isAdmin) { 
     return (
       <div className="container mx-auto py-8 text-center">
         <h1 className="text-2xl font-bold mb-4">접근 권한 없음</h1>
@@ -76,8 +76,7 @@ export default function NewMeetingPage() {
     );
   }
 
-  // Admin view, currentUser is guaranteed here
-  const currentUserId = currentUser!.uid; // Safe to use ! due to checks above
+  const currentUserId = currentUser!.uid; 
 
   return (
     <div className="max-w-2xl mx-auto">

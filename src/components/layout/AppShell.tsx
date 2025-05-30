@@ -220,9 +220,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       )}
 
       <div className={cn(
-        "flex flex-1 flex-col overflow-y-auto",
-        // Desktop: Apply left margin when sidebar is present and not mobile
-        !isMobile && canShowAppShell && userRole !== 'none' && "sm:ml-[var(--sidebar-width)] group-data-[state=collapsed]/sidebar-wrapper:sm:ml-[var(--sidebar-width-icon)] transition-[margin-left] duration-300 ease-in-out"
+        "flex flex-1 flex-col overflow-y-auto relative" // Added 'relative'
       )}>
         <header
           className={cn(
