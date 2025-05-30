@@ -348,7 +348,7 @@ export async function finalizeMeetingSettlementAction(meetingId: string, current
     let actualDeduction = 0;
 
     if (amountToDeduct && amountToDeduct > 0) {
-        actualDeduction = Math.min(amountToDeduct, currentReserveBalance);
+        actualDeduction = Math.min(amountToDeduct, currentReserveBalance ?? 0);
         if (actualDeduction > 0.001) {
             // Revert any previous deduction for this meeting before recording a new one to prevent duplicates if action is retried
             await dbRevertMeetingDeduction(meeting.id); 
@@ -357,7 +357,7 @@ export async function finalizeMeetingSettlementAction(meetingId: string, current
             if (actualDeduction < amountToDeduct) {
                 message += ` (설정된 금액보다 회비 잔액이 부족하여 부분 사용)`;
             }
-        } else if (amountToDeduct > 0 && currentReserveBalance <= 0.001) {
+        } else if (amountToDeduct > 0 && (currentReserveBalance ?? 0) <= 0.001) {
              message = `모임 (${meeting.name}) 정산 확정. 회비 잔액 부족으로 설정된 금액을 사용할 수 없습니다.`;
         } else {
             message = `모임 (${meeting.name}) 정산 확정. 설정된 회비 사용액이 없거나 0원입니다.`;

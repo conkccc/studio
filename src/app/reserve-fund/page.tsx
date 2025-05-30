@@ -33,7 +33,7 @@ export default function ReserveFundPage() {
           getReserveFundBalance(),
           getLoggedReserveFundTransactions()
         ]);
-        setBalance(fetchedBalance);
+        setBalance(fetchedBalance ?? 0);
         setTransactions(fetchedTransactions);
       } catch (error) {
         console.error("Failed to fetch reserve fund data:", error);
