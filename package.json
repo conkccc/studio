@@ -42,7 +42,7 @@
     "clsx": "^2.1.1",
     "cmdk": "^1.0.0",
     "date-fns": "^3.6.0",
-    "firebase": "^9.23.0",
+    "firebase": "^11.8.1",
     "firebase-admin": "^13.4.0",
     "lucide-react": "^0.400.0",
     "nanoid": "^5.0.7",
