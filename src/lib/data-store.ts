@@ -395,9 +395,9 @@ export const getReserveFundBalance = async (): Promise<number|null> => {
   return null;
 };
 
-export const getLoggedReserveFundTransactions = async (): Promise<ReserveFundTransaction[]> => {
+export const getLoggedReserveFundTransactions = async (limitCount: number = 5): Promise<ReserveFundTransaction[]> => {
   const transactionsCollectionRef = collection(db, RESERVE_FUND_TRANSACTIONS_COLLECTION);
-  const q = query(transactionsCollectionRef, orderBy('date', 'desc'));
+  const q = query(transactionsCollectionRef, orderBy('date', 'desc'), firestoreLimit(limitCount));
   const snapshot = await getDocs(q);
   return arrayFromSnapshot<ReserveFundTransaction>(snapshot);
 };

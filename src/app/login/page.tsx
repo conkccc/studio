@@ -57,7 +57,7 @@ export default function LoginPage() {
           <Card>
             <CardHeader>
               <CardTitle>로그인</CardTitle>
-              <CardDescription>Google 계정으로 로그인하고 관리자가 역활을 부여해야 사용 가능합니다.</CardDescription>
+              <CardDescription>로그인하고 관리자가 역활을 부여해야 사용 가능합니다.</CardDescription>
             </CardHeader>
             <CardContent>
               <LoginForm />

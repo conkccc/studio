@@ -41,9 +41,9 @@ interface NavItem {
 
 const navItems: NavItem[] = [
   { href: '/', label: '대시보드', icon: Home, matchExact: true, userOrAdmin: true },
-  { href: '/friends', label: '친구 목록', icon: UsersRound, adminOnly: true },
+  { href: '/friends', label: '친구 목록', icon: UsersRound, userOrAdmin: true },
   { href: '/meetings', label: '모임 목록', icon: CalendarCheck, userOrAdmin: true },
-  { href: '/reserve-fund', label: '회비 관리', icon: PiggyBank, adminOnly: true },
+  { href: '/reserve-fund', label: '회비 관리', icon: PiggyBank, userOrAdmin: true },
   { href: '/users', label: '사용자 관리', icon: Briefcase, adminOnly: true },
 ];
 

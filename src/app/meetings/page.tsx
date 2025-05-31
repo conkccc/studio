@@ -32,13 +32,14 @@ export default function MeetingsPage() {
 
   useEffect(() => {
     if (yearParam === null || yearParam === "all") {
-      setSelectedYear(undefined);
+      // 기본값: 현재 연도
+      setSelectedYear(new Date().getFullYear());
     } else {
       const parsedYear = parseInt(yearParam, 10);
       if (!isNaN(parsedYear)) {
         setSelectedYear(parsedYear);
       } else {
-        setSelectedYear(undefined); 
+        setSelectedYear(new Date().getFullYear());
       }
     }
   }, [yearParam]);

@@ -216,7 +216,7 @@ export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, 
       endTime: undefined,
       locationName: '',
       locationCoordinates: undefined,
-      participantIds: [], // Default to empty, user must select
+      participantIds: friends.map(f => f.id), // 모든 친구가 기본 선택
       useReserveFund: false,
       partialReserveFundAmount: undefined,
       nonReserveFundParticipants: [],

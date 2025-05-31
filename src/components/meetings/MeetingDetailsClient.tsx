@@ -39,6 +39,7 @@ import { Input } from '@/components/ui/input';
 import Link from 'next/link';
 import { cn } from '@/lib/utils';
 import { Loader } from '@googlemaps/js-api-loader';
+import { Accordion, AccordionItem, AccordionTrigger, AccordionContent } from '@/components/ui/accordion';
 
 const googleMapsLibraries: ("places" | "maps" | "marker")[] = ["places", "maps", "marker"];
 
@@ -72,8 +73,15 @@ export function MeetingDetailsClient({
 
   const { toast } = useToast();
   const router = useRouter();
-  const { currentUser, isAdmin } = useAuth();
+  const { currentUser, isAdmin, userRole } = useAuth();
   const isCreator = currentUser?.uid === meeting.creatorId;
+  // userRole: 'admin' | 'user' | 'none'
+
+  // 권한 플래그: user도 모든 정보는 볼 수 있으나, 수정/삭제/추가 등은 불가
+  const canManageMeetingActions = (isAdmin || isCreator) && !isReadOnlyShare;
+  const canManageExpenses = (isAdmin || isCreator) && !isReadOnlyShare;
+  const canFinalize = isAdmin && meeting.useReserveFund && meeting.partialReserveFundAmount && meeting.partialReserveFundAmount > 0 && !meeting.isSettled && expenses.length > 0 && !isReadOnlyShare;
+  const isReadOnlyUser = userRole === 'user' && !isAdmin && !isCreator;
 
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<google.maps.Map | null>(null);
@@ -222,10 +230,6 @@ export function MeetingDetailsClient({
     }
   };
 
-  const canManageMeetingActions = (isAdmin || isCreator) && !isReadOnlyShare;
-  const canManageExpenses = (isAdmin || isCreator) && !isReadOnlyShare;
-  const canFinalize = isAdmin && meeting.useReserveFund && meeting.partialReserveFundAmount && meeting.partialReserveFundAmount > 0 && !meeting.isSettled && expenses.length > 0 && !isReadOnlyShare;
-
   const handleDeleteMeeting = async () => {
     if (!currentUser?.uid) {
         toast({ title: '오류', description: '로그인이 필요합니다.', variant: 'destructive' });
@@ -350,7 +354,7 @@ export function MeetingDetailsClient({
                 만든이: {creatorName}
               </CardDescription>
             </div>
-            {canManageMeetingActions && (
+            {canManageMeetingActions && !isReadOnlyUser && (
               <div className="flex space-x-2 shrink-0">
                 <Button variant="outline" size="sm" onClick={() => router.push(`/meetings/${meeting.id}/edit`)} disabled={isDeleting || isFinalizing || (meeting.isSettled && !isAdmin) }>
                   <Edit3 className="mr-2 h-4 w-4" /> 수정
@@ -489,67 +493,78 @@ export function MeetingDetailsClient({
         </CardContent>
       </Card>
 
-      {!isReadOnlyShare && (isAdmin || isCreator) && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2"><Share2 className="h-5 w-5"/>모임 공유 설정</CardTitle>
-            <CardDescription>이 모임의 정산 내역을 다른 사람과 공유할 수 있습니다.</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="flex items-center space-x-2">
-              <Switch
-                id="share-enable"
-                checked={shareEnabled}
-                onCheckedChange={setShareEnabled}
-                disabled={isShareSettingsSaving}
-              />
-              <Label htmlFor="share-enable">공유 활성화</Label>
-            </div>
-            {shareEnabled && (
-              <>
-                <div>
-                  <Label htmlFor="share-expiry">공유 만료 기간</Label>
-                  <Select
-                    value={selectedExpiryDays}
-                    onValueChange={setSelectedExpiryDays}
-                    disabled={isShareSettingsSaving}
-                  >
-                    <SelectTrigger id="share-expiry" className="w-[180px] mt-1">
-                      <SelectValue placeholder="기간 선택" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="7">7일 후 만료</SelectItem>
-                      <SelectItem value="30">30일 후 만료</SelectItem>
-                      <SelectItem value="90">90일 후 만료</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                {currentShareLink && (
-                  <div className="space-y-2">
-                    <Label>공유 링크 (읽기 전용)</Label>
-                    <div className="flex items-center space-x-2">
-                      <Input type="text" value={currentShareLink} readOnly className="text-xs" />
-                      <Button type="button" variant="outline" size="icon" onClick={handleCopyShareLink}>
-                        <Copy className="h-4 w-4" />
-                      </Button>
-                    </div>
-                    {meeting.shareExpiryDate && (
-                       <p className="text-xs text-muted-foreground">
-                         만료일: {format(meeting.shareExpiryDate instanceof Timestamp ? meeting.shareExpiryDate.toDate() : new Date(meeting.shareExpiryDate), 'yyyy년 M월 d일 HH:mm', { locale: ko })}
-                       </p>
-                    )}
+      {!isReadOnlyShare && (isAdmin || isCreator || userRole === 'user') && (
+        <Accordion type="single" collapsible className="my-4">
+          <AccordionItem value="share-settings" className="rounded-lg border bg-white px-4 py-2">
+            <AccordionTrigger className="py-4 px-2">
+              <div className="flex items-center gap-2">
+                <Share2 className="h-5 w-5" />
+                모임 공유 설정
+              </div>
+            </AccordionTrigger>
+            <AccordionContent className="pb-4 px-2">
+              <Card className="shadow-none border-none p-0 bg-transparent">
+                <CardHeader className="p-0 pb-2">
+                  <CardDescription>이 모임의 정산 내역을 다른 사람과 공유할 수 있습니다.</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4 p-0">
+                  <div className="flex items-center space-x-2 mt-2">
+                    <Switch
+                      id="share-enable"
+                      checked={shareEnabled}
+                      onCheckedChange={setShareEnabled}
+                      disabled={isShareSettingsSaving || isReadOnlyUser}
+                    />
+                    <Label htmlFor="share-enable">공유 활성화</Label>
                   </div>
-                )}
-              </>
-            )}
-          </CardContent>
-          <CardFooter>
-            <Button onClick={handleSaveShareSettings} disabled={isShareSettingsSaving}>
-              {isShareSettingsSaving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              공유 설정 저장
-            </Button>
-          </CardFooter>
-        </Card>
+                  {shareEnabled && (
+                    <>
+                      <div className="mt-2">
+                        <Label htmlFor="share-expiry">공유 만료 기간</Label>
+                        <Select
+                          value={selectedExpiryDays}
+                          onValueChange={setSelectedExpiryDays}
+                          disabled={isShareSettingsSaving || isReadOnlyUser}
+                        >
+                          <SelectTrigger id="share-expiry" className="w-[180px] mt-1">
+                            <SelectValue placeholder="기간 선택" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="7">7일 후 만료</SelectItem>
+                            <SelectItem value="30">30일 후 만료</SelectItem>
+                            <SelectItem value="90">90일 후 만료</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      {currentShareLink && (
+                        <div className="space-y-2 mt-2">
+                          <Label>공유 링크 (읽기 전용)</Label>
+                          <div className="flex items-center space-x-2">
+                            <Input type="text" value={currentShareLink} readOnly className="text-xs" />
+                            <Button type="button" variant="outline" size="icon" onClick={handleCopyShareLink}>
+                              <Copy className="h-4 w-4" />
+                            </Button>
+                          </div>
+                          {meeting.shareExpiryDate && (
+                            <p className="text-xs text-muted-foreground">
+                              만료일: {format(meeting.shareExpiryDate instanceof Timestamp ? meeting.shareExpiryDate.toDate() : new Date(meeting.shareExpiryDate), 'yyyy년 M월 d일 HH:mm', { locale: ko })}
+                            </p>
+                          )}
+                        </div>
+                      )}
+                    </>
+                  )}
+                </CardContent>
+                <CardFooter className="p-0 pt-4">
+                  <Button onClick={handleSaveShareSettings} disabled={isShareSettingsSaving || isReadOnlyUser} className="w-full mt-2 py-3 text-base rounded-md">
+                    {isShareSettingsSaving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                    공유 설정 저장
+                  </Button>
+                </CardFooter>
+              </Card>
+            </AccordionContent>
+          </AccordionItem>
+        </Accordion>
       )}
 
       <Tabs defaultValue="expenses" className="w-full">
@@ -569,9 +584,9 @@ export function MeetingDetailsClient({
                     participants={participants}
                     onExpenseAdded={handleExpenseAdded}
                     triggerButton={
-                       <Button variant="outline" size="sm" disabled={isDeleting || isFinalizing || (meeting.isSettled && !isAdmin) }>
-                          <PlusCircle className="mr-2 h-4 w-4" /> 새 지출 추가
-                        </Button>
+                      <Button variant="outline" size="sm" disabled={isDeleting || isFinalizing || (meeting.isSettled && !isAdmin) || isReadOnlyUser}>
+                        <PlusCircle className="mr-2 h-4 w-4" /> 새 지출 추가
+                      </Button>
                     }
                   />
                 )}
@@ -605,7 +620,7 @@ export function MeetingDetailsClient({
           <Card>
             <CardHeader>
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-                {canFinalize && (
+                {canFinalize && !isReadOnlyUser && (
                   <Button onClick={handleFinalizeSettlement} disabled={isFinalizing || isDeleting} size="sm">
                     {isFinalizing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <CheckCircle2 className="mr-2 h-4 w-4" />}
                     정산 확정 및 회비 사용 기록

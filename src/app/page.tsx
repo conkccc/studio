@@ -24,12 +24,10 @@ export default function DashboardPage() {
       if (currentUser && (isAdmin || userRole === 'user')) {
         setDataLoading(true);
         try {
-          const balancePromise = isAdmin ? getReserveFundBalance() : Promise.resolve(0); // Only admin fetches balance
-          const meetingsPromise = getMeetings({ limitParam: 1 }); // Fetch most recent meeting for all roles (user/admin)
+          const balancePromise = getReserveFundBalance()
+          const meetingsPromise = getMeetings({ limitParam: 1 });
           const [balance, recentMeetingsData] = await Promise.all([balancePromise, meetingsPromise]);
-          if (isAdmin) {
-            setReserveBalance(balance);
-          }
+          setReserveBalance(balance);
           if (recentMeetingsData.meetings.length > 0) {
             const latestMeeting = recentMeetingsData.meetings[0];
             const expenses = await getExpensesByMeetingId(latestMeeting.id);
@@ -51,7 +49,7 @@ export default function DashboardPage() {
           }
         } catch (error) {
           console.error("Failed to fetch dashboard data:", error);
-          if (isAdmin) setReserveBalance(0);
+          setReserveBalance(0);
           setRecentMeetingSummary("요약 정보를 가져오는 데 실패했습니다.");
         } finally {
           setDataLoading(false);
@@ -66,9 +64,9 @@ export default function DashboardPage() {
   }, [authLoading, currentUser, isAdmin, userRole]);
 
   const quickLinks = [
-    { href: '/friends', label: '친구 관리', icon: UsersRound, description: '친구 목록을 보고 새 친구를 추가하세요.', adminOnly: true },
+    { href: '/friends', label: '친구 관리', icon: UsersRound, description: '친구 목록을 보고 새 친구를 추가하세요.', userOrAdmin: true },
     { href: '/meetings', label: '모임 관리', icon: CalendarCheck, description: '모임을 만들고 지난 모임을 확인하세요.', userOrAdmin: true },
-    { href: '/reserve-fund', label: '회비 현황', icon: PiggyBank, description: '회비 잔액과 사용 내역을 보세요.', adminOnly: true },
+    { href: '/reserve-fund', label: '회비 현황', icon: PiggyBank, description: '회비 잔액과 사용 내역을 보세요.', userOrAdmin: true },
     { href: '/users', label: '사용자 관리', icon: Briefcase, description: '사용자 역할을 관리합니다.', adminOnly: true },
   ];
 
@@ -125,7 +123,6 @@ export default function DashboardPage() {
                 <LineChart className="w-6 h-6 text-primary" />
                 최근 활동 요약
               </CardTitle>
-              <CardDescription>최근 모임 및 회비 잔액에 대한 간략한 개요입니다.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
               <div>
@@ -134,17 +131,15 @@ export default function DashboardPage() {
                   {dataLoading ? "요약 로딩 중..." : recentMeetingSummary || "최근 모임 내역이 없습니다."}
                 </p>
               </div>
-              {isAdmin && (
+              {(
                 <div>
                   <h3 className="font-semibold mb-2 text-lg">회비 잔액</h3>
-                  {dataLoading ? (
-                    <p className="text-3xl font-bold text-primary">잔액 로딩 중...</p>
-                  ) : reserveBalance === null ? (
-                    <p className="text-3xl font-bold text-primary">잔액 정보 없음</p>
-                  ) : (
-                    <p className="text-3xl font-bold text-primary">₩{reserveBalance.toLocaleString()}</p>
-                  )}
-                  <p className="text-sm text-muted-foreground">다음 모임을 위해 충분한 잔액이 남아있습니다.</p>
+                  <p className="text-3xl font-bold text-primary">
+                    {dataLoading ? "잔액 로딩 중..." : reserveBalance === null ? "잔액 정보 없음" : `₩${reserveBalance.toLocaleString()}`}
+                  </p>
+                  <p className="text-sm text-muted-foreground">
+                    {(reserveBalance ?? 0) >= 1_000_000 ? "다음 모임을 위한 충분한 잔액이 남아있습니다." : "다음 모임을 위한 잔액이 부족합니다."}
+                  </p>
                   <Button asChild variant="secondary" className="mt-4">
                     <Link href="/reserve-fund">회비 내역 보기</Link>
                   </Button>

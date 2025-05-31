@@ -1,4 +1,3 @@
-
 'use client';
 
 import type { ReserveFundTransaction } from '@/lib/types';
@@ -44,7 +43,7 @@ interface ReserveFundClientProps {
   initialBalance: number;
 }
 
-export function ReserveFundClient({ initialTransactions, initialBalance }: ReserveFundClientProps) {
+export function ReserveFundClient({ initialTransactions, initialBalance, isReadOnly = false }: ReserveFundClientProps & { isReadOnly?: boolean }) {
   const [transactions, setTransactions] = useState<ReserveFundTransaction[]>(initialTransactions);
   const [currentBalance, setCurrentBalance] = useState<number>(initialBalance); // Local state for balance
   const [isUpdateDialogOpen, setIsUpdateDialogOpen] = useState(false);
@@ -113,7 +112,7 @@ export function ReserveFundClient({ initialTransactions, initialBalance }: Reser
           <CardTitle>잔액 설정</CardTitle>
             <AlertDialog open={isUpdateDialogOpen} onOpenChange={setIsUpdateDialogOpen}>
               <AlertDialogTrigger asChild>
-                <Button variant="outline">
+                <Button variant="outline" disabled={isReadOnly}>
                   <Edit className="mr-2 h-4 w-4" /> 현재 잔액 설정
                 </Button>
               </AlertDialogTrigger>
@@ -135,7 +134,7 @@ export function ReserveFundClient({ initialTransactions, initialBalance }: Reser
                           const rawValue = e.target.value.replace(/,/g, '');
                           form.setValue('newBalance', rawValue === '' ? 0 : parseFloat(rawValue), {shouldValidate: true});
                         }}
-                        disabled={isPending} 
+                        disabled={isPending || isReadOnly} 
                       />
                     {form.formState.errors.newBalance && <p className="text-sm text-destructive mt-1">{form.formState.errors.newBalance.message}</p>}
                   </div>
@@ -145,13 +144,13 @@ export function ReserveFundClient({ initialTransactions, initialBalance }: Reser
                         id="description" 
                         {...form.register('description')}
                         placeholder="예: 2024년 7월 정산 후 잔액"
-                        disabled={isPending} 
+                        disabled={isPending || isReadOnly} 
                       />
                      {form.formState.errors.description && <p className="text-sm text-destructive mt-1">{form.formState.errors.description.message}</p>}
                   </div>
                   <AlertDialogFooter>
                     <AlertDialogCancel onClick={() => setIsUpdateDialogOpen(false)} disabled={isPending}>취소</AlertDialogCancel>
-                    <AlertDialogAction type="submit" disabled={isPending}>
+                    <AlertDialogAction type="submit" disabled={isPending || isReadOnly}>
                       {isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                       잔액 저장
                     </AlertDialogAction>

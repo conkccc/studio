@@ -1,4 +1,3 @@
-
 'use client';
 
 import type { Friend } from '@/lib/types';
@@ -25,7 +24,7 @@ interface FriendListClientProps {
   initialFriends: Friend[];
 }
 
-export function FriendListClient({ initialFriends }: FriendListClientProps) {
+export function FriendListClient({ initialFriends, isReadOnly = false }: FriendListClientProps & { isReadOnly?: boolean }) {
   const [friends, setFriends] = useState<Friend[]>(initialFriends);
   const [editingFriendId, setEditingFriendId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState<{ nickname: string; name?: string }>({ nickname: '', name: '' });
@@ -88,7 +87,7 @@ export function FriendListClient({ initialFriends }: FriendListClientProps) {
                     onChange={(e) => setEditForm({ ...editForm, nickname: e.target.value })}
                     className="h-8 text-sm"
                     placeholder="닉네임"
-                    disabled={isPending}
+                    disabled={isPending || isReadOnly}
                   />
                   <Input
                     type="text"
@@ -96,13 +95,13 @@ export function FriendListClient({ initialFriends }: FriendListClientProps) {
                     onChange={(e) => setEditForm({ ...editForm, name: e.target.value })}
                     className="h-8 text-sm"
                     placeholder="이름 (선택)"
-                    disabled={isPending}
+                    disabled={isPending || isReadOnly}
                   />
                 </div>
                 <div className="flex space-x-1">
                   <Tooltip>
                     <TooltipTrigger asChild>
-                      <Button variant="ghost" size="icon" onClick={() => handleSaveEdit(friend.id)} className="h-8 w-8" disabled={isPending}>
+                      <Button variant="ghost" size="icon" onClick={() => handleSaveEdit(friend.id)} className="h-8 w-8" disabled={isPending || isReadOnly}>
                         {isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4 text-green-600" />}
                       </Button>
                     </TooltipTrigger>
@@ -110,7 +109,7 @@ export function FriendListClient({ initialFriends }: FriendListClientProps) {
                   </Tooltip>
                   <Tooltip>
                     <TooltipTrigger asChild>
-                      <Button variant="ghost" size="icon" onClick={handleCancelEdit} className="h-8 w-8" disabled={isPending}>
+                      <Button variant="ghost" size="icon" onClick={handleCancelEdit} className="h-8 w-8" disabled={isPending || isReadOnly}>
                         <X className="h-4 w-4 text-red-600" />
                       </Button>
                     </TooltipTrigger>
@@ -130,7 +129,7 @@ export function FriendListClient({ initialFriends }: FriendListClientProps) {
                 <div className="flex space-x-1">
                   <Tooltip>
                     <TooltipTrigger asChild>
-                      <Button variant="ghost" size="icon" onClick={() => handleEdit(friend)} className="h-8 w-8" disabled={isPending}>
+                      <Button variant="ghost" size="icon" onClick={() => handleEdit(friend)} className="h-8 w-8" disabled={isPending || isReadOnly}>
                         <Edit3 className="h-4 w-4" />
                       </Button>
                     </TooltipTrigger>
@@ -140,7 +139,7 @@ export function FriendListClient({ initialFriends }: FriendListClientProps) {
                     <Tooltip>
                       <TooltipTrigger asChild>
                         <AlertDialogTrigger asChild>
-                          <Button variant="ghost" size="icon" className="h-8 w-8" disabled={isPending}>
+                          <Button variant="ghost" size="icon" className="h-8 w-8" disabled={isPending || isReadOnly}>
                             <Trash2 className="h-4 w-4 text-destructive" />
                           </Button>
                         </AlertDialogTrigger>
@@ -155,8 +154,8 @@ export function FriendListClient({ initialFriends }: FriendListClientProps) {
                         </AlertDialogDescription>
                       </AlertDialogHeader>
                       <AlertDialogFooter>
-                        <AlertDialogCancel disabled={isPending}>취소</AlertDialogCancel>
-                        <AlertDialogAction onClick={() => handleDelete(friend.id)} disabled={isPending} className="bg-destructive hover:bg-destructive/90">
+                        <AlertDialogCancel disabled={isPending || isReadOnly}>취소</AlertDialogCancel>
+                        <AlertDialogAction onClick={() => handleDelete(friend.id)} disabled={isPending || isReadOnly} className="bg-destructive hover:bg-destructive/90">
                           {isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
                           삭제
                         </AlertDialogAction>
