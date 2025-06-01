@@ -259,6 +259,7 @@ export const addMeeting = async (meetingData: Omit<Meeting, 'id' | 'createdAt' |
     nonReserveFundParticipants: meetingData.nonReserveFundParticipants || [],
     useReserveFund: meetingData.useReserveFund || false,
     partialReserveFundAmount: meetingData.partialReserveFundAmount === undefined ? deleteField() : Number(meetingData.partialReserveFundAmount),
+    memo: meetingData.memo === undefined ? deleteField() : meetingData.memo,
   };
 
   const meetingsCollectionRef = collection(db, MEETINGS_COLLECTION);
@@ -289,6 +290,9 @@ export const updateMeeting = async (id: string, updates: Partial<Omit<Meeting, '
   if (updates.hasOwnProperty('isShareEnabled') && updates.isShareEnabled === false) {
     updateData.shareToken = null;
     updateData.shareExpiryDate = null;
+  }
+  if (updates.hasOwnProperty('memo')) {
+    updateData.memo = updates.memo === undefined ? deleteField() : updates.memo;
   }
 
   await updateDoc(meetingDocRef, updateData);

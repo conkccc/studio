@@ -1,4 +1,3 @@
-
 import type { Timestamp } from 'firebase/firestore';
 
 export type User = {
@@ -51,6 +50,7 @@ export type Meeting = {
   isShareEnabled?: boolean;
   shareToken?: string | null;
   shareExpiryDate?: Date | null;
+  memo?: string;
 };
 
 export type ReserveFundTransaction = {

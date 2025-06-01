@@ -36,6 +36,7 @@ const meetingSchemaBase = z.object({
     z.number().min(0, '금액은 0 이상이어야 합니다.').optional()
   ),
   nonReserveFundParticipants: z.array(z.string()),
+  memo: z.string().max(2000, '메모는 2000자 이내여야 합니다.').optional(),
 });
 
 const meetingSchema = meetingSchemaBase.refine(data => {
@@ -210,6 +211,7 @@ export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, 
       useReserveFund: initialData.useReserveFund || false,
       partialReserveFundAmount: initialData.partialReserveFundAmount === undefined ? undefined : Number(initialData.partialReserveFundAmount),
       nonReserveFundParticipants: initialData.nonReserveFundParticipants || [],
+      memo: initialData.memo || '',
     } : {
       name: '',
       dateTime: new Date(), // Default to now for new meetings
@@ -220,6 +222,7 @@ export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, 
       useReserveFund: false,
       partialReserveFundAmount: undefined,
       nonReserveFundParticipants: [],
+      memo: '',
     },
   });
 
@@ -369,6 +372,7 @@ export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, 
                                     ? Number(data.partialReserveFundAmount)
                                     : undefined,
         nonReserveFundParticipants: data.nonReserveFundParticipants || [],
+        memo: data.memo || undefined,
       };
 
       if (isEditMode && initialData) {
@@ -796,6 +800,28 @@ export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, 
           </PopoverContent>
         </Popover>
         {form.formState.errors.participantIds && <p className="text-sm text-destructive mt-1">{form.formState.errors.participantIds.message}</p>}
+      </div>
+
+      <div className="space-y-2">
+        <Label htmlFor="memo" className={cn((isEditMode && initialData?.isSettled) && "text-muted-foreground")}>메모</Label>
+        <Controller
+          name="memo"
+          control={form.control}
+          render={({ field }) => (
+            <textarea
+              id="memo"
+              className={cn(
+                "w-full min-h-[80px] p-2 border rounded-md text-sm",
+                (isEditMode && initialData?.isSettled) && "bg-muted/50 cursor-not-allowed"
+              )}
+              maxLength={2000}
+              placeholder="모임에 대한 메모를 입력하세요..."
+              disabled={isPending || (isEditMode && initialData?.isSettled)}
+              {...field}
+            />
+          )}
+        />
+        {form.formState.errors.memo && <p className="text-sm text-destructive mt-1">{form.formState.errors.memo.message}</p>}
       </div>
 
       <div className="flex justify-end space-x-2 pt-4">

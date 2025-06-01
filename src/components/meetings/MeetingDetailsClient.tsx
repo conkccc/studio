@@ -418,8 +418,9 @@ export function MeetingDetailsClient({
                       size="sm"
                       className="sm:w-auto"
                       onClick={() => {
-                        const coords = meeting.locationCoordinates!;
-                        const url = `https://www.google.com/maps/search/?api=1&query=${coords.lat},${coords.lng}`;
+                        //const coords = meeting.locationCoordinates!;
+                        //const url = `https://www.google.com/maps/search/?api=1&query=${coords.lat},${coords.lng}`;
+                        const url = `https://www.google.com/maps/search/?api=1&query=${meeting.locationName}`;
                         window.open(url, '_blank', 'noopener,noreferrer');
                       }}
                     >
@@ -489,6 +490,30 @@ export function MeetingDetailsClient({
                 </div>
                 <p className="text-muted-foreground pl-6">사용 안함</p>
             </div>
+          )}
+
+          {/* Memo Section */}
+          {(isAdmin || isCreator) ? (
+            <div className="mt-6">
+              <Label htmlFor="meeting-memo" className="font-medium">메모</Label>
+              <textarea
+                id="meeting-memo"
+                className="w-full mt-2 p-2 border rounded-md min-h-[80px] text-sm"
+                value={meeting.memo || ''}
+                onChange={e => setMeeting(m => ({ ...m, memo: e.target.value }))}
+                placeholder="모임에 대한 메모를 입력하세요..."
+                disabled={isReadOnlyShare}
+              />
+            </div>
+          ) : (
+            meeting.memo && meeting.memo.trim() !== '' && (
+              <div className="mt-6">
+                <Label className="font-medium">메모</Label>
+                <div className="w-full mt-2 p-2 border rounded-md min-h-[80px] text-sm bg-muted/50">
+                  {meeting.memo}
+                </div>
+              </div>
+            )
           )}
         </CardContent>
       </Card>
