@@ -122,26 +122,14 @@ export default function MeetingsPage() {
             지난 모임을 확인하고 새로운 모임을 만드세요.
           </p>
         </div>
-        <div className="flex flex-col sm:flex-row gap-2 items-center">
-          <select
-            className="block w-full appearance-none rounded-md border border-input bg-background px-4 py-2 pr-10 text-base shadow-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/30 transition disabled:opacity-50"
-            value={selectedGroupId || ''}
-            onChange={e => setSelectedGroupId(e.target.value)}
-          >
-            <option value="">전체 그룹</option>
-            {groups.map(group => (
-              <option key={group.id} value={group.id}>{group.name}</option>
-            ))}
-          </select>
-          {isAdmin && (
-            <Link href="/meetings/new" passHref legacyBehavior={false}>
-              <Button>
-                <PlusCircle className="mr-2 h-5 w-5" />
-                새 모임 만들기
-              </Button>
-            </Link>
-          )}
-        </div>
+        {isAdmin && (
+          <Link href="/meetings/new" passHref legacyBehavior={false}>
+            <Button>
+              <PlusCircle className="mr-2 h-5 w-5" />
+              새 모임 만들기
+            </Button>
+          </Link>
+        )}
       </div>
       {/* 그룹 필터 적용: selectedGroupId가 있으면 해당 그룹만, 없으면 전체 */}
       {dataLoading ? ( 
@@ -150,12 +138,15 @@ export default function MeetingsPage() {
          </div>
       ) : (
         <MeetingListClient 
-          initialMeetings={selectedGroupId ? meetings.filter(m => m.groupId === selectedGroupId) : meetings}
+          initialMeetings={meetings}
           allFriends={allFriends}
           availableYears={availableYears}
           selectedYear={selectedYear}
           currentPage={currentPage}
           totalPages={totalPages}
+          groups={groups}
+          selectedGroupId={selectedGroupId}
+          onGroupChange={setSelectedGroupId}
         />
       )}
     </div>

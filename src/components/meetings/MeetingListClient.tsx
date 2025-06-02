@@ -1,4 +1,3 @@
-
 'use client';
 
 import type { Meeting, Friend } from '@/lib/types';
@@ -22,6 +21,9 @@ interface MeetingListClientProps {
   selectedYear?: number;
   currentPage: number;
   totalPages: number;
+  groups: { id: string; name: string }[];
+  selectedGroupId: string | null;
+  onGroupChange: (groupId: string | null) => void;
 }
 
 export function MeetingListClient({ 
@@ -30,7 +32,10 @@ export function MeetingListClient({
   availableYears,
   selectedYear,
   currentPage,
-  totalPages
+  totalPages,
+  groups,
+  selectedGroupId,
+  onGroupChange
 }: MeetingListClientProps) {
   const router = useRouter();
   const pathname = usePathname();
@@ -60,27 +65,45 @@ export function MeetingListClient({
 
   return (
     <Card>
-      <CardHeader className="flex flex-row items-center justify-between gap-2">
+      <CardHeader className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
         <CardTitle>모임 목록 {selectedYear && `(${selectedYear}년)`}</CardTitle>
-        <div className="w-full sm:w-auto sm:min-w-[180px]">
-          <Select onValueChange={handleYearChange} defaultValue={currentDisplayYear}>
-            <SelectTrigger id="year-filter" aria-label="연도 필터">
-              <SelectValue placeholder="연도 선택..." />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">전체 연도</SelectItem>
-              {availableYears.map(year => (
-                <SelectItem key={year} value={year.toString()}>{year}년</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+        <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
+          <div className="w-full sm:w-auto sm:min-w-[180px]">
+            <Select onValueChange={handleYearChange} defaultValue={currentDisplayYear}>
+              <SelectTrigger id="year-filter" aria-label="연도 필터">
+                <SelectValue placeholder="연도 선택..." />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">전체 연도</SelectItem>
+                {availableYears.map(year => (
+                  <SelectItem key={year} value={year.toString()}>{year}년</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="w-full sm:w-auto sm:min-w-[180px]">
+            <Select
+              onValueChange={val => onGroupChange(val === 'all' ? null : val)}
+              value={selectedGroupId || 'all'}
+            >
+              <SelectTrigger id="group-filter" aria-label="그룹 필터">
+                <SelectValue placeholder="전체 그룹" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">전체 그룹</SelectItem>
+                {groups.map(group => (
+                  <SelectItem key={group.id} value={group.id}>{group.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
         </div>
       </CardHeader>
       <CardContent>
-        {initialMeetings.length > 0 ? (
+        {initialMeetings.filter(m => !selectedGroupId || m.groupId === selectedGroupId).length > 0 ? (
           <>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {initialMeetings.map((meeting) => (
+              {initialMeetings.filter(m => !selectedGroupId || m.groupId === selectedGroupId).map((meeting) => (
                 <MeetingCard key={meeting.id} meeting={meeting} allFriends={allFriends} />
               ))}
             </div>
