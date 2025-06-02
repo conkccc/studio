@@ -202,7 +202,7 @@ export function MeetingDetailsClient({
       return '관리자 (나)';
     }
     const creatorFriend = allFriends.find(f => f.id === meeting.creatorId);
-    if (creatorFriend) return creatorFriend.nickname;
+    if (creatorFriend) return creatorFriend.name + (creatorFriend.description ? ` (${creatorFriend.description})` : '');
     if (currentUser && meeting.creatorId === currentUser.uid) return currentUser.displayName || currentUser.email || '알 수 없는 생성자';
     return '관리자';
   }, [meeting.creatorId, allFriends, currentUser, isAdmin]);
@@ -455,7 +455,7 @@ export function MeetingDetailsClient({
             <UsersIcon className="h-5 w-5 mt-0.5 text-primary flex-shrink-0" />
             <div>
                 <span className="font-medium">참여자 ({participants.length}명):</span>
-                <p className="text-muted-foreground">{participants.map(p => p.nickname).join(', ')}</p>
+                <p className="text-muted-foreground">{participants.map(p => p.name + (p.description ? ` (${p.description})` : '')).join(', ')}</p>
             </div>
           </div>
           {meeting.useReserveFund && meeting.partialReserveFundAmount && meeting.partialReserveFundAmount > 0 ? (
@@ -470,7 +470,10 @@ export function MeetingDetailsClient({
               </p>
               {meeting.nonReserveFundParticipants && meeting.nonReserveFundParticipants.length > 0 && (
                 <p className="text-muted-foreground pl-6 text-xs">
-                  (회비 사용 제외: {meeting.nonReserveFundParticipants.map(id => allFriends.find(f => f.id === id)?.nickname || '알 수 없음').join(', ')})
+                  (회비 사용 제외: {meeting.nonReserveFundParticipants.map(id => {
+                    const f = allFriends.find(f => f.id === id);
+                    return f ? f.name + (f.description ? ` (${f.description})` : '') : '알 수 없음';
+                  }).join(', ')})
                 </p>
               )}
             </div>
@@ -493,20 +496,7 @@ export function MeetingDetailsClient({
           )}
 
           {/* Memo Section */}
-          {(isAdmin || isCreator) ? (
-            <div className="mt-6">
-              <Label htmlFor="meeting-memo" className="font-medium">메모</Label>
-              <textarea
-                id="meeting-memo"
-                className="w-full mt-2 p-2 border rounded-md min-h-[80px] text-sm"
-                value={meeting.memo || ''}
-                onChange={e => setMeeting(m => ({ ...m, memo: e.target.value }))}
-                placeholder="모임에 대한 메모를 입력하세요..."
-                disabled={isReadOnlyShare}
-              />
-            </div>
-          ) : (
-            meeting.memo && meeting.memo.trim() !== '' && (
+          {(meeting.memo && meeting.memo.trim() !== '' && (
               <div className="mt-6">
                 <Label className="font-medium">메모</Label>
                 <div className="w-full mt-2 p-2 border rounded-md min-h-[80px] text-sm bg-muted/50">
@@ -646,10 +636,29 @@ export function MeetingDetailsClient({
             <CardHeader>
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
                 {canFinalize && !isReadOnlyUser && (
-                  <Button onClick={handleFinalizeSettlement} disabled={isFinalizing || isDeleting} size="sm">
-                    {isFinalizing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <CheckCircle2 className="mr-2 h-4 w-4" />}
-                    정산 확정 및 회비 사용 기록
-                  </Button>
+                  <AlertDialog>
+                    <AlertDialogTrigger asChild>
+                      <Button disabled={isFinalizing || isDeleting} size="sm">
+                        {isFinalizing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <CheckCircle2 className="mr-2 h-4 w-4" />}
+                        정산 확정 및 회비 사용 기록
+                      </Button>
+                    </AlertDialogTrigger>
+                    <AlertDialogContent>
+                      <AlertDialogHeader>
+                        <AlertDialogTitle>정산을 확정하시겠습니까?</AlertDialogTitle>
+                        <AlertDialogDescription>
+                          이 작업은 되돌릴 수 없습니다. 회비 사용 내역이 기록되며, 이후에는 수정이 불가합니다.
+                        </AlertDialogDescription>
+                      </AlertDialogHeader>
+                      <AlertDialogFooter>
+                        <AlertDialogCancel disabled={isFinalizing || isDeleting}>취소</AlertDialogCancel>
+                        <AlertDialogAction onClick={handleFinalizeSettlement} disabled={isFinalizing || isDeleting} className="bg-primary">
+                          {isFinalizing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                          정산 확정
+                        </AlertDialogAction>
+                      </AlertDialogFooter>
+                    </AlertDialogContent>
+                  </AlertDialog>
                 )}
               </div>
               {meeting.useReserveFund && meeting.isSettled && expenses.length > 0 && !isReadOnlyShare && (

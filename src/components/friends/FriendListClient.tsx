@@ -5,7 +5,7 @@ import React, { useState, useTransition, Fragment, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useToast } from '@/hooks/use-toast';
-import { updateFriendAction, deleteFriendAction } from '@/lib/actions';
+import { updateFriendAction, deleteFriendAction, getFriendsByGroupAction } from '@/lib/actions';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -22,12 +22,14 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 
 interface FriendListClientProps {
   initialFriends: Friend[];
+  onFriendAdded?: () => void;
+  onFriendDeleted?: (friendId: string) => void;
 }
 
-export function FriendListClient({ initialFriends, isReadOnly = false }: FriendListClientProps & { isReadOnly?: boolean }) {
+export function FriendListClient({ initialFriends, isReadOnly = false, onFriendAdded, onFriendDeleted }: FriendListClientProps & { isReadOnly?: boolean }) {
   const [friends, setFriends] = useState<Friend[]>(initialFriends);
   const [editingFriendId, setEditingFriendId] = useState<string | null>(null);
-  const [editForm, setEditForm] = useState<{ nickname: string; name?: string }>({ nickname: '', name: '' });
+  const [editForm, setEditForm] = useState<{ name: string; description?: string }>({ name: '', description: '' });
   const { toast } = useToast();
   const [isPending, startTransition] = useTransition();
 
@@ -35,9 +37,16 @@ export function FriendListClient({ initialFriends, isReadOnly = false }: FriendL
     setFriends(initialFriends);
   }, [initialFriends]);
 
+  // 친구 추가 후 콜백이 있으면 실행
+  useEffect(() => {
+    if (onFriendAdded) {
+      onFriendAdded();
+    }
+  }, [initialFriends, onFriendAdded]);
+
   const handleEdit = (friend: Friend) => {
     setEditingFriendId(friend.id);
-    setEditForm({ nickname: friend.nickname, name: friend.name || '' });
+    setEditForm({ name: friend.name, description: friend.description || '' });
   };
 
   const handleCancelEdit = () => {
@@ -45,12 +54,12 @@ export function FriendListClient({ initialFriends, isReadOnly = false }: FriendL
   };
 
   const handleSaveEdit = (id: string) => {
-    if (!editForm.nickname.trim()) {
-      toast({ title: '오류', description: '닉네임은 비워둘 수 없습니다.', variant: 'destructive' });
+    if (!editForm.name.trim()) {
+      toast({ title: '오류', description: '이름은 비워둘 수 없습니다.', variant: 'destructive' });
       return;
     }
     startTransition(async () => {
-      const result = await updateFriendAction(id, { nickname: editForm.nickname, name: editForm.name });
+      const result = await updateFriendAction(id, { name: editForm.name, description: editForm.description });
       if (result.success && result.friend) {
         setFriends(prev => prev.map(f => (f.id === id ? result.friend! : f)));
         setEditingFriendId(null);
@@ -67,6 +76,7 @@ export function FriendListClient({ initialFriends, isReadOnly = false }: FriendL
       if (result.success) {
         setFriends(prev => prev.filter(f => f.id !== id));
         toast({ title: '성공', description: '친구가 삭제되었습니다.' });
+        onFriendDeleted?.(id);
       } else {
         toast({ title: '오류', description: result.error || '친구 삭제에 실패했습니다.', variant: 'destructive' });
       }
@@ -83,18 +93,18 @@ export function FriendListClient({ initialFriends, isReadOnly = false }: FriendL
                 <div className="flex-grow grid grid-cols-2 gap-2 items-center mr-2">
                   <Input
                     type="text"
-                    value={editForm.nickname}
-                    onChange={(e) => setEditForm({ ...editForm, nickname: e.target.value })}
+                    value={editForm.name}
+                    onChange={(e) => setEditForm({ ...editForm, name: e.target.value })}
                     className="h-8 text-sm"
-                    placeholder="닉네임"
+                    placeholder="이름"
                     disabled={isPending || isReadOnly}
                   />
                   <Input
                     type="text"
-                    value={editForm.name || ''}
-                    onChange={(e) => setEditForm({ ...editForm, name: e.target.value })}
+                    value={editForm.description || ''}
+                    onChange={(e) => setEditForm({ ...editForm, description: e.target.value })}
                     className="h-8 text-sm"
-                    placeholder="이름 (선택)"
+                    placeholder="설명 (선택)"
                     disabled={isPending || isReadOnly}
                   />
                 </div>
@@ -122,8 +132,8 @@ export function FriendListClient({ initialFriends, isReadOnly = false }: FriendL
                 <div className="flex items-center">
                   <User className="h-5 w-5 mr-3 text-primary" />
                   <div>
-                    <span className="font-medium">{friend.nickname}</span>
-                    {friend.name && <span className="text-xs text-muted-foreground ml-2">({friend.name})</span>}
+                    <span className="font-medium">{friend.name}</span>
+                    {friend.description && <span className="text-xs text-muted-foreground ml-2">({friend.description})</span>}
                   </div>
                 </div>
                 <div className="flex space-x-1">
@@ -150,7 +160,7 @@ export function FriendListClient({ initialFriends, isReadOnly = false }: FriendL
                       <AlertDialogHeader>
                         <AlertDialogTitle>정말로 삭제하시겠습니까?</AlertDialogTitle>
                         <AlertDialogDescription>
-                          이 작업은 되돌릴 수 없습니다. '{friend.nickname}' 친구 정보가 영구적으로 삭제됩니다.
+                          이 작업은 되돌릴 수 없습니다. '{friend.name}' 친구 정보가 영구적으로 삭제됩니다.
                         </AlertDialogDescription>
                       </AlertDialogHeader>
                       <AlertDialogFooter>
@@ -170,4 +180,38 @@ export function FriendListClient({ initialFriends, isReadOnly = false }: FriendL
       </ul>
     </TooltipProvider>
   );
+}
+
+interface FriendListByGroupProps {
+  groupId: string;
+  isReadOnly?: boolean;
+}
+
+export function FriendListByGroup({ groupId, isReadOnly = false }: FriendListByGroupProps) {
+  const [friends, setFriends] = useState<Friend[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  // 친구 추가 후 즉시 목록 갱신을 위한 핸들러
+  const handleFriendAdded = () => {
+    setLoading(true);
+    getFriendsByGroupAction(groupId).then(res => {
+      if (res.success && res.friends) setFriends(res.friends);
+      else setFriends([]);
+      setLoading(false);
+    });
+  };
+
+  useEffect(() => {
+    setLoading(true);
+    getFriendsByGroupAction(groupId).then(res => {
+      if (res.success && res.friends) setFriends(res.friends);
+      else setFriends([]);
+      setLoading(false);
+    });
+  }, [groupId]);
+
+  if (loading) return <div>친구 목록 로딩 중...</div>;
+  if (friends.length === 0) return <div>이 그룹에 등록된 친구가 없습니다.</div>;
+
+  return <FriendListClient initialFriends={friends} isReadOnly={isReadOnly} onFriendAdded={handleFriendAdded} />;
 }

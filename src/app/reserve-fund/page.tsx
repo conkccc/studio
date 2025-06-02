@@ -8,12 +8,16 @@ import { useAuth } from '@/contexts/AuthContext';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import type { ReserveFundTransaction } from '@/lib/types';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { useRouter, usePathname } from 'next/navigation';
 
 export default function ReserveFundPage() {
   const { currentUser, isAdmin, userRole, loading: authLoading } = useAuth();
   const [balance, setBalance] = useState<number>(0);
   const [transactions, setTransactions] = useState<ReserveFundTransaction[]>([]);
   const [dataLoading, setDataLoading] = useState(true);
+  const router = useRouter();
+  const pathname = usePathname();
 
   useEffect(() => {
     if (authLoading) {
@@ -67,27 +71,48 @@ export default function ReserveFundPage() {
   }
 
   // 로그인한 모든 사용자(관리자/일반)에게 회비 관리 노출
+  // 탭 상태: 전체/그룹별
+  const tabValue = pathname === '/reserve-fund/group' ? 'group' : 'all';
+
+  const handleTabChange = (value: string) => {
+    if (value === 'all') router.push('/reserve-fund');
+    else if (value === 'group') router.push('/reserve-fund/group');
+  };
+
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold">회비 관리</h1>
-        <p className="text-muted-foreground">
-          모임의 공동 회비 잔액을 설정하고, 사용 내역을 확인하세요.
-        </p>
-      </div>
-      <Card>
-        <CardHeader>
-          <CardTitle>현재 잔액</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <p className="text-4xl font-bold text-primary">{balance.toLocaleString()}원</p>
-        </CardContent>
-      </Card>
-      <ReserveFundClient 
-        initialTransactions={transactions} 
-        initialBalance={balance}
-        isReadOnly={userRole === 'user' && !isAdmin}
-      />
+      <Tabs value={tabValue} onValueChange={handleTabChange} className="mb-6">
+        <TabsList>
+          <TabsTrigger value="all">전체 회비 관리</TabsTrigger>
+          <TabsTrigger value="group">그룹별 회비 관리</TabsTrigger>
+        </TabsList>
+      </Tabs>
+      {/* 전체 회비 관리 UI */}
+      {tabValue === 'all' && (
+        <>
+          <div>
+            <h1 className="text-2xl font-semibold">회비 관리</h1>
+            <p className="text-muted-foreground">
+              모임의 공동 회비 잔액을 설정하고, 사용 내역을 확인하세요.
+            </p>
+          </div>
+          <Card>
+            <CardHeader>
+              <CardTitle>현재 잔액</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="text-4xl font-bold text-primary">{balance.toLocaleString()}원</p>
+            </CardContent>
+          </Card>
+          <ReserveFundClient 
+            initialTransactions={transactions} 
+            initialBalance={balance}
+            groupId={''}
+            isReadOnly={userRole === 'user' && !isAdmin}
+          />
+        </>
+      )}
+      {/* 그룹별 회비 관리는 /reserve-fund/group에서 렌더링 */}
     </div>
   );
 }

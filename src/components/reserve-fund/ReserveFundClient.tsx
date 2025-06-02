@@ -27,6 +27,7 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
+import { useAuth } from '@/contexts/AuthContext';
 
 const balanceUpdateSchema = z.object({
   newBalance: z.preprocess(
@@ -41,14 +42,17 @@ type BalanceUpdateFormData = z.infer<typeof balanceUpdateSchema>;
 interface ReserveFundClientProps {
   initialTransactions: ReserveFundTransaction[]; // These are logged transactions
   initialBalance: number;
+  groupId: string; // groupId 추가
+  onChanged?: () => void; // Optional callback for parent refresh
 }
 
-export function ReserveFundClient({ initialTransactions, initialBalance, isReadOnly = false }: ReserveFundClientProps & { isReadOnly?: boolean }) {
+export function ReserveFundClient({ initialTransactions, initialBalance, groupId, isReadOnly = false, onChanged }: ReserveFundClientProps & { isReadOnly?: boolean }) {
   const [transactions, setTransactions] = useState<ReserveFundTransaction[]>(initialTransactions);
   const [currentBalance, setCurrentBalance] = useState<number>(initialBalance); // Local state for balance
   const [isUpdateDialogOpen, setIsUpdateDialogOpen] = useState(false);
   const [isPending, startTransition] = useTransition();
   const { toast } = useToast();
+  const { appUser } = useAuth();
 
   const form = useForm<BalanceUpdateFormData>({
     resolver: zodResolver(balanceUpdateSchema),
@@ -70,24 +74,24 @@ export function ReserveFundClient({ initialTransactions, initialBalance, isReadO
 
   const handleBalanceUpdate = (data: BalanceUpdateFormData) => {
     startTransition(async () => {
-      const result = await setReserveFundBalanceAction(data.newBalance, data.description);
+      const newBalance = typeof data.newBalance === 'number' ? data.newBalance : parseFloat(String(data.newBalance));
+      // appUser?.id를 currentUserId로 전달
+      const result = await setReserveFundBalanceAction(groupId, newBalance, data.description || '', appUser?.id);
       if (result.success && result.newBalance !== undefined) {
         toast({ title: '성공', description: '회비 잔액이 업데이트되었습니다.' });
-        setCurrentBalance(result.newBalance); // Update local balance state
-        // Optimistically add the balance update log, or re-fetch if necessary
-        // For simplicity, we'll assume revalidation from action handles transaction list update
-        // Or manually add:
+        setCurrentBalance(result.newBalance);
         const newLogEntry: ReserveFundTransaction = {
-            id: `temp-${Date.now()}`, // Temporary ID
-            type: 'balance_update',
-            amount: result.newBalance, // The new balance itself for this type
-            description: data.description || `잔액 ${result.newBalance.toLocaleString()}원으로 설정됨`,
-            date: new Date(),
+          id: `temp-${Date.now()}`,
+          groupId,
+          type: 'balance_update',
+          amount: result.newBalance,
+          description: data.description || `잔액 ${result.newBalance.toLocaleString()}원으로 설정됨`,
+          date: new Date(),
         };
         setTransactions(prev => [newLogEntry, ...prev].sort((a,b) => new Date(b.date).getTime() - new Date(a.date).getTime()));
-
         form.reset({ newBalance: result.newBalance, description: '수동 잔액 조정' });
         setIsUpdateDialogOpen(false);
+        if (onChanged) onChanged();
       } else {
         toast({
           title: '오류',

@@ -64,6 +64,7 @@ interface MeetingFormProps {
   currentUserId: string;
   isEditMode?: boolean;
   initialData?: Meeting;
+  groupId?: string; // 추가: 모임 생성 시 그룹 지정
 }
 
 const googleMapsLibraries: ("places" | "maps" | "marker")[] = ["places", "maps", "marker"];
@@ -182,7 +183,7 @@ function LocationSearchInput({ form, isPending, isMapsLoaded, mapsLoadError, onL
 }
 
 
-export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, initialData }: MeetingFormProps) {
+export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, initialData, groupId }: MeetingFormProps) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const { toast } = useToast();
@@ -356,6 +357,23 @@ export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, 
     return isNaN(num) ? '' : num.toLocaleString();
   };
 
+  // --- 회비 금액 입력: 입력 중에는 raw value, onBlur에서만 콤마 포맷 적용 ---
+  const [reserveFundInput, setReserveFundInput] = useState<string>(
+    initialData && initialData.partialReserveFundAmount !== undefined && initialData.partialReserveFundAmount !== null
+      ? Number(initialData.partialReserveFundAmount).toLocaleString()
+      : ''
+  );
+
+  useEffect(() => {
+    // form의 값이 바뀌면 reserveFundInput도 동기화 (예: 참여자 변경 등)
+    const formValue = form.watch('partialReserveFundAmount');
+    if (formValue === undefined || formValue === null || isNaN(formValue)) {
+      setReserveFundInput('');
+    } else {
+      setReserveFundInput(Number(formValue).toLocaleString());
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form.watch('partialReserveFundAmount')]);
 
   const onSubmit = (data: MeetingFormData) => {
     startTransition(async () => {
@@ -368,11 +386,18 @@ export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, 
         participantIds: data.participantIds,
         creatorId: currentUserId,
         useReserveFund: data.useReserveFund,
-        partialReserveFundAmount: data.useReserveFund && data.partialReserveFundAmount !== undefined
-                                    ? Number(data.partialReserveFundAmount)
-                                    : undefined,
+        // addDoc에서는 deleteField() 사용 금지, undefined만 허용
+        partialReserveFundAmount:
+          data.useReserveFund && typeof data.partialReserveFundAmount === 'number' && !isNaN(data.partialReserveFundAmount)
+            ? data.partialReserveFundAmount
+            : undefined,
         nonReserveFundParticipants: data.nonReserveFundParticipants || [],
         memo: data.memo || undefined,
+        // groupId는 모임별로 독립적으로 관리되어야 하므로,
+        // 모임 생성 시점에만 복사, 이후에는 Meeting의 고유 필드로 저장
+        groupId: groupId || (initialData?.groupId ?? ''),
+        // 회비 관리 구조 확장: 모임별 회비 내역(지출/정산 등) 필드 추가 준비
+        // expenses: [], // 추후 MeetingExpense[] 등으로 확장 가능
       };
 
       if (isEditMode && initialData) {
@@ -389,7 +414,12 @@ export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, 
           });
         }
       } else {
-        const result = await createMeetingAction(payload);
+        // 로그인 체크: currentUserId 없으면 에러
+        if (!currentUserId) {
+          toast({ title: '로그인이 필요합니다.', description: '로그인 후 다시 시도해 주세요.', variant: 'destructive' });
+          return;
+        }
+        const result = await createMeetingAction(payload, currentUserId);
         if (result.success && result.meeting) {
           toast({ title: '성공', description: '새로운 모임이 생성되었습니다.' });
           router.push(`/meetings/${result.meeting.id}`);
@@ -603,10 +633,9 @@ export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, 
                     variant="outline"
                     size="sm"
                     onClick={() => {
-                    if (watchedLocationCoordinates) {
-                        const url = `https://www.google.com/maps/search/?api=1&query=${watchedLocationCoordinates.lat},${watchedLocationCoordinates.lng}`;
-                        window.open(url, '_blank', 'noopener,noreferrer');
-                    }
+                    const locationName = form.getValues('locationName');
+                    const url = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(locationName || '')}`;
+                    window.open(url, '_blank', 'noopener,noreferrer');
                     }}
                     className="sm:w-auto"
                     disabled={isPending || (isEditMode && initialData?.isSettled)}
@@ -672,15 +701,35 @@ export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, 
                   <Input
                     id="partialReserveFundAmount"
                     type="text"
-                    value={formatNumberInput(field.value)}
-                    onChange={(e) => {
-                       const rawValue = e.target.value.replace(/,/g, '');
-                       field.onChange(rawValue === '' ? undefined : parseFloat(rawValue));
+                    value={reserveFundInput}
+                    onChange={e => {
+                      // 숫자만 허용, 앞자리 0 제거, 모두 지울 수 있음
+                      let raw = e.target.value.replace(/[^0-9]/g, '');
+                      if (raw.startsWith('0') && raw.length > 1) raw = raw.replace(/^0+/, '');
+                      if (raw === '') {
+                        setReserveFundInput('');
+                        field.onChange(undefined);
+                      } else {
+                        const formatted = Number(raw).toLocaleString();
+                        setReserveFundInput(formatted);
+                        field.onChange(Number(raw));
+                      }
                     }}
-                    onBlur={field.onBlur}
-                    disabled={isPending || (isEditMode && initialData?.isSettled)}
-                    className={cn("mt-1", (isEditMode && initialData?.isSettled) && "bg-muted/50 cursor-not-allowed")}
-                    placeholder="예: 10000"
+                    onBlur={e => {
+                      // 포맷팅: 콤마 추가, 모두 지울 수 있음
+                      const raw = e.target.value.replace(/[^0-9]/g, '');
+                      if (raw === '') {
+                        setReserveFundInput('');
+                        field.onChange(undefined);
+                      } else {
+                        const formatted = Number(raw).toLocaleString();
+                        setReserveFundInput(formatted);
+                        field.onChange(Number(raw));
+                      }
+                    }}
+                    disabled={isEditMode && initialData?.isSettled}
+                    placeholder="0"
+                    autoComplete="off"
                   />
                 )}
               />
@@ -721,7 +770,11 @@ export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, 
                             (isEditMode && initialData?.isSettled) && "text-muted-foreground cursor-not-allowed"
                           )}
                         >
-                          {participant.nickname} {participant.id === currentUserId && "(나)"}
+                          {participant.name}
+                          {participant.description && (
+                            <span className="ml-1 text-xs text-muted-foreground">({participant.description})</span>
+                          )}
+                          {participant.id === currentUserId && " (나)"}
                         </Label>
                       </div>
                     ))
@@ -747,30 +800,27 @@ export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, 
               disabled={isPending || (isEditMode && initialData?.isSettled)}
             >
               {selectedParticipants.length > 0
-                ? selectedParticipants.map(f => f.nickname).join(', ')
+                ? selectedParticipants.map(f => f.name + (f.description ? ` (${f.description})` : "")).join(', ')
                 : "참여자 선택..."}
               <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
             </Button>
           </PopoverTrigger>
           <PopoverContent className="w-[--radix-popover-trigger-width] p-0">
             <Command>
-              <CommandInput placeholder="친구 검색..." />
+              <CommandInput placeholder="친구 이름 또는 설명으로 검색..." />
               <CommandList>
                 <CommandEmpty>친구를 찾을 수 없습니다.</CommandEmpty>
                 <CommandGroup>
                   {friends.map((friend) => (
                     <CommandItem
                       key={friend.id}
-                      value={friend.nickname}
+                      value={friend.name + (friend.description ? ` ${friend.description}` : "")}
                       onSelect={() => {
                         if (isEditMode && initialData?.isSettled) return;
                         const currentParticipantIds = form.getValues("participantIds") || [];
                         let newParticipantIds = [...currentParticipantIds];
 
                         if (newParticipantIds.includes(friend.id)) {
-                          // Allow removing the creator only if there are other participants left OR if it's not the creator themselves trying to deselect
-                          // This logic needs careful review based on exact requirements for minimum participants and creator role.
-                          // The Zod schema already ensures min 1 participant.
                           newParticipantIds = newParticipantIds.filter(id => id !== friend.id);
                         } else {
                           newParticipantIds.push(friend.id);
@@ -791,7 +841,13 @@ export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, 
                           form.watch('participantIds')?.includes(friend.id) ? "opacity-100" : "opacity-0"
                         )}
                       />
-                      {friend.nickname} {friend.id === currentUserId && "(나)"}
+                      <span>
+                        {friend.name}
+                        {friend.description && (
+                          <span className="ml-1 text-xs text-muted-foreground">({friend.description})</span>
+                        )}
+                        {friend.id === currentUserId && " (나)"}
+                      </span>
                     </CommandItem>
                   ))}
                 </CommandGroup>

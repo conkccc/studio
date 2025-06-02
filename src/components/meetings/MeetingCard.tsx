@@ -1,4 +1,3 @@
-
 'use client';
 import Link from 'next/link';
 import type { Meeting, Friend } from '@/lib/types';
@@ -19,7 +18,10 @@ export function MeetingCard({ meeting, allFriends }: MeetingCardProps) {
   const { currentUser, isAdmin } = useAuth();
 
   const participants = meeting.participantIds
-    .map(id => allFriends.find(f => f.id === id)?.nickname)
+    .map(id => {
+      const f = allFriends.find(f => f.id === id);
+      return f ? f.name + (f.description ? ` (${f.description})` : '') : undefined;
+    })
     .filter(Boolean); 
 
   const creatorName = useMemo(() => {
@@ -27,7 +29,7 @@ export function MeetingCard({ meeting, allFriends }: MeetingCardProps) {
       return '관리자 (나)';
     }
     const creatorFriend = allFriends.find(f => f.id === meeting.creatorId);
-    return creatorFriend?.nickname || '관리자';
+    return creatorFriend ? creatorFriend.name + (creatorFriend.description ? ` (${creatorFriend.description})` : '') : '관리자';
   }, [meeting.creatorId, allFriends, currentUser, isAdmin]);
 
 

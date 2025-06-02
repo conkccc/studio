@@ -1,4 +1,3 @@
-
 'use client';
 
 import React, { useState, useTransition } from 'react';
@@ -198,7 +197,10 @@ export function AddExpenseDialog({ meetingId, participants, onExpenseAdded, trig
                           className="w-full justify-between"
                           disabled={isPending}
                         >
-                          {field.value ? participants.find(p => p.id === field.value)?.nickname : "결제자 선택..."}
+                          {field.value ? (() => {
+                            const p = participants.find(p => p.id === field.value);
+                            return p ? p.name + (p.description ? ` (${p.description})` : '') : "결제자 선택...";
+                          })() : "결제자 선택..."}
                           <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
                         </Button>
                       </PopoverTrigger>
@@ -211,7 +213,7 @@ export function AddExpenseDialog({ meetingId, participants, onExpenseAdded, trig
                               {participants.map((participant) => (
                                 <CommandItem
                                   key={participant.id}
-                                  value={participant.nickname}
+                                  value={participant.name}
                                   onSelect={() => {
                                     field.onChange(participant.id);
                                     setPayerSearchOpen(false);
@@ -220,7 +222,7 @@ export function AddExpenseDialog({ meetingId, participants, onExpenseAdded, trig
                                   <Check
                                     className={cn("mr-2 h-4 w-4", participant.id === field.value ? "opacity-100" : "opacity-0")}
                                   />
-                                  {participant.nickname}
+                                  <span>{participant.name + (participant.description ? ` ${participant.description}` : '')}</span>
                                 </CommandItem>
                               ))}
                             </CommandGroup>
@@ -271,7 +273,7 @@ export function AddExpenseDialog({ meetingId, participants, onExpenseAdded, trig
                           }}
                           disabled={isPending}
                         />
-                        <Label htmlFor={`split-${participant.id}`}>{participant.nickname}</Label>
+                        <Label htmlFor={`split-${participant.id}`}>{participant.name}{participant.description && (<span className="ml-1 text-xs text-muted-foreground">({participant.description})</span>)}</Label>
                       </div>
                     ))}
                   </div>
@@ -285,7 +287,7 @@ export function AddExpenseDialog({ meetingId, participants, onExpenseAdded, trig
                   <div className="space-y-2 mt-1 p-3 border rounded-md max-h-60 overflow-y-auto">
                     {participants.map((participant, index) => (
                       <div key={participant.id} className="flex items-center justify-between space-x-2">
-                        <Label htmlFor={`custom-${participant.id}`} className="flex-shrink-0">{participant.nickname}</Label>
+                        <Label htmlFor={`custom-${participant.id}`} className="flex-shrink-0">{participant.name}{participant.description && (<span className="ml-1 text-xs text-muted-foreground">({participant.description})</span>)}</Label>
                         <Controller
                           name={`customSplits.${index}.amount`}
                           control={form.control}

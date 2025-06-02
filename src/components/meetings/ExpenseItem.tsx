@@ -62,14 +62,15 @@ export function ExpenseItem({
   const getSplitDetails = () => { 
     if (expense.splitType === 'equally') {
       const involved = (expense.splitAmongIds
-        ?.map(id => allFriends.find(f => f.id === id)?.nickname)
+        ?.map(id => {
+          const f = allFriends.find(f => f.id === id);
+          return f ? f.name + (f.description ? ` (${f.description})` : '') : undefined;
+        })
         .filter(Boolean) || []) as string[];
-      
       // Check if all *meeting* participants are involved in this specific equal split
-      const meetingParticipantNicknames = new Set(participants.map(p => p.nickname));
-      const allMeetingParticipantsInvolved = involved.length === meetingParticipantNicknames.size &&
-                                           involved.every(nickname => meetingParticipantNicknames.has(nickname));
-
+      const meetingParticipantNames = new Set(participants.map(p => p.name + (p.description ? ` (${p.description})` : '')));
+      const allMeetingParticipantsInvolved = involved.length === meetingParticipantNames.size &&
+                                           involved.every(name => meetingParticipantNames.has(name));
       if (allMeetingParticipantsInvolved) {
         return "모든 참여자";
       }
@@ -80,7 +81,7 @@ export function ExpenseItem({
       const details = expense.customSplits
         .map(split => {
           const friend = allFriends.find(f => f.id === split.friendId);
-          return `${friend?.nickname || '?'}: ${split.amount.toLocaleString()}원`;
+          return `${friend ? friend.name + (friend.description ? ` (${friend.description})` : '') : '?'}: ${split.amount.toLocaleString()}원`;
         })
         .join(' / ');
       return `개별: ${details}`;
@@ -134,7 +135,7 @@ export function ExpenseItem({
       <div className="mt-3 space-y-1 text-sm text-muted-foreground">
         <div className="flex items-center gap-2">
           <UserCircle className="h-4 w-4" />
-          <span>결제자: {payer?.nickname || '알 수 없음'}</span>
+          <span>결제자: {payer ? payer.name + (payer.description ? ` (${payer.description})` : '') : '알 수 없음'}</span>
         </div>
         <div className="flex items-center gap-2">
           <Users className="h-4 w-4" />

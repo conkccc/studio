@@ -69,7 +69,7 @@ export default function UsersPage() {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <UserListClient initialUsers={users} currentAdminId={currentUser?.uid || ''} />
+          <UserListClient initialUsers={users} currentAdminId={currentUser?.uid || ''} isAdmin={isAdmin} />
         </CardContent>
       </Card>
     </div>

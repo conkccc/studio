@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button';
 import { UsersRound, CalendarCheck, PiggyBank, ArrowRight, LineChart, Briefcase } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useEffect, useState } from 'react';
-import { getReserveFundBalance, getMeetings, getExpensesByMeetingId } from '@/lib/data-store';
+import { getReserveFundBalanceByGroup, getMeetings, getExpensesByMeetingId } from '@/lib/data-store';
 import type { Meeting } from '@/lib/types';
 
 export default function DashboardPage() {
@@ -24,12 +24,13 @@ export default function DashboardPage() {
       if (currentUser && (isAdmin || userRole === 'user')) {
         setDataLoading(true);
         try {
-          const balancePromise = getReserveFundBalance()
           const meetingsPromise = getMeetings({ limitParam: 1 });
-          const [balance, recentMeetingsData] = await Promise.all([balancePromise, meetingsPromise]);
-          setReserveBalance(balance);
+          const recentMeetingsData = await meetingsPromise;
+          let groupReserveBalance: number | null = null;
           if (recentMeetingsData.meetings.length > 0) {
             const latestMeeting = recentMeetingsData.meetings[0];
+            // 모임의 groupId로 그룹별 회비 잔액 조회
+            groupReserveBalance = await getReserveFundBalanceByGroup(latestMeeting.groupId);
             const expenses = await getExpensesByMeetingId(latestMeeting.id);
             const totalSpent = expenses.reduce((sum, exp) => sum + exp.totalAmount, 0);
             const perPersonCost = latestMeeting.participantIds.length > 0 
@@ -47,6 +48,7 @@ export default function DashboardPage() {
           } else {
             setRecentMeetingSummary("최근 모임 내역이 없습니다.");
           }
+          setReserveBalance(groupReserveBalance);
         } catch (error) {
           console.error("Failed to fetch dashboard data:", error);
           setReserveBalance(0);
@@ -64,9 +66,9 @@ export default function DashboardPage() {
   }, [authLoading, currentUser, isAdmin, userRole]);
 
   const quickLinks = [
-    { href: '/friends', label: '친구 관리', icon: UsersRound, description: '친구 목록을 보고 새 친구를 추가하세요.', userOrAdmin: true },
+    { href: '/friends', label: '친구 관리', icon: UsersRound, description: '친구 목록을 보고 새 친구를 추가하세요.', adminOnly: true },
     { href: '/meetings', label: '모임 관리', icon: CalendarCheck, description: '모임을 만들고 지난 모임을 확인하세요.', userOrAdmin: true },
-    { href: '/reserve-fund', label: '회비 현황', icon: PiggyBank, description: '회비 잔액과 사용 내역을 보세요.', userOrAdmin: true },
+    { href: '/reserve-fund', label: '회비 현황', icon: PiggyBank, description: '회비 잔액과 사용 내역을 보세요.', adminOnly: true },
     { href: '/users', label: '사용자 관리', icon: Briefcase, description: '사용자 역할을 관리합니다.', adminOnly: true },
   ];
 

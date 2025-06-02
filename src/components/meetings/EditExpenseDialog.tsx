@@ -1,4 +1,3 @@
-
 'use client';
 
 import React, { useState, useTransition, useEffect } from 'react';
@@ -217,7 +216,7 @@ export function EditExpenseDialog({
                           className="w-full justify-between"
                           disabled={isPending}
                         >
-                          {field.value ? currentMeetingParticipants.find(p => p.id === field.value)?.nickname : "결제자 선택..."}
+                          {field.value ? currentMeetingParticipants.find(p => p.id === field.value)?.name : "결제자 선택..."}
                           <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
                         </Button>
                       </PopoverTrigger>
@@ -230,7 +229,7 @@ export function EditExpenseDialog({
                               {currentMeetingParticipants.map((participant) => (
                                 <CommandItem
                                   key={participant.id}
-                                  value={participant.nickname} // Use nickname for search, but set ID onSelect
+                                  value={participant.name} // Use name for search, but set ID onSelect
                                   onSelect={() => {
                                     field.onChange(participant.id);
                                     setPayerSearchOpen(false);
@@ -239,7 +238,7 @@ export function EditExpenseDialog({
                                   <Check
                                     className={cn("mr-2 h-4 w-4", participant.id === field.value ? "opacity-100" : "opacity-0")}
                                   />
-                                  {participant.nickname}
+                                  {participant.name}
                                 </CommandItem>
                               ))}
                             </CommandGroup>
@@ -290,7 +289,7 @@ export function EditExpenseDialog({
                           }}
                           disabled={isPending}
                         />
-                        <Label htmlFor={`edit-split-${participant.id}`}>{participant.nickname}</Label>
+                        <Label htmlFor={`edit-split-${participant.id}`}>{participant.name}</Label>
                       </div>
                     ))}
                   </div>
@@ -304,7 +303,7 @@ export function EditExpenseDialog({
                   <div className="space-y-2 mt-1 p-3 border rounded-md max-h-60 overflow-y-auto">
                     {currentMeetingParticipants.map((participant, index) => (
                       <div key={participant.id} className="flex items-center justify-between space-x-2">
-                        <Label htmlFor={`edit-custom-${participant.id}`} className="flex-shrink-0">{participant.nickname}</Label>
+                        <Label htmlFor={`edit-custom-${participant.id}`} className="flex-shrink-0">{participant.name}</Label>
                         <Controller
                           name={`customSplits.${index}.amount`} // This should be fine
                           control={form.control}

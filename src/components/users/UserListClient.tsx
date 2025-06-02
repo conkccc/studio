@@ -15,13 +15,16 @@ import { Timestamp } from 'firebase/firestore';
 
 interface UserListClientProps {
   initialUsers: User[];
-  currentAdminId: string; // ID of the currently logged-in admin
+  currentAdminId: string;
+  isAdmin: boolean;
 }
 
-export function UserListClient({ initialUsers, currentAdminId }: UserListClientProps) {
+export function UserListClient({ initialUsers, currentAdminId, isAdmin }: UserListClientProps) {
   const [users, setUsers] = useState<User[]>(initialUsers);
   const [isPending, startTransition] = useTransition();
   const { toast } = useToast();
+  const [editingUserId, setEditingUserId] = useState<string | null>(null);
+  const [editLoading, setEditLoading] = useState(false);
 
   useEffect(() => {
     setUsers(initialUsers);
@@ -80,7 +83,6 @@ export function UserListClient({ initialUsers, currentAdminId }: UserListClientP
     return format(date, 'yyyy.MM.dd HH:mm', { locale: ko });
   };
 
-
   return (
     <div className="space-y-4">
       {isPending && <div className="flex items-center space-x-2 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" /> <span>처리 중...</span></div>}
@@ -88,7 +90,6 @@ export function UserListClient({ initialUsers, currentAdminId }: UserListClientP
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>ID (UID)</TableHead>
               <TableHead>이름</TableHead>
               <TableHead>이메일</TableHead>
               <TableHead>역할</TableHead>
@@ -98,14 +99,13 @@ export function UserListClient({ initialUsers, currentAdminId }: UserListClientP
           <TableBody>
             {users.length === 0 && !isPending && ( // Show only if not pending and users is empty
               <TableRow>
-                <TableCell colSpan={5} className="text-center text-muted-foreground h-24">
+                <TableCell colSpan={4} className="text-center text-muted-foreground h-24">
                   사용자가 없습니다.
                 </TableCell>
               </TableRow>
             )}
             {users.map((user) => (
               <TableRow key={user.id}>
-                <TableCell className="font-mono text-xs truncate max-w-[100px]" title={user.id}>{user.id}</TableCell>
                 <TableCell>{user.name || '-'}</TableCell>
                 <TableCell>{user.email || '-'}</TableCell>
                 <TableCell>

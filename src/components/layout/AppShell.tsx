@@ -41,9 +41,9 @@ interface NavItem {
 
 const navItems: NavItem[] = [
   { href: '/', label: '대시보드', icon: Home, matchExact: true, userOrAdmin: true },
-  { href: '/friends', label: '친구 목록', icon: UsersRound, userOrAdmin: true },
+  { href: '/friends', label: '친구 목록', icon: UsersRound, adminOnly: true },
   { href: '/meetings', label: '모임 목록', icon: CalendarCheck, userOrAdmin: true },
-  { href: '/reserve-fund', label: '회비 관리', icon: PiggyBank, userOrAdmin: true },
+  { href: '/reserve-fund/group', label: '회비 관리', icon: PiggyBank, adminOnly: true }, // 그룹 회비로 바로 이동
   { href: '/users', label: '사용자 관리', icon: Briefcase, adminOnly: true },
 ];
 
@@ -145,13 +145,14 @@ export function AppShell({ children }: { children: ReactNode }) {
     // 로그인 페이지, 공유 페이지는 예외
     if (
       typeof window !== 'undefined' &&
+      !loading && // <-- Only redirect when loading is false
       (!currentUser || userRole === 'none') &&
       pathname !== '/login' &&
       !pathname.startsWith('/share/meeting')
     ) {
       window.location.replace('/login'); // push 대신 replace로 히스토리 방지
     }
-  }, [currentUser, userRole, pathname]);
+  }, [currentUser, userRole, pathname, loading]);
 
   if (loading || !isClient) {
     return (

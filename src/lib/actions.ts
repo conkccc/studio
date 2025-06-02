@@ -20,20 +20,43 @@ import {
   dbRevertMeetingDeduction,
   getExpenseById as dbGetExpenseById,
   updateUser as dbUpdateUser,
+  addFriendGroup as dbAddFriendGroup,
+  updateFriendGroup as dbUpdateFriendGroup,
+  deleteFriendGroup as dbDeleteFriendGroup,
 } from './data-store';
-import type { Friend, Meeting, Expense, ReserveFundTransaction, User } from './types';
+import type { Friend, Meeting, Expense, ReserveFundTransaction, User, FriendGroup } from './types';
 import { Timestamp } from 'firebase/firestore';
 import { nanoid } from 'nanoid';
 import { addDays } from 'date-fns';
+import { db } from './firebase';
+import { doc, getDoc, updateDoc } from 'firebase/firestore';
 
 
 // Friend Actions
-export async function createFriendAction(nickname: string, name?: string) {
+export async function createFriendAction(name: string, groupId: string, description?: string) {
   try {
-    // Permission check should ideally be here if not using Firestore rules exclusively
-    // For now, assuming UI and Firestore rules handle admin-only access
-    const newFriend = await dbAddFriend({ nickname, name });
+    // 1. 친구 추가
+    if (!groupId || groupId.trim() === '') {
+      throw new Error('그룹이 선택되지 않았습니다.');
+    }
+    const newFriend = await dbAddFriend({ name, description, groupId });
+    // 2. 그룹의 memberIds에 친구 id 추가
+    if (groupId) {
+      // 기존 그룹 정보 가져오기
+      // 서버/클라이언트 환경에 따라 db 인스턴스 사용
+      const groupDocRef = doc(db, 'friendGroups', groupId);
+      const groupSnap = await getDoc(groupDocRef);
+      if (groupSnap.exists()) {
+        const groupData = groupSnap.data();
+        const memberIds: string[] = Array.isArray(groupData.memberIds) ? groupData.memberIds : [];
+        if (!memberIds.includes(newFriend.id)) {
+          memberIds.push(newFriend.id);
+          await updateDoc(groupDocRef, { memberIds });
+        }
+      }
+    }
     revalidatePath('/friends');
+    revalidatePath(`/friends/${groupId}`); // 그룹별 친구 목록 경로도 갱신
     revalidatePath('/meetings/new'); // Friend list might be used here
     return { success: true, friend: newFriend };
   } catch (error) {
@@ -289,7 +312,7 @@ export async function deleteExpenseAction(expenseId: string, meetingId: string, 
 }
 
 // Reserve Fund Actions
-export async function setReserveFundBalanceAction(newBalance: number, description?: string, currentUserId?: string | null) {
+export async function setReserveFundBalanceAction(groupId: string, newBalance: number, description?: string, currentUserId?: string | null) {
   if (!currentUserId) {
     return { success: false, error: "인증되지 않은 사용자입니다. 로그인이 필요합니다." };
   }
@@ -299,7 +322,7 @@ export async function setReserveFundBalanceAction(newBalance: number, descriptio
   }
 
   try {
-    await dbSetReserveFundBalance(newBalance, description || "수동 잔액 조정");
+    await dbSetReserveFundBalance(groupId, newBalance, description || "수동 잔액 조정");
     revalidatePath('/reserve-fund');
     revalidatePath('/'); // Dashboard shows reserve balance
     return { success: true, newBalance };
@@ -352,7 +375,7 @@ export async function finalizeMeetingSettlementAction(meetingId: string, current
         if (actualDeduction > 0.001) {
             // Revert any previous deduction for this meeting before recording a new one to prevent duplicates if action is retried
             await dbRevertMeetingDeduction(meeting.id); 
-            await dbRecordMeetingDeduction(meeting.id, meeting.name, actualDeduction, meeting.dateTime); // Pass meeting.dateTime as JS Date
+            await dbRecordMeetingDeduction(meeting.groupId, meeting.id, meeting.name, actualDeduction, meeting.dateTime); // groupId 전달
             message = `모임 (${meeting.name}) 정산 확정. 회비에서 ${actualDeduction.toLocaleString()}원 사용.`;
             if (actualDeduction < amountToDeduct) {
                 message += ` (설정된 금액보다 회비 잔액이 부족하여 부분 사용)`;
@@ -476,5 +499,55 @@ export async function toggleMeetingShareAction(meetingId: string, currentUserId:
     console.error("toggleMeetingShareAction Error:", error);
     const errorMessage = error instanceof Error ? error.message : '공유 설정 변경 중 오류가 발생했습니다.';
     return { success: false, error: errorMessage };
+  }
+}
+
+// --- FriendGroup Actions ---
+export async function createFriendGroupAction(
+  name: string,
+  ownerUserId: string,
+  memberIds: string[] = []
+) {
+  try {
+    const newGroup = await dbAddFriendGroup({ name, ownerUserId, memberIds });
+    revalidatePath('/friends');
+    revalidatePath('/meetings/new');
+    return { success: true, group: newGroup };
+  } catch (error) {
+    console.error('createFriendGroupAction Error:', error);
+    return { success: false, error: '친구 그룹 생성에 실패했습니다.' };
+  }
+}
+
+export async function updateFriendGroupAction(
+  id: string,
+  updates: Partial<Omit<FriendGroup, 'id' | 'createdAt'>>
+) {
+  try {
+    const updatedGroup = await dbUpdateFriendGroup(id, updates);
+    return { success: true, group: updatedGroup };
+  } catch (error) {
+    console.error('updateFriendGroupAction Error:', error);
+    return { success: false, error: '친구 그룹 수정에 실패했습니다.' };
+  }
+}
+
+export async function deleteFriendGroupAction(id: string) {
+  try {
+    await dbDeleteFriendGroup(id);
+    return { success: true };
+  } catch (error) {
+    console.error('deleteFriendGroupAction Error:', error);
+    return { success: false, error: '친구 그룹 삭제에 실패했습니다.' };
+  }
+}
+
+// 그룹별 친구 목록 조회
+export async function getFriendsByGroupAction(groupId: string) {
+  try {
+    const friends = await (await import('./data-store')).getFriendsByGroup(groupId);
+    return { success: true, friends: friends ?? [] };
+  } catch (error) {
+    return { success: false, error: '그룹별 친구 목록 조회에 실패했습니다.' };
   }
 }

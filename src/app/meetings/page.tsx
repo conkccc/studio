@@ -2,12 +2,12 @@
 
 import Link from 'next/link';
 import { useEffect, useState, useMemo } from 'react';
-import { getMeetings, getFriends } from '@/lib/data-store';
+import { getMeetings, getFriends, getFriendGroupsByUser } from '@/lib/data-store';
 import { MeetingListClient } from '@/components/meetings/MeetingListClient';
 import { Button } from '@/components/ui/button';
 import { PlusCircle } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
-import type { Meeting, Friend } from '@/lib/types';
+import type { Meeting, Friend, FriendGroup } from '@/lib/types';
 import { useSearchParams } from 'next/navigation';
 
 const ITEMS_PER_PAGE = 10;
@@ -20,8 +20,10 @@ export default function MeetingsPage() {
 
   const [meetings, setMeetings] = useState<Meeting[]>([]);
   const [allFriends, setAllFriends] = useState<Friend[]>([]);
+  const [groups, setGroups] = useState<FriendGroup[]>([]);
   const [availableYears, setAvailableYears] = useState<number[]>([]);
   const [selectedYear, setSelectedYear] = useState<number | undefined>(undefined);
+  const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
   const [dataLoading, setDataLoading] = useState(true);
   const [totalMeetingCount, setTotalMeetingCount] = useState(0);
 
@@ -82,6 +84,11 @@ export default function MeetingsPage() {
     fetchData();
   }, [authLoading, isAdmin, userRole, currentUser, currentPage, selectedYear, allFriends.length]);
 
+  useEffect(() => {
+    if (!currentUser) return;
+    getFriendGroupsByUser(currentUser.uid).then(setGroups);
+  }, [currentUser]);
+
   const totalPages = useMemo(() => {
     return Math.ceil(totalMeetingCount / ITEMS_PER_PAGE);
   }, [totalMeetingCount]);
@@ -115,23 +122,35 @@ export default function MeetingsPage() {
             지난 모임을 확인하고 새로운 모임을 만드세요.
           </p>
         </div>
-        {isAdmin && (
-          <Link href="/meetings/new" passHref legacyBehavior={false}>
-            <Button>
-              <PlusCircle className="mr-2 h-5 w-5" />
-              새 모임 만들기
-            </Button>
-          </Link>
-        )}
+        <div className="flex flex-col sm:flex-row gap-2 items-center">
+          <select
+            className="block w-full appearance-none rounded-md border border-input bg-background px-4 py-2 pr-10 text-base shadow-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/30 transition disabled:opacity-50"
+            value={selectedGroupId || ''}
+            onChange={e => setSelectedGroupId(e.target.value)}
+          >
+            <option value="">전체 그룹</option>
+            {groups.map(group => (
+              <option key={group.id} value={group.id}>{group.name}</option>
+            ))}
+          </select>
+          {isAdmin && (
+            <Link href="/meetings/new" passHref legacyBehavior={false}>
+              <Button>
+                <PlusCircle className="mr-2 h-5 w-5" />
+                새 모임 만들기
+              </Button>
+            </Link>
+          )}
+        </div>
       </div>
-      
+      {/* 그룹 필터 적용: selectedGroupId가 있으면 해당 그룹만, 없으면 전체 */}
       {dataLoading ? ( 
          <div className="flex justify-center items-center min-h-[200px]">
             <p className="text-muted-foreground">모임 정보 로딩 중...</p>
          </div>
       ) : (
         <MeetingListClient 
-          initialMeetings={meetings}
+          initialMeetings={selectedGroupId ? meetings.filter(m => m.groupId === selectedGroupId) : meetings}
           allFriends={allFriends}
           availableYears={availableYears}
           selectedYear={selectedYear}

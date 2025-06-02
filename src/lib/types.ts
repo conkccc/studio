@@ -8,10 +8,19 @@ export type User = {
   createdAt: Date; // Always store as JS Date in app, convert to/from Timestamp for Firestore
 };
 
+export type FriendGroup = {
+  id: string;
+  name: string;
+  ownerUserId: string; // 그룹 소유자(유저)
+  memberIds: string[]; // Friend id 목록
+  createdAt: Date;
+};
+
 export type Friend = {
   id: string;
-  nickname: string;
-  name?: string;
+  name: string; // 이름(필수)
+  description?: string; // 설명(선택)
+  groupId: string; // 소속 그룹
   createdAt: Date;
 };
 
@@ -51,6 +60,7 @@ export type Meeting = {
   shareToken?: string | null;
   shareExpiryDate?: Date | null;
   memo?: string;
+  groupId: string; // 소속 친구 그룹
 };
 
 export type ReserveFundTransaction = {
@@ -60,4 +70,5 @@ export type ReserveFundTransaction = {
   amount: number; // 차감 시 음수, 잔액 설정 시 해당 잔액
   date: Date;
   meetingId?: string;
+  groupId: string; // 소속 그룹
 };

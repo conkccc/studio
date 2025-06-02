@@ -1,4 +1,3 @@
-
 'use client';
 
 import React, { useState, useTransition } from 'react';
@@ -24,18 +23,19 @@ import { useRouter } from 'next/navigation'; // Added for router.refresh()
 import type { Friend } from '@/lib/types'; // Ensure Friend type is imported
 
 const friendSchema = z.object({
-  nickname: z.string().min(1, '닉네임을 입력해주세요.').max(50, '닉네임은 50자 이내여야 합니다.'),
-  name: z.string().max(50, '이름은 50자 이내여야 합니다.').optional(),
+  name: z.string().min(1, '이름을 입력해주세요.').max(50, '이름은 50자 이내여야 합니다.'),
+  description: z.string().max(100, '설명은 100자 이내여야 합니다.').optional(),
 });
 
 type FriendFormData = z.infer<typeof friendSchema>;
 
-interface AddFriendDialogProps {
+export interface AddFriendDialogProps {
   triggerButton?: React.ReactNode; // Optional custom trigger
   onFriendAdded?: (friend: Friend) => void; // Callback after successful addition, type changed to Friend
+  groupId?: string; // 그룹별 친구 추가 지원
 }
 
-export function AddFriendDialog({ triggerButton, onFriendAdded }: AddFriendDialogProps) {
+export function AddFriendDialog({ triggerButton, onFriendAdded, groupId }: AddFriendDialogProps) {
   const [open, setOpen] = useState(false);
   const [isPending, startTransition] = useTransition();
   const { toast } = useToast();
@@ -44,20 +44,24 @@ export function AddFriendDialog({ triggerButton, onFriendAdded }: AddFriendDialo
   const form = useForm<FriendFormData>({
     resolver: zodResolver(friendSchema),
     defaultValues: {
-      nickname: '',
       name: '',
+      description: '',
     },
   });
 
   const onSubmit = (data: FriendFormData) => {
+    if (!groupId || groupId.trim() === '') {
+      toast({ title: '오류', description: '그룹이 선택되지 않았습니다.', variant: 'destructive' });
+      return;
+    }
     startTransition(async () => {
-      const result = await createFriendAction(data.nickname, data.name);
+      const result = await createFriendAction(data.name, groupId, data.description);
       if (result.success) {
         toast({ title: '성공', description: '새로운 친구가 추가되었습니다.' });
         form.reset();
         setOpen(false); // Close dialog *before* refreshing
         router.refresh(); // Refresh server data for the current route
-        if (onFriendAdded && result.friend) { // Ensure result.friend exists for the callback
+        if (onFriendAdded && result.friend) {
           onFriendAdded(result.friend);
         }
       } else {
@@ -82,24 +86,8 @@ export function AddFriendDialog({ triggerButton, onFriendAdded }: AddFriendDialo
         </DialogHeader>
         <form onSubmit={form.handleSubmit(onSubmit)} className="grid gap-4 py-4">
           <div className="grid grid-cols-4 items-center gap-4">
-            <Label htmlFor="nickname" className="text-right">
-              닉네임 <span className="text-destructive">*</span>
-            </Label>
-            <Input
-              id="nickname"
-              {...form.register('nickname')}
-              className="col-span-3"
-              disabled={isPending}
-            />
-          </div>
-          {form.formState.errors.nickname && (
-            <p className="col-span-4 text-right text-sm text-destructive">
-              {form.formState.errors.nickname.message}
-            </p>
-          )}
-          <div className="grid grid-cols-4 items-center gap-4">
             <Label htmlFor="name" className="text-right">
-              이름 (선택)
+              이름 <span className="text-destructive">*</span>
             </Label>
             <Input
               id="name"
@@ -111,6 +99,22 @@ export function AddFriendDialog({ triggerButton, onFriendAdded }: AddFriendDialo
           {form.formState.errors.name && (
             <p className="col-span-4 text-right text-sm text-destructive">
               {form.formState.errors.name.message}
+            </p>
+          )}
+          <div className="grid grid-cols-4 items-center gap-4">
+            <Label htmlFor="description" className="text-right">
+              설명 (선택)
+            </Label>
+            <Input
+              id="description"
+              {...form.register('description')}
+              className="col-span-3"
+              disabled={isPending}
+            />
+          </div>
+          {form.formState.errors.description && (
+            <p className="col-span-4 text-right text-sm text-destructive">
+              {form.formState.errors.description.message}
             </p>
           )}
           <DialogFooter>
