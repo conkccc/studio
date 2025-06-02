@@ -178,41 +178,43 @@ export function ReserveFundClient({ initialTransactions, initialBalance, groupId
         </CardHeader>
         <CardContent>
           {transactions.length > 0 ? (
-            <ScrollArea className="h-[400px]">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>날짜</TableHead>
-                    <TableHead>설명</TableHead>
-                    <TableHead>유형</TableHead>
-                    <TableHead className="text-right">금액 (원)</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {transactions.map((tx) => (
-                    <TableRow key={tx.id}>
-                      <TableCell>{format(new Date(tx.date), 'yyyy.MM.dd HH:mm', { locale: ko })}</TableCell>
-                      <TableCell>{tx.description}</TableCell>
-                      <TableCell>
-                        {tx.type === 'meeting_deduction' ? (
-                          <span className="inline-flex items-center text-xs text-red-700 bg-red-100 px-2 py-0.5 rounded-full">
-                            <TrendingDown className="h-3 w-3 mr-1"/> 모임 차감
-                          </span>
-                        ) : (
-                          <span className="inline-flex items-center text-xs text-blue-700 bg-blue-100 px-2 py-0.5 rounded-full">
-                            <PiggyBank className="h-3 w-3 mr-1"/> 잔액 설정
-                          </span>
-                        )}
-                      </TableCell>
-                      <TableCell className={`text-right font-medium ${tx.type === 'meeting_deduction' ? 'text-red-600' : 'text-foreground'}`}>
-                        {/* For balance_update, amount is the new balance. For deduction, it's the change. */}
-                        {tx.type === 'balance_update' ? tx.amount.toLocaleString() : tx.amount.toLocaleString()}
-                      </TableCell>
+            <div className="overflow-x-auto">
+              <ScrollArea className="h-[400px] min-w-[600px]">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>날짜</TableHead>
+                      <TableHead>설명</TableHead>
+                      <TableHead>유형</TableHead>
+                      <TableHead className="text-right">금액 (원)</TableHead>
                     </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </ScrollArea>
+                  </TableHeader>
+                  <TableBody>
+                    {transactions.map((tx) => (
+                      <TableRow key={tx.id}>
+                        <TableCell>{format(new Date(tx.date), 'yyyy.MM.dd HH:mm', { locale: ko })}</TableCell>
+                        <TableCell>{tx.description}</TableCell>
+                        <TableCell>
+                          {tx.type === 'meeting_deduction' ? (
+                            <span className="inline-flex items-center text-xs text-red-700 bg-red-100 px-2 py-0.5 rounded-full">
+                              <TrendingDown className="h-3 w-3 mr-1"/> 모임 차감
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center text-xs text-blue-700 bg-blue-100 px-2 py-0.5 rounded-full">
+                              <PiggyBank className="h-3 w-3 mr-1"/> 잔액 설정
+                            </span>
+                          )}
+                        </TableCell>
+                        <TableCell className={`text-right font-medium ${tx.type === 'meeting_deduction' ? 'text-red-600' : 'text-foreground'}`}>
+                          {/* For balance_update, amount is the new balance. For deduction, it's the change. */}
+                          {tx.type === 'balance_update' ? tx.amount.toLocaleString() : tx.amount.toLocaleString()}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </ScrollArea>
+            </div>
           ) : (
             <p className="text-center text-muted-foreground py-8">
               기록된 회비 변경 내역이 없습니다.
