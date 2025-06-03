@@ -7,6 +7,7 @@ import { getFriends } from '@/lib/data-store';
 import { getFriendGroupsForUserAction, getFriendsByGroupAction } from '@/lib/actions';
 import { CreateMeetingForm } from '@/components/meetings/CreateMeetingForm';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
+import { useToast } from '@/hooks/use-toast'; // For error notifications
 import { useAuth } from '@/contexts/AuthContext';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
@@ -17,94 +18,97 @@ import { ChevronsUpDown, Check } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 export default function NewMeetingPage() {
-  const { currentUser, isAdmin, userRole, loading: authLoading } = useAuth();
-  const [friends, setFriends] = useState<Friend[]>([]);
-  const [groups, setGroups] = useState<FriendGroup[]>([]);
-  const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
-  const [dataLoading, setDataLoading] = useState(true);
-  const [groupPopoverOpen, setGroupPopoverOpen] = useState(false);
-  const [isTemporaryMeeting, setIsTemporaryMeeting] = useState(false); // Added state
+  const { currentUser, appUser, isAdmin, userRole, loading: authLoading } = useAuth(); // Use appUser for id
+  const { toast } = useToast(); // For error notifications
 
-  const handleTemporaryChange = (isTemporary: boolean) => { // Added handler
+  const [allOwnedGroups, setAllOwnedGroups] = useState<FriendGroup[]>([]);
+  const [selectedMeetingGroupId, setSelectedMeetingGroupId] = useState<string | null>(null);
+  const [friendsForParticipantSelect, setFriendsForParticipantSelect] = useState<Friend[]>([]);
+  const [isLoadingInitialData, setIsLoadingInitialData] = useState(true); // For groups and initial friends (if any)
+  const [isLoadingParticipants, setIsLoadingParticipants] = useState(false); // For friends of selected group
+
+  const [isTemporaryMeeting, setIsTemporaryMeeting] = useState(false);
+
+  const handleTemporaryChange = (isTemporary: boolean) => {
     setIsTemporaryMeeting(isTemporary);
     if (isTemporary) {
-      // Optionally, if a group was selected, clear it when switching to temporary
-      // setSelectedGroupId(null);
-      // This might be good UX, but the form itself will ignore friends/groupId if isTemporary is true.
+      setSelectedMeetingGroupId(null); // Clear group selection if switching to temporary
+      setFriendsForParticipantSelect([]); // Clear participant list
     }
   };
 
+  // Fetch initial data: groups for the dropdown
   useEffect(() => {
-    if (authLoading && process.env.NEXT_PUBLIC_DEV_MODE_SKIP_AUTH !== "true") {
-      setDataLoading(true);
+    if (authLoading || !appUser?.id) {
+      setIsLoadingInitialData(false);
+      setAllOwnedGroups([]);
       return;
     }
-
-    // Guard for page access, already handled below, but this useEffect is for data fetching.
-    // User must be logged in and be either admin or user.
-    if (!currentUser || !(isAdmin || userRole === 'user')) {
-      setDataLoading(false);
-      setFriends([]);
-      setGroups([]); // Also clear groups if user has no permission
-      return;
-    }
-
-    const fetchDataForUser = async () => {
-      setDataLoading(true);
+    setIsLoadingInitialData(true);
+    const fetchInitialData = async () => {
       try {
-        let fetchedFriends: Friend[] = [];
-        let userOwnedGroups: FriendGroup[] = []; // For user role, to populate group dropdown and fetch their friends
-
-        if (isAdmin) {
-          fetchedFriends = await getFriends(); // Admins get all friends
-          // For admins, the groups prop for CreateMeetingForm should ideally list all groups for assignment.
-          // Using getFriendGroupsForUserAction which gets all groups for admin.
-          const adminGroupsResponse = await getFriendGroupsForUserAction(currentUser.uid);
-          if (adminGroupsResponse.success && adminGroupsResponse.groups) {
-            setGroups(adminGroupsResponse.groups);
-          } else {
-            setGroups([]);
+        const groupResponse = await getFriendGroupsForUserAction(appUser.id);
+        if (groupResponse.success && groupResponse.groups) {
+          if (appUser.role === 'admin') {
+            setAllOwnedGroups(groupResponse.groups); // Admin sees all accessible groups in dropdown
+          } else { // 'user' or 'viewer' (though viewer shouldn't be here)
+            setAllOwnedGroups(groupResponse.groups.filter(g => g.ownerUserId === appUser.id));
           }
-        } else if (userRole === 'user') {
-          // Users get friends from their owned groups
-          const groupResponse = await getFriendGroupsForUserAction(currentUser.uid);
-          if (groupResponse.success && groupResponse.groups) {
-            userOwnedGroups = groupResponse.groups.filter(g => g.ownerUserId === currentUser.uid);
-            setGroups(userOwnedGroups); // For 'user', the group dropdown in form shows only their owned groups
-
-            if (userOwnedGroups.length > 0) {
-              const friendPromises = userOwnedGroups.map(g => getFriendsByGroupAction(g.id));
-              const friendResults = await Promise.all(friendPromises);
-
-              const tempFriendsMap = new Map<string, Friend>();
-              friendResults.forEach(res => {
-                if (res.success && res.friends) {
-                  res.friends.forEach(f => tempFriendsMap.set(f.id, f));
-                }
-              });
-              fetchedFriends = Array.from(tempFriendsMap.values()).sort((a, b) => a.name.localeCompare(b.name));
-            } else {
-              fetchedFriends = []; // No owned groups, so no friends from groups
-            }
-          }
+        } else {
+          setAllOwnedGroups([]);
+          toast({ title: "오류", description: groupResponse.error || "모임 생성을 위한 그룹 목록을 가져오지 못했습니다.", variant: "destructive"});
         }
-        setFriends(fetchedFriends);
-
       } catch (error) {
-        console.error("Failed to fetch data for new meeting:", error);
-        setFriends([]);
-        setGroups([]);
+        console.error("Error fetching initial data for new meeting:", error);
+        setAllOwnedGroups([]);
+        toast({ title: "오류", description: "데이터 로딩 중 오류 발생.", variant: "destructive"});
       } finally {
-        setDataLoading(false);
+        setIsLoadingInitialData(false);
       }
     };
-    
-    fetchDataForUser();
+    fetchInitialData();
+  }, [authLoading, appUser, toast]);
 
-  }, [authLoading, currentUser, isAdmin, userRole]);
-  // Removed the separate useEffect for groups as it's now handled within fetchDataForUser
 
-  if (authLoading || ((isAdmin || userRole === 'user') && dataLoading)) { // dataLoading applies if user is permitted
+  // Fetch friends when selectedMeetingGroupId changes
+  useEffect(() => {
+    const fetchFriendsForGroup = async () => {
+      if (!selectedMeetingGroupId) {
+        // If no group is selected, or if it's a temporary meeting,
+        // participant list should be empty or handled by CreateMeetingForm based on its 'friends' prop.
+        // For non-temporary meetings, if no group is selected, users might not be able to pick participants
+        // until a group is chosen.
+        setFriendsForParticipantSelect([]);
+        return;
+      }
+      if (isTemporaryMeeting) { // No specific group friends for temporary meetings.
+        setFriendsForParticipantSelect([]);
+        return;
+      }
+
+      setIsLoadingParticipants(true);
+      try {
+        const response = await getFriendsByGroupAction(selectedMeetingGroupId);
+        if (response.success && response.friends) {
+          setFriendsForParticipantSelect(response.friends);
+        } else {
+          setFriendsForParticipantSelect([]);
+          toast({ title: "오류", description: response.error || "선택된 그룹의 친구 목록을 가져오지 못했습니다.", variant: "destructive" });
+        }
+      } catch (error) {
+        setFriendsForParticipantSelect([]);
+        toast({ title: "오류", description: "참여자 목록 조회 중 예외가 발생했습니다.", variant: "destructive" });
+        console.error("Error fetching friends for group:", error);
+      } finally {
+        setIsLoadingParticipants(false);
+      }
+    };
+
+    fetchFriendsForGroup();
+  }, [selectedMeetingGroupId, isTemporaryMeeting, toast]);
+
+
+  if (authLoading || isLoadingInitialData) {
     return (
       <div className="flex justify-center items-center min-h-[calc(100vh-150px)]">
         <p className="text-xl text-muted-foreground">페이지 로딩 중...</p>
@@ -137,7 +141,7 @@ export default function NewMeetingPage() {
     );
   }
 
-  const currentUserId = currentUser!.uid; 
+  const currentUserId = appUser!.id; // appUser is confirmed to exist here due to authLoading/!appUser checks
 
   return (
     <div className="max-w-2xl mx-auto">
@@ -148,16 +152,14 @@ export default function NewMeetingPage() {
         </CardHeader>
         <CardContent>
           <CreateMeetingForm
-            friends={isTemporaryMeeting
-              ? []
-              : (selectedGroupId ? friends.filter(f => f.groupId === selectedGroupId) : [])
-            }
             currentUserId={currentUserId}
-            groupId={selectedGroupId || undefined}
-            groups={groups}
-            selectedGroupId={selectedGroupId}
-            setSelectedGroupId={setSelectedGroupId}
+            groups={allOwnedGroups} // Groups for the dropdown in the form
+            selectedGroupId={selectedMeetingGroupId} // To control the form's group selection
+            onGroupChange={setSelectedMeetingGroupId} // Callback for when group selection changes in form
+            friends={isTemporaryMeeting ? [] : friendsForParticipantSelect} // Friends for participant selection
+            isLoadingFriends={isLoadingParticipants} // Loading state for friends list
             onTemporaryChange={handleTemporaryChange}
+            isEditMode={false} // Explicitly set for clarity
           />
         </CardContent>
       </Card>

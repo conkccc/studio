@@ -9,10 +9,11 @@ import {
 } from '@/lib/actions';
 import type { FriendGroup, User, Friend } from '@/lib/types';
 import { useToast } from '@/hooks/use-toast';
-import { Loader2, Edit, Trash2, PlusCircle, ChevronDown, ChevronRight } from 'lucide-react'; // Added icons
-import { Button } from '@/components/ui/button'; // Assuming shadcn Button
-import { Input } from '@/components/ui/input'; // Assuming shadcn Input
-import { useAuth } from '@/contexts/AuthContext'; // Corrected path
+import { Loader2, Edit, Trash2, PlusCircle, ChevronDown, ChevronRight, UserPlus } from 'lucide-react'; // Added UserPlus
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { useAuth } from '@/contexts/AuthContext';
+import { AddFriendToGroupDialog } from './AddFriendToGroupDialog'; // Import the new dialog
 
 // Define a type for groups with added UI-specific flags
 type DisplayFriendGroup = FriendGroup & {
@@ -33,6 +34,11 @@ export default function FriendGroupListClient() {
   const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
   const [friendsInSelectedGroup, setFriendsInSelectedGroup] = useState<Friend[]>([]);
   const [isLoadingFriends, setIsLoadingFriends] = useState(false);
+
+  // State for AddFriendToGroupDialog
+  const [isAddFriendDialogOpen, setIsAddFriendDialogOpen] = useState(false);
+  const [groupIdForAddingFriend, setGroupIdForAddingFriend] = useState<string | null>(null);
+  const [groupNameForAddingFriend, setGroupNameForAddingFriend] = useState<string | undefined>(undefined);
 
   const currentSelectedGroupObject = useMemo(() => {
     if (!selectedGroupId) return null;
@@ -197,10 +203,38 @@ export default function FriendGroupListClient() {
   const canCreateGroup = appUser && (appUser.role === 'admin' || appUser.role === 'user');
 
   const ownedGroups = groups.filter(g => g.isOwned);
-  const referencedGroups = groups.filter(g => !g.isOwned && g.isReferenced); // Show only referenced if not owned
+  const referencedGroups = groups.filter(g => !g.isOwned && g.isReferenced);
+
+  const handleOpenAddFriendDialog = (groupId: string, groupName: string) => {
+    setGroupIdForAddingFriend(groupId);
+    setGroupNameForAddingFriend(groupName);
+    setIsAddFriendDialogOpen(true);
+  };
+
+  const handleFriendAdded = (newFriend: Friend) => {
+    // If the new friend was added to the currently selected group, update the list
+    if (selectedGroupId === newFriend.groupId) {
+      setFriendsInSelectedGroup(prevFriends =>
+        [...prevFriends, newFriend].sort((a, b) => a.name.localeCompare(b.name))
+      );
+    }
+    // Optionally, show a toast or further UI updates
+    toast({ title: "성공", description: `그룹 '${groupNameForAddingFriend || selectedGroupId}'에 '${newFriend.name}' 친구를 추가했습니다.` });
+  };
 
   return (
     <div className="space-y-6 p-1">
+      {/* Add Friend Dialog */}
+      {groupIdForAddingFriend && (
+        <AddFriendToGroupDialog
+          isOpen={isAddFriendDialogOpen}
+          setIsOpen={setIsAddFriendDialogOpen}
+          groupId={groupIdForAddingFriend}
+          groupName={groupNameForAddingFriend}
+          onFriendAdded={handleFriendAdded}
+        />
+      )}
+
       {canCreateGroup && (
         <div className="bg-card p-4 rounded-lg shadow">
           <h2 className="text-lg font-semibold mb-3">새 그룹 만들기</h2>
@@ -234,11 +268,25 @@ export default function FriendGroupListClient() {
                     {selectedGroupId === group.id ? <ChevronDown className="h-4 w-4 mr-1" /> : <ChevronRight className="h-4 w-4 mr-1" />}
                     {group.name}
                   </button>
-                  { appUser && (appUser.role === 'user' || appUser.role === 'admin') && (
-                    <Button variant="destructive" size="sm" onClick={(e) => { e.stopPropagation(); handleDeleteGroup(group.id);}} disabled={isSubmitting}>
-                      {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
-                    </Button>
-                  )}
+                  <div className="flex items-center space-x-1">
+                    {(group.isOwned || appUser?.role === 'admin') && (
+                       <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7"
+                        onClick={(e) => { e.stopPropagation(); handleOpenAddFriendDialog(group.id, group.name);}}
+                        disabled={isSubmitting}
+                        aria-label="Add friend to group"
+                      >
+                        <UserPlus className="h-4 w-4 text-muted-foreground hover:text-primary" />
+                      </Button>
+                    )}
+                    { appUser && (appUser.role === 'user' || appUser.role === 'admin') && (
+                      <Button variant="ghost" size="icon" className="h-7 w-7" onClick={(e) => { e.stopPropagation(); handleDeleteGroup(group.id);}} disabled={isSubmitting}>
+                        {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4 text-destructive" />}
+                      </Button>
+                    )}
+                  </div>
                 </div>
                 {selectedGroupId === group.id && (
                   <div className="mt-2 pl-4 border-l-2 border-muted">
@@ -249,15 +297,17 @@ export default function FriendGroupListClient() {
                         {friendsInSelectedGroup.map(friend => (
                           <li key={friend.id} className="flex justify-between items-center text-sm p-1 hover:bg-muted rounded group">
                             <span>{friend.name} {friend.description && `(${friend.description})`}</span>
-                            {currentSelectedGroupObject?.isOwned || appUser?.role === 'admin' ? (
+                            {/* Delete Friend Button: Only if group is owned by current user OR current user is admin */}
+                            {(currentSelectedGroupObject?.isOwned && appUser && (appUser.role === 'user' || appUser.role === 'admin')) || (appUser?.role === 'admin') ? (
                               <Button
                                 variant="ghost"
-                                size="icon_sm"
-                                className="opacity-0 group-hover:opacity-100 transition-opacity"
+                                size="icon"
+                                className="h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity"
                                 onClick={() => handleDeleteFriend(friend.id, friend.name)}
                                 disabled={isDeletingFriend === friend.id}
+                                aria-label={`Delete ${friend.name}`}
                               >
-                                {isDeletingFriend === friend.id ? <Loader2 className="h-3 w-3 animate-spin"/> : <Trash2 className="h-3 w-3 text-destructive" />}
+                                {isDeletingFriend === friend.id ? <Loader2 className="h-4 w-4 animate-spin"/> : <Trash2 className="h-4 w-4 text-destructive" />}
                               </Button>
                             ) : null}
                           </li>
@@ -303,12 +353,13 @@ export default function FriendGroupListClient() {
                             {(currentSelectedGroupObject?.isOwned && appUser && (appUser.role === 'user' || appUser.role === 'admin')) || (appUser?.role === 'admin') ? (
                               <Button
                                 variant="ghost"
-                                size="icon_sm"
-                                className="opacity-0 group-hover:opacity-100 transition-opacity"
+                                size="icon" // Changed from icon_sm
+                                className="h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity" // Adjusted button size
                                 onClick={() => handleDeleteFriend(friend.id, friend.name)}
                                 disabled={isDeletingFriend === friend.id}
+                                aria-label={`Delete ${friend.name}`}
                               >
-                                {isDeletingFriend === friend.id ? <Loader2 className="h-3 w-3 animate-spin"/> : <Trash2 className="h-3 w-3 text-destructive" />}
+                                {isDeletingFriend === friend.id ? <Loader2 className="h-4 w-4 animate-spin"/> : <Trash2 className="h-4 w-4 text-destructive" />}
                               </Button>
                             ) : null}
                           </li>

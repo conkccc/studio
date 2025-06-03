@@ -137,14 +137,15 @@ type MeetingFormData = z.infer<typeof meetingSchema>;
 
 interface MeetingFormProps {
   friends: Friend[];
+  isLoadingFriends?: boolean; // Added this prop
   currentUserId: string;
   isEditMode?: boolean;
   initialData?: Meeting;
-  groupId?: string;
+  groupId?: string; // This is the groupId the meeting will be associated with
   onTemporaryChange?: (isTemporary: boolean) => void;
-  groups?: FriendGroup[];
-  selectedGroupId?: string | null;
-  setSelectedGroupId?: (id: string | null) => void;
+  groups?: FriendGroup[]; // List of groups for the "Assign to Group" dropdown
+  selectedGroupId?: string | null; // Currently selected group ID for the meeting
+  onGroupChange?: (id: string | null) => void; // Callback when group selection changes
 }
 
 const googleMapsLibraries: ("places" | "maps" | "marker")[] = ["places", "maps", "marker"];
@@ -263,7 +264,19 @@ function LocationSearchInput({ form, isPending, isMapsLoaded, mapsLoadError, onL
 }
 
 
-export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, initialData, groupId, onTemporaryChange, groups = [], selectedGroupId = null, setSelectedGroupId }: MeetingFormProps) {
+export function CreateMeetingForm({
+  friends,
+  isLoadingFriends, // Destructure new prop
+  currentUserId,
+  isEditMode = false,
+  initialData,
+  // groupId prop seems redundant if selectedGroupId from parent is used for meeting's group
+  // Let's assume selectedGroupId (passed as prop) is the definitive group for the meeting
+  onTemporaryChange,
+  groups = [],
+  selectedGroupId: currentMeetingGroupId, // Renaming for clarity within form, this is the group for the meeting
+  onGroupChange, // This is the callback to parent when form's group dropdown changes
+}: MeetingFormProps) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const { toast } = useToast();
@@ -714,11 +727,11 @@ export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, 
                         key={group.id}
                         value={group.name}
                         onSelect={() => {
-                          setSelectedGroupId(group.id);
+                          if (onGroupChange) onGroupChange(group.id); // Use onGroupChange
                           setGroupPopoverOpen(false);
                         }}
                       >
-                        <Check className={cn("mr-2 h-4 w-4", selectedGroupId === group.id ? "opacity-100" : "opacity-0")} />
+                        <Check className={cn("mr-2 h-4 w-4", currentMeetingGroupId === group.id ? "opacity-100" : "opacity-0")} />
                         <span>{group.name}</span>
                       </CommandItem>
                     ))}
@@ -1211,48 +1224,55 @@ export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, 
                 <CommandList>
                   <CommandEmpty>친구를 찾을 수 없습니다.</CommandEmpty>
                   <CommandGroup>
-                    {friends.map((friend) => (
-                      <CommandItem
-                        key={friend.id}
-                        value={friend.name + (friend.description ? ` ${friend.description}` : "")}
-                        onSelect={() => {
-                          if (isEditMode && initialData?.isSettled || isTemporaryMeeting) return;
-                          const currentParticipantIds = form.getValues("participantIds") || [];
-                          let newParticipantIds = [...currentParticipantIds];
-
-                          if (newParticipantIds.includes(friend.id)) {
-                            newParticipantIds = newParticipantIds.filter(id => id !== friend.id);
-                          } else {
-                            newParticipantIds.push(friend.id);
-                          }
-                          form.setValue("participantIds", newParticipantIds, { shouldValidate: true });
-
-                          // Update nonReserveFundParticipants if a participant is removed
-                          const currentNonParticipants = form.getValues('nonReserveFundParticipants') || [];
-                          if (!newParticipantIds.includes(friend.id) && currentNonParticipants.includes(friend.id)) {
-                              form.setValue('nonReserveFundParticipants', currentNonParticipants.filter(id => id !== friend.id), { shouldValidate: true });
-                          }
-                        }}
-                        className={cn(
-                          (isEditMode && initialData?.isSettled) && "cursor-not-allowed opacity-50",
-                          isTemporaryMeeting && "cursor-not-allowed opacity-30"
-                          )}
-                      >
-                        <Check
-                          className={cn(
-                            "mr-2 h-4 w-4",
-                            form.watch('participantIds')?.includes(friend.id) ? "opacity-100" : "opacity-0"
-                          )}
-                        />
-                        <span>
-                          {friend.name}
-                          {friend.description && (
-                            <span className="ml-1 text-xs text-muted-foreground">({friend.description})</span>
-                          )}
-                          {friend.id === currentUserId && " (나)"}
-                        </span>
+                    {isLoadingFriends ? (
+                      <CommandItem disabled className="text-muted-foreground">친구 목록 로딩 중...</CommandItem>
+                    ) : friends.length === 0 ? (
+                      <CommandItem disabled className="text-muted-foreground">
+                        {isTemporaryMeeting ? "임시 모임에는 참여자를 직접 추가합니다." : (currentMeetingGroupId ? "선택된 그룹에 친구가 없습니다." : "먼저 그룹을 선택해주세요.")}
                       </CommandItem>
-                    ))}
+                    ) : (
+                      friends.map((friend) => (
+                        <CommandItem
+                          key={friend.id}
+                          value={friend.name + (friend.description ? ` ${friend.description}` : "")}
+                          onSelect={() => {
+                            if (isEditMode && initialData?.isSettled || isTemporaryMeeting) return;
+                            const currentParticipantIds = form.getValues("participantIds") || [];
+                            let newParticipantIds = [...currentParticipantIds];
+
+                            if (newParticipantIds.includes(friend.id)) {
+                              newParticipantIds = newParticipantIds.filter(id => id !== friend.id);
+                            } else {
+                              newParticipantIds.push(friend.id);
+                            }
+                            form.setValue("participantIds", newParticipantIds, { shouldValidate: true });
+
+                            const currentNonParticipants = form.getValues('nonReserveFundParticipants') || [];
+                            if (!newParticipantIds.includes(friend.id) && currentNonParticipants.includes(friend.id)) {
+                                form.setValue('nonReserveFundParticipants', currentNonParticipants.filter(id => id !== friend.id), { shouldValidate: true });
+                            }
+                          }}
+                          className={cn(
+                            (isEditMode && initialData?.isSettled) && "cursor-not-allowed opacity-50",
+                            isTemporaryMeeting && "cursor-not-allowed opacity-30"
+                            )}
+                        >
+                          <Check
+                            className={cn(
+                              "mr-2 h-4 w-4",
+                              form.watch('participantIds')?.includes(friend.id) ? "opacity-100" : "opacity-0"
+                            )}
+                          />
+                          <span>
+                            {friend.name}
+                            {friend.description && (
+                              <span className="ml-1 text-xs text-muted-foreground">({friend.description})</span>
+                            )}
+                            {friend.id === currentUserId && " (나)"}
+                          </span>
+                        </CommandItem>
+                      ))
+                    )}
                   </CommandGroup>
                 </CommandList>
               </Command>

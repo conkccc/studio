@@ -28,7 +28,7 @@ import {
   getMeetings as dbGetMeetings, // Import for the new meeting action
 } from './data-store';
 import type { Friend, Meeting, Expense, ReserveFundTransaction, User, FriendGroup } from './types';
-import { Timestamp, arrayRemove as firestoreArrayRemove } from 'firebase/firestore'; // Added firestoreArrayRemove
+import { Timestamp, arrayRemove as firestoreArrayRemove, arrayUnion as firestoreArrayUnion } from 'firebase/firestore'; // Added firestoreArrayUnion
 import { nanoid } from 'nanoid';
 import { addDays } from 'date-fns';
 import { db } from './firebase';
@@ -36,35 +36,52 @@ import { doc, getDoc, updateDoc } from 'firebase/firestore';
 
 
 // Friend Actions
-export async function createFriendAction(name: string, groupId: string, description?: string) {
+export async function createFriendAction(payload: { name: string; description?: string; groupId: string; currentUserId: string }) {
+  const { name, description, groupId, currentUserId } = payload;
+
+  if (!name || name.trim() === '') {
+    return { success: false, error: "친구 이름은 필수입니다." };
+  }
+  if (!groupId || groupId.trim() === '') {
+    return { success: false, error: "그룹 ID가 지정되지 않았습니다." };
+  }
+  if (!currentUserId) {
+    return { success: false, error: "사용자 ID가 필요합니다. 로그인이 필요합니다." };
+  }
+
   try {
-    // 1. 친구 추가
-    if (!groupId || groupId.trim() === '') {
-      throw new Error('그룹이 선택되지 않았습니다.');
+    const callingUser = await dbGetUserById(currentUserId);
+    if (!callingUser) {
+      return { success: false, error: "사용자 정보를 찾을 수 없습니다." };
     }
+
+    const groupDocRef = doc(db, 'friendGroups', groupId);
+    const groupSnap = await getDoc(groupDocRef);
+
+    if (!groupSnap.exists()) {
+      return { success: false, error: "친구를 추가할 그룹을 찾을 수 없습니다." };
+    }
+    const groupData = groupSnap.data() as FriendGroup;
+
+    if (groupData.ownerUserId !== currentUserId && callingUser.role !== 'admin') {
+      return { success: false, error: "이 그룹에 친구를 추가할 권한이 없습니다." };
+    }
+
+    // 1. Add friend document to 'friends' collection
     const newFriend = await dbAddFriend({ name, description, groupId });
-    // 2. 그룹의 memberIds에 친구 id 추가
-    if (groupId) {
-      // 기존 그룹 정보 가져오기
-      // 서버/클라이언트 환경에 따라 db 인스턴스 사용
-      const groupDocRef = doc(db, 'friendGroups', groupId);
-      const groupSnap = await getDoc(groupDocRef);
-      if (groupSnap.exists()) {
-        const groupData = groupSnap.data();
-        const memberIds: string[] = Array.isArray(groupData.memberIds) ? groupData.memberIds : [];
-        if (!memberIds.includes(newFriend.id)) {
-          memberIds.push(newFriend.id);
-          await updateDoc(groupDocRef, { memberIds });
-        }
-      }
-    }
+
+    // 2. Add friend's ID to the group's memberIds array
+    await updateDoc(groupDocRef, {
+      memberIds: firestoreArrayUnion(newFriend.id)
+    });
+
     revalidatePath('/friends');
-    revalidatePath(`/friends/${groupId}`); // 그룹별 친구 목록 경로도 갱신
-    revalidatePath('/meetings/new'); // Friend list might be used here
+    // Consider revalidating specific group page if exists, e.g. /friends/group/${groupId}
+    // Client-side update in FriendGroupListClient will also refresh the list for the selected group.
     return { success: true, friend: newFriend };
   } catch (error) {
     console.error("createFriendAction Error:", error);
-    const errorMessage = error instanceof Error ? error.message : '친구 추가에 실패했습니다.';
+    const errorMessage = error instanceof Error ? error.message : '친구 추가 중 오류가 발생했습니다.';
     return { success: false, error: errorMessage };
   }
 }
