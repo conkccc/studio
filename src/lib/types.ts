@@ -5,7 +5,7 @@ export type User = {
   name?: string | null;
   email?: string | null;
   role: 'admin' | 'user' | 'viewer' | 'none';
-  refFriendGroupIds?: string[];
+  friendGroupIds?: string[]; // Renamed from refFriendGroupIds
   createdAt: Date; // Always store as JS Date in app, convert to/from Timestamp for Firestore
 };
 

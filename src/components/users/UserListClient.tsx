@@ -11,7 +11,7 @@ import { Loader2, Settings2 } from 'lucide-react'; // Added Settings2 for assign
 import { format, isValid } from 'date-fns';
 import { ko } from 'date-fns/locale';
 import { Timestamp } from 'firebase/firestore';
-import { AssignRefGroupsDialog } from './AssignRefGroupsDialog'; // Uncommented and verified path
+import { AssignFriendGroupsDialog } from './AssignFriendGroupsDialog'; // Renamed import
 import type { FriendGroup } from '@/lib/types'; // For allFriendGroups prop
 
 interface UserListClientProps {
@@ -169,7 +169,7 @@ export function UserListClient({ initialUsers, currentAdminId, isAdmin, allFrien
       </div>
 
       {selectedUserForGroups && isAdmin && (
-        <AssignRefGroupsDialog
+        <AssignFriendGroupsDialog // Renamed component
           isOpen={isAssignDialogOpen}
           setIsOpen={setIsAssignDialogOpen}
           targetUser={selectedUserForGroups}

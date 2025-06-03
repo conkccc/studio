@@ -36,7 +36,7 @@ export default function FriendGroupListClient() {
         const processedGroups: DisplayFriendGroup[] = res.groups.map(group => ({
           ...group,
           isOwned: group.ownerUserId === currentUser.id,
-          isReferenced: !!(currentUser.refFriendGroupIds?.includes(group.id)),
+          isReferenced: !!(currentUser.friendGroupIds?.includes(group.id)), // Renamed
         }));
         setGroups(processedGroups);
       } else {

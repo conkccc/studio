@@ -53,7 +53,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
               createdAt: fetchedDBUser.createdAt instanceof Timestamp
                           ? fetchedDBUser.createdAt.toDate()
                           : new Date(fetchedDBUser.createdAt || Date.now()),
-              refFriendGroupIds: fetchedDBUser.refFriendGroupIds || undefined, // Ensure refFriendGroupIds is included
+              friendGroupIds: fetchedDBUser.friendGroupIds || undefined, // Renamed from refFriendGroupIds
             };
             setAppUser(processedAppUser);
             setUserRole(processedAppUser.role);

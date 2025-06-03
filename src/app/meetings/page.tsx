@@ -7,7 +7,7 @@ import { MeetingListClient } from '@/components/meetings/MeetingListClient';
 import { Button } from '@/components/ui/button';
 // PlusCircle can be removed if MeetingListClient handles its own "New Meeting" button
 // import { PlusCircle } from 'lucide-react';
-import { useAuth } from '@/context/AuthContext';
+import { useAuth } from '@/contexts/AuthContext'; // Corrected path
 import type { Friend } from '@/lib/types';
 // Removed useSearchParams, useMemo, getMeetings, getFriendGroupsByUser, Meeting type, FriendGroup type
 // Removed ITEMS_PER_PAGE

@@ -14,11 +14,11 @@ import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox'; // Using Checkbox for multi-select
 import { ScrollArea } from '@/components/ui/scroll-area'; // For scrollable group list
 import type { User, FriendGroup } from '@/lib/types';
-import { assignRefFriendGroupsToUserAction } from '@/lib/actions';
+import { assignFriendGroupsToUserAction } from '@/lib/actions'; // Renamed action
 import { useToast } from '@/hooks/use-toast';
 import { Loader2 } from 'lucide-react';
 
-interface AssignRefGroupsDialogProps {
+interface AssignFriendGroupsDialogProps { // Renamed interface
   isOpen: boolean;
   setIsOpen: (isOpen: boolean) => void;
   targetUser: User | null;
@@ -27,7 +27,7 @@ interface AssignRefGroupsDialogProps {
   onUserUpdated: (updatedUser: User) => void; // Callback to update user list
 }
 
-export function AssignRefGroupsDialog({
+export function AssignFriendGroupsDialog({ // Renamed component
   isOpen,
   setIsOpen,
   targetUser,
@@ -40,8 +40,8 @@ export function AssignRefGroupsDialog({
   const { toast } = useToast();
 
   useEffect(() => {
-    if (targetUser && targetUser.refFriendGroupIds) {
-      setSelectedGroupIds(targetUser.refFriendGroupIds);
+    if (targetUser && targetUser.friendGroupIds) { // Renamed field
+      setSelectedGroupIds(targetUser.friendGroupIds); // Renamed field
     } else {
       setSelectedGroupIds([]);
     }
@@ -64,10 +64,10 @@ export function AssignRefGroupsDialog({
     }
     setIsSubmitting(true);
     try {
-      const result = await assignRefFriendGroupsToUserAction(
+      const result = await assignFriendGroupsToUserAction( // Renamed action
         currentAdminId,
         targetUser.id,
-        selectedGroupIds
+        selectedGroupIds // This variable holds the list of IDs, name is fine
       );
 
       if (result.success && result.user) {

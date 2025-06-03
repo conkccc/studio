@@ -80,11 +80,11 @@ export async function getAllFriendGroupsAction() {
   }
 }
 
-// Admin Action: Assign reference friend groups to a user
-export async function assignRefFriendGroupsToUserAction(
+// Admin Action: Assign friend groups to a user
+export async function assignFriendGroupsToUserAction( // Renamed
   adminUserId: string,
   targetUserId: string,
-  refFriendGroupIds: string[]
+  friendGroupIds: string[] // Renamed
 ) {
   try {
     if (!adminUserId) {
@@ -98,10 +98,10 @@ export async function assignRefFriendGroupsToUserAction(
     if (!targetUserId) {
       return { success: false, error: "대상 사용자 ID가 지정되지 않았습니다." };
     }
-    // Ensure refFriendGroupIds is an array, even if empty, to avoid Firestore errors.
-    const validRefFriendGroupIds = Array.isArray(refFriendGroupIds) ? refFriendGroupIds : [];
+    // Ensure friendGroupIds is an array, even if empty, to avoid Firestore errors.
+    const validFriendGroupIds = Array.isArray(friendGroupIds) ? friendGroupIds : []; // Renamed
 
-    const updatedUser = await dbUpdateUser(targetUserId, { refFriendGroupIds: validRefFriendGroupIds });
+    const updatedUser = await dbUpdateUser(targetUserId, { friendGroupIds: validFriendGroupIds }); // Renamed field in updates
     if (!updatedUser) {
       return { success: false, error: "대상 사용자 정보 업데이트에 실패했습니다. 사용자를 찾을 수 없거나 업데이트 중 오류가 발생했습니다." };
     }
@@ -111,8 +111,8 @@ export async function assignRefFriendGroupsToUserAction(
     return { success: true, user: updatedUser };
 
   } catch (error) {
-    console.error('assignRefFriendGroupsToUserAction Error:', error);
-    const errorMessage = error instanceof Error ? error.message : '참조 친구 그룹 할당 중 오류가 발생했습니다.';
+    console.error('assignFriendGroupsToUserAction Error:', error); // Renamed in log
+    const errorMessage = error instanceof Error ? error.message : '친구 그룹 할당 중 오류가 발생했습니다.'; // Renamed in message
     return { success: false, error: errorMessage };
   }
 }
@@ -893,24 +893,24 @@ export async function getMeetingsForUserAction(params: {
   }
 
   let actualUserIdForFilter: string | undefined = undefined;
-  let actualUserRefGroupIdsForFilter: string[] | undefined = undefined;
+  let actualUserFriendGroupIdsForFilter: string[] | undefined = undefined; // Renamed
 
   if (user.role !== 'admin') {
     actualUserIdForFilter = user.id;
-    actualUserRefGroupIdsForFilter = user.refFriendGroupIds && user.refFriendGroupIds.length > 0 ? user.refFriendGroupIds : undefined;
+    actualUserFriendGroupIdsForFilter = user.friendGroupIds && user.friendGroupIds.length > 0 ? user.friendGroupIds : undefined; // Renamed field
     // Pass undefined if empty to ensure getMeetings logic for OR condition works as intended (no group filter if undefined)
   }
-  // For admin, actualUserIdForFilter and actualUserRefGroupIdsForFilter remain undefined,
+  // For admin, actualUserIdForFilter and actualUserFriendGroupIdsForFilter remain undefined,
   // so dbGetMeetings should fetch all meetings based on its internal logic.
 
   try {
-    // Ensure dbGetMeetings can handle undefined for userId and userRefFriendGroupIds to mean "no filter" for those specific criteria
+    // Ensure dbGetMeetings can handle undefined for userId and userFriendGroupIds to mean "no filter" for those specific criteria
     const result = await dbGetMeetings({
       year,
       page,
       limitParam,
       userId: actualUserIdForFilter,
-      userRefFriendGroupIds: actualUserRefGroupIdsForFilter,
+      userFriendGroupIds: actualUserFriendGroupIdsForFilter, // Renamed
     });
     return { success: true, ...result };
   } catch (error) {
@@ -932,12 +932,12 @@ export async function getFriendGroupsForUserAction(currentUserId: string) {
       return { success: false, error: "사용자 정보를 찾을 수 없습니다." };
     }
 
-    // dbGetFriendGroupsByUser already fetches groups owned by user OR referenced in user.refFriendGroupIds
+    // dbGetFriendGroupsByUser already fetches groups owned by user OR referenced in user.friendGroupIds
     const allAccessibleGroups = await dbGetFriendGroupsByUser(currentUserId);
 
     if (currentUser.role === 'viewer') {
-      // Viewers should only see groups explicitly referenced in their refFriendGroupIds
-      const referencedIds = currentUser.refFriendGroupIds || [];
+      // Viewers should only see groups explicitly referenced in their friendGroupIds
+      const referencedIds = currentUser.friendGroupIds || []; // Renamed
       const filteredGroups = allAccessibleGroups.filter(group => referencedIds.includes(group.id));
       return { success: true, groups: filteredGroups };
     } else {

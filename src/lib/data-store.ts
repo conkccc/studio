@@ -114,12 +114,13 @@ export const addUserOnLogin = async (userData: { id: string; email?: string | nu
   return existingUser;
 };
 
-export const updateUser = async (userId: string, updates: Partial<Omit<User, 'id' | 'createdAt'> & { refFriendGroupIds?: string[] }>): Promise<User | null> => {
+export const updateUser = async (userId: string, updates: Partial<Omit<User, 'id' | 'createdAt'> & { friendGroupIds?: string[] }>): Promise<User | null> => {
   const userDocRef = doc(db, USERS_COLLECTION, userId);
-  // Ensure that if refFriendGroupIds is explicitly passed as undefined, it's handled correctly by Firestore.
+  // Ensure that if friendGroupIds is explicitly passed as undefined, it's handled correctly by Firestore.
   // updateDoc by default ignores undefined fields. If deletion is needed, use deleteField().
   // For now, we'll pass it as is, which means undefined will not change the field,
   // and an empty array will set it to an empty array.
+  // The key in `updates` object should be `friendGroupIds` if that's what we are sending.
   await updateDoc(userDocRef, updates);
   const updatedSnapshot = await getDoc(userDocRef);
   return dataFromSnapshot<User>(updatedSnapshot) || null;
@@ -198,8 +199,8 @@ interface GetMeetingsParams {
   year?: number;
   limitParam?: number;
   page?: number;
-  userId?: string; // Added for filtering by user
-  userRefFriendGroupIds?: string[]; // Added for filtering by user's group memberships
+  userId?: string;
+  userFriendGroupIds?: string[]; // Renamed from userRefFriendGroupIds
 }
 
 interface GetMeetingsResult {
@@ -213,7 +214,7 @@ export const getMeetings = async ({
   limitParam,
   page = 1,
   userId,
-  userRefFriendGroupIds,
+  userFriendGroupIds, // Renamed
 }: GetMeetingsParams = {}): Promise<GetMeetingsResult> => {
   const meetingsCollectionRef = collection(db, MEETINGS_COLLECTION);
 
@@ -248,8 +249,8 @@ export const getMeetings = async ({
   let fetchedMeetings: Meeting[] = [];
   const meetingIds = new Set<string>();
 
-  if (userId || (userRefFriendGroupIds && userRefFriendGroupIds.length > 0)) {
-    // Scenario 1: Filtering by userId and/or userRefFriendGroupIds
+  if (userId || (userFriendGroupIds && userFriendGroupIds.length > 0)) { // Renamed
+    // Scenario 1: Filtering by userId and/or userFriendGroupIds
     if (userId) {
       const userMeetingsQuery = query(meetingsCollectionRef, where('creatorId', '==', userId), ...dateConstraints);
       const userMeetingsSnap = await getDocs(userMeetingsQuery);
@@ -261,8 +262,8 @@ export const getMeetings = async ({
       });
     }
 
-    if (userRefFriendGroupIds && userRefFriendGroupIds.length > 0) {
-      const validGroupIds = userRefFriendGroupIds.filter(id => typeof id === 'string' && id.length > 0);
+    if (userFriendGroupIds && userFriendGroupIds.length > 0) { // Renamed
+      const validGroupIds = userFriendGroupIds.filter(id => typeof id === 'string' && id.length > 0); // Renamed
       if (validGroupIds.length > 0) {
         const MAX_IN_QUERIES = 30;
         const chunks = [];
@@ -318,7 +319,7 @@ export const getMeetings = async ({
     return { meetings: fetchedMeetings, totalCount: totalCountForPagination, availableYears };
   }
 
-  // For Scenario 1 (userId or userRefFriendGroupIds filtered), totalCount is the number of fetched (and merged) meetings before pagination
+  // For Scenario 1 (userId or userFriendGroupIds filtered), totalCount is the number of fetched (and merged) meetings before pagination
   const totalCount = fetchedMeetings.length;
 
   // Apply in-memory pagination for Scenario 1
@@ -627,16 +628,16 @@ export const getFriendGroupsByUser = async (userId: string): Promise<FriendGroup
     }
   });
 
-  // Query 2: Groups referenced in user.refFriendGroupIds
+  // Query 2: Groups referenced in user.friendGroupIds
   // Firestore 'in' queries are limited to 30 comparison values.
-  // If refFriendGroupIds can exceed this, chunking is needed.
-  const refFriendGroupIds = user?.refFriendGroupIds?.filter(id => typeof id === 'string' && id.length > 0);
+  // If friendGroupIds can exceed this, chunking is needed.
+  const friendGroupIds = user?.friendGroupIds?.filter(id => typeof id === 'string' && id.length > 0); // Renamed
 
-  if (refFriendGroupIds && refFriendGroupIds.length > 0) {
+  if (friendGroupIds && friendGroupIds.length > 0) { // Renamed
     const MAX_IN_QUERIES = 30; // Firestore limit for 'in' queries as of last check
     const chunks = [];
-    for (let i = 0; i < refFriendGroupIds.length; i += MAX_IN_QUERIES) {
-      chunks.push(refFriendGroupIds.slice(i, i + MAX_IN_QUERIES));
+    for (let i = 0; i < friendGroupIds.length; i += MAX_IN_QUERIES) { // Renamed
+      chunks.push(friendGroupIds.slice(i, i + MAX_IN_QUERIES)); // Renamed
     }
 
     for (const chunk of chunks) {
