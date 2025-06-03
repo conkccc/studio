@@ -716,7 +716,7 @@ export function CreateMeetingForm({
 
       {/* 그룹 선택 드롭다운: 임시 모임이 아닐 때만 표시, 임시 모임 UI 바로 아래 */}
       {/* Ensure `groups` is not empty and `onGroupChange` (renamed from setSelectedGroupId in parent) is provided */}
-      {!isTemporaryMeeting && groups && groups.length > 0 && typeof onGroupChange === 'function' && (
+      {!watchedIsTemporary && groups && groups.length > 0 && typeof onGroupChange === 'function' && (
         <div className="mt-2 mb-4">
           <label className="block mb-1 font-medium">친구 그룹 선택 <span className="text-destructive">*</span></label>
           <Popover open={groupPopoverOpen} onOpenChange={setGroupPopoverOpen}>
@@ -997,14 +997,14 @@ export function CreateMeetingForm({
               className={cn(
                 "cursor-pointer",
                 (isEditMode && initialData?.isSettled) && "text-muted-foreground cursor-not-allowed",
-                isTemporaryMeeting && "text-muted-foreground cursor-not-allowed"
+                watchedIsTemporary && "text-muted-foreground cursor-not-allowed" // Use watchedIsTemporary
               )}
             >
               모임 회비 사용 {(isEditMode && initialData?.isSettled) && "(정산 완료됨 - 수정 불가)"}
             </Label>
           </div>
 
-          {watchUseReserveFund && !isTemporaryMeeting && (
+          {watchUseReserveFund && !watchedIsTemporary && ( // Use watchedIsTemporary
             <div className="space-y-4 mt-4 pl-2 border-l-2 ml-2">
               <div>
                 <Label
@@ -1078,7 +1078,7 @@ export function CreateMeetingForm({
                                     : currentNonParticipants.filter(id => id !== participant.id);
                                   field.onChange(newNonParticipants);
                                 }}
-                                disabled={isPending || (isEditMode && initialData?.isSettled) || isTemporaryMeeting}
+                                disabled={isPending || (isEditMode && initialData?.isSettled) || watchedIsTemporary} // Use watchedIsTemporary
                               />
                             )}
                           />
@@ -1087,7 +1087,7 @@ export function CreateMeetingForm({
                             className={cn(
                               "font-normal",
                               (isEditMode && initialData?.isSettled) && "text-muted-foreground cursor-not-allowed",
-                              isTemporaryMeeting && "text-muted-foreground cursor-not-allowed"
+                              watchedIsTemporary && "text-muted-foreground cursor-not-allowed" // Use watchedIsTemporary
                             )}
                           >
                             {participant.name}
@@ -1099,7 +1099,7 @@ export function CreateMeetingForm({
                         </div>
                       ))
                   ) : (
-                    <p className={cn("text-sm", (isEditMode && initialData?.isSettled) ? "text-muted-foreground/70" : "text-mutedForeground", isTemporaryMeeting && "text-muted-foreground/70" )}>참여자를 먼저 선택해주세요.</p>
+                    <p className={cn("text-sm", (isEditMode && initialData?.isSettled) ? "text-muted-foreground/70" : "text-mutedForeground", watchedIsTemporary && "text-muted-foreground/70" )}>참여자를 먼저 선택해주세요.</p> // Use watchedIsTemporary
                   )}
                 </div>
                 {form.formState.errors.nonReserveFundParticipants && <p className="text-sm text-destructive mt-1">{form.formState.errors.nonReserveFundParticipants.message}</p>}
@@ -1109,7 +1109,7 @@ export function CreateMeetingForm({
         </div>
       )}
 
-      {isTemporaryMeeting && (
+      {watchedIsTemporary && ( // Use watchedIsTemporary
         <div className="space-y-4 border p-4 rounded-md mt-4">
           <h3 className="text-lg font-medium">임시 모임 정보</h3>
           <div className="space-y-4">
@@ -1226,9 +1226,9 @@ export function CreateMeetingForm({
                 className={cn(
                   "w-full justify-between",
                   (isEditMode && initialData?.isSettled) && "bg-muted/50 cursor-not-allowed",
-                  isTemporaryMeeting && "bg-muted/50 cursor-not-allowed opacity-50"
+                  watchedIsTemporary && "bg-muted/50 cursor-not-allowed opacity-50" // Use watchedIsTemporary
                 )}
-                disabled={isPending || (isEditMode && initialData?.isSettled) || isTemporaryMeeting}
+                disabled={isPending || (isEditMode && initialData?.isSettled) || watchedIsTemporary} // Use watchedIsTemporary
               >
                 {selectedParticipants.length > 0
                   ? selectedParticipants.map(f => f.name + (f.description ? ` (${f.description})` : "")).join(', ')
@@ -1246,7 +1246,7 @@ export function CreateMeetingForm({
                       <CommandItem disabled className="text-muted-foreground">친구 목록 로딩 중...</CommandItem>
                     ) : friends.length === 0 ? (
                       <CommandItem disabled className="text-muted-foreground">
-                        {isTemporaryMeeting ? "임시 모임에는 참여자를 직접 추가합니다." : (currentMeetingGroupId ? "선택된 그룹에 친구가 없습니다." : "먼저 그룹을 선택해주세요.")}
+                        {watchedIsTemporary ? "임시 모임에는 참여자를 직접 추가합니다." : (currentMeetingGroupId ? "선택된 그룹에 친구가 없습니다." : "먼저 그룹을 선택해주세요.")}
                       </CommandItem>
                     ) : (
                       friends.map((friend) => (
@@ -1254,7 +1254,7 @@ export function CreateMeetingForm({
                           key={friend.id}
                           value={friend.name + (friend.description ? ` ${friend.description}` : "")}
                           onSelect={() => {
-                            if (isEditMode && initialData?.isSettled || isTemporaryMeeting) return;
+                            if (isEditMode && initialData?.isSettled || watchedIsTemporary) return; // Use watchedIsTemporary
                             const currentParticipantIds = form.getValues("participantIds") || [];
                             let newParticipantIds = [...currentParticipantIds];
 
@@ -1272,7 +1272,7 @@ export function CreateMeetingForm({
                           }}
                           className={cn(
                             (isEditMode && initialData?.isSettled) && "cursor-not-allowed opacity-50",
-                            isTemporaryMeeting && "cursor-not-allowed opacity-30"
+                            watchedIsTemporary && "cursor-not-allowed opacity-30" // Use watchedIsTemporary
                             )}
                         >
                           <Check
