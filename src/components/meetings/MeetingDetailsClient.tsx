@@ -487,10 +487,10 @@ export function MeetingDetailsClient({
                 <PiggyBank className="h-4 w-4 text-primary" />
                 <span className="font-medium">회비 정보 (임시 모임):</span>
               </div>
-              {meeting.totalFee !== undefined && (
+              {typeof meeting.totalFee === 'number' && (
                 <p className="text-muted-foreground pl-6">총 회비: {meeting.totalFee.toLocaleString()}원</p>
               )}
-              {meeting.feePerPerson !== undefined && (
+              {typeof meeting.feePerPerson === 'number' && (
                 <p className="text-muted-foreground pl-6">1인당 회비: {meeting.feePerPerson.toLocaleString()}원</p>
               )}
               {(meeting.totalFee === undefined && meeting.feePerPerson === undefined) && (
@@ -684,13 +684,13 @@ export function MeetingDetailsClient({
                  <CardDescription>임시 모임은 단순 회비 정보를 제공하며, 개별 정산 기능을 지원하지 않습니다.</CardDescription>
               </CardHeader>
               <CardContent className="space-y-2">
-                 {meeting.totalFee !== undefined && (
+                 {typeof meeting.totalFee === 'number' && (
                     <div className="flex justify-between items-center">
                       <span className="font-medium">총 회비:</span>
                       <span className="text-lg font-semibold">{meeting.totalFee.toLocaleString()}원</span>
                     </div>
                   )}
-                  {meeting.feePerPerson !== undefined && (
+                  {typeof meeting.feePerPerson === 'number' && (
                      <div className="flex justify-between items-center">
                         <span className="font-medium">1인당 회비:</span>
                         <span className="text-lg font-semibold">{meeting.feePerPerson.toLocaleString()}원</span>
