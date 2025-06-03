@@ -87,7 +87,7 @@ export default function UsersPage() {
         <CardContent>
           <UserListClient
             initialUsers={users}
-            currentAdminId={currentUser?.id || ''} // Assuming currentUser.id from useAuth
+            currentAdminId={currentUser?.uid || ''} // Corrected to currentUser.uid for FirebaseUser
             isAdmin={isAdmin}
             allFriendGroups={allFriendGroups}
           />

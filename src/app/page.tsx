@@ -3,76 +3,89 @@
 import Link from 'next/link';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { UsersRound, CalendarCheck, PiggyBank, ArrowRight, LineChart, Briefcase } from 'lucide-react';
+import { UsersRound, CalendarCheck, PiggyBank, ArrowRight, LineChart, Briefcase, Info } from 'lucide-react'; // Added Info
 import { useAuth } from '@/contexts/AuthContext';
 import { useEffect, useState } from 'react';
-import { getReserveFundBalanceByGroup, getMeetings, getExpensesByMeetingId } from '@/lib/data-store';
+import { getReserveFundBalanceByGroup, getExpensesByMeetingId } from '@/lib/data-store'; // Removed getMeetings
+import { getMeetingsForUserAction } from '@/lib/actions'; // Added
 import type { Meeting } from '@/lib/types';
 
+const MAX_RECENT_MEETINGS_DISPLAY = 3;
+
 export default function DashboardPage() {
-  const { currentUser, appUser, isAdmin, userRole, loading: authLoading } = useAuth();
+  const { appUser, isAdmin, userRole, loading: authLoading } = useAuth(); // Using appUser for id
   const [reserveBalance, setReserveBalance] = useState<number | null>(null);
-  const [recentMeetingSummary, setRecentMeetingSummary] = useState<string | null>(null);
-  const [dataLoading, setDataLoading] = useState(true); // Separate loading state for dashboard data
+  // Store an array of recent meetings instead of just one summary string
+  const [recentMeetings, setRecentMeetings] = useState<Meeting[]>([]);
+  const [isLoadingDashboardData, setIsLoadingDashboardData] = useState(true);
 
   useEffect(() => {
     if (authLoading) {
-      setDataLoading(true); // If auth is loading, dashboard data also waits
+      setIsLoadingDashboardData(true);
       return;
     }
+
     const fetchDashboardData = async () => {
-      if (currentUser && (isAdmin || userRole === 'user')) {
-        setDataLoading(true);
-        try {
-          const meetingsPromise = getMeetings({ limitParam: 1 });
-          const recentMeetingsData = await meetingsPromise;
-          let groupReserveBalance: number | null = null;
-          if (recentMeetingsData.meetings.length > 0) {
-            const latestMeeting = recentMeetingsData.meetings[0];
-            // 모임의 groupId로 그룹별 회비 잔액 조회
-            groupReserveBalance = await getReserveFundBalanceByGroup(latestMeeting.groupId);
-            const expenses = await getExpensesByMeetingId(latestMeeting.id);
-            const totalSpent = expenses.reduce((sum, exp) => sum + exp.totalAmount, 0);
-            const perPersonCost = latestMeeting.participantIds.length > 0 
-              ? totalSpent / latestMeeting.participantIds.length 
-              : 0;
-            let summary = `최근 모임 '${latestMeeting.name}'에서 ${latestMeeting.participantIds.length}명 이 총 ${totalSpent.toLocaleString()}원 지출, 1인당 ${perPersonCost.toLocaleString(undefined, {maximumFractionDigits: 0})}원`;
-            if (latestMeeting.isSettled) {
-              summary += " 정산 완료.";
-            } else if (expenses.length > 0) {
-              summary += " 정산 필요.";
-            } else {
-              summary += " (지출 내역 없음).";
-            }
-            setRecentMeetingSummary(summary);
-          } else {
-            setRecentMeetingSummary("최근 모임 내역이 없습니다.");
-          }
-          setReserveBalance(groupReserveBalance);
-        } catch (error) {
-          console.error("Failed to fetch dashboard data:", error);
-          setReserveBalance(0);
-          setRecentMeetingSummary("요약 정보를 가져오는 데 실패했습니다.");
-        } finally {
-          setDataLoading(false);
-        }
-      } else {
+      if (!appUser?.id) { // Check for appUser and its id
+        setIsLoadingDashboardData(false);
+        setRecentMeetings([]);
         setReserveBalance(null);
-        setRecentMeetingSummary(null);
-        setDataLoading(false);
+        return;
+      }
+
+      setIsLoadingDashboardData(true);
+      try {
+        // Fetch recent meetings relevant to the user
+        const meetingsResult = await getMeetingsForUserAction({
+          requestingUserId: appUser.id,
+          page: 1,
+          limitParam: MAX_RECENT_MEETINGS_DISPLAY,
+          // Not filtering by year for dashboard, to get most recent regardless of year
+        });
+
+        if (meetingsResult.success && meetingsResult.meetings && meetingsResult.meetings.length > 0) {
+          setRecentMeetings(meetingsResult.meetings);
+
+          // For simplicity, show reserve balance of the group of the very latest meeting if it exists
+          // This could be made more sophisticated e.g. a dropdown or showing multiple balances
+          const latestMeetingForBalance = meetingsResult.meetings[0];
+          if (latestMeetingForBalance && latestMeetingForBalance.groupId) {
+            const groupReserveBalance = await getReserveFundBalanceByGroup(latestMeetingForBalance.groupId);
+            setReserveBalance(groupReserveBalance);
+          } else {
+            setReserveBalance(null); // No group associated with the latest meeting
+          }
+        } else {
+          setRecentMeetings([]);
+          setReserveBalance(null);
+          if (!meetingsResult.success) {
+            console.error("Failed to fetch recent meetings for dashboard:", meetingsResult.error);
+          }
+        }
+      } catch (error) {
+        console.error("Failed to fetch dashboard data:", error);
+        setRecentMeetings([]);
+        setReserveBalance(null);
+      } finally {
+        setIsLoadingDashboardData(false);
       }
     };
+
     fetchDashboardData();
-  }, [authLoading, currentUser, isAdmin, userRole]);
+  }, [authLoading, appUser]); // appUser in dependency array
 
   const quickLinks = [
-    { href: '/friends', label: '친구 관리', icon: UsersRound, description: '친구 목록을 보고 새 친구를 추가하세요.', adminOnly: true },
-    { href: '/meetings', label: '모임 관리', icon: CalendarCheck, description: '모임을 만들고 지난 모임을 확인하세요.', userOrAdmin: true },
-    { href: '/reserve-fund', label: '회비 현황', icon: PiggyBank, description: '회비 잔액과 사용 내역을 보세요.', adminOnly: true },
-    { href: '/users', label: '사용자 관리', icon: Briefcase, description: '사용자 역할을 관리합니다.', adminOnly: true },
+    // For 'user' role, "친구 관리" should be available if it means managing groups they own/are part of.
+    // Current AppShell logic: Friends, Meetings, Reserve Fund visible to admin, user, viewer.
+    // User Management only for admin.
+    // Let's make quick links consistent or more granular based on appUser role.
+    { href: '/friends', label: '친구 및 그룹 관리', icon: UsersRound, description: '친구 및 그룹 목록을 보고 관리하세요.', roles: ['admin', 'user', 'viewer'] },
+    { href: '/meetings', label: '모임 관리', icon: CalendarCheck, description: '모임을 만들고 지난 모임을 확인하세요.', roles: ['admin', 'user', 'viewer'] },
+    { href: '/reserve-fund', label: '회비 현황', icon: PiggyBank, description: '회비 잔액과 사용 내역을 보세요.', roles: ['admin', 'user', 'viewer'] },
+    { href: '/users', label: '사용자 관리', icon: Briefcase, description: '사용자 역할을 관리합니다.', roles: ['admin'] },
   ];
 
-  if (authLoading || (isAdmin || userRole === 'user') && dataLoading) {
+  if (authLoading || (!appUser && isLoadingDashboardData)) { // Show loading if auth or initial dashboard data is loading
     return (
       <div className="flex justify-center items-center min-h-[calc(100vh-150px)]">
         <p className="text-xl text-muted-foreground">대시보드 로딩 중...</p>
@@ -80,17 +93,23 @@ export default function DashboardPage() {
     );
   }
 
+  // Filter quickLinks based on appUser.role
   const visibleQuickLinks = quickLinks.filter(link => {
-    if (userRole === null) return false; 
-    if (link.adminOnly) return isAdmin;
-    if (link.userOrAdmin) return isAdmin || userRole === 'user';
-    return true;
+    if (!appUser) return false; // Should not happen if authLoading is false and appUser is still null
+    return link.roles.includes(appUser.role);
   });
+
+  const renderMeetingSummary = (meeting: Meeting) => {
+    // This is a placeholder. Actual expense fetching for summary would be async
+    // For now, just display meeting name and date.
+    // A more complete summary would require fetching expenses for each meeting.
+    return `모임 '${meeting.name}' (${new Date(meeting.dateTime).toLocaleDateString()}) ${meeting.isSettled ? '(정산 완료)' : '(정산 필요)'}`;
+  };
 
   return (
     <div className="container mx-auto py-8" style={{ maxWidth: '1000px' }}>
       <header className="mb-12 text-center">
-        <h1 className="text-4xl font-bold tracking-tight text-primary mb-3">N빵친구 {isAdmin ? '(관리자 대시보드)' : userRole === 'user' ? '(사용자 대시보드)' : ''}</h1>
+        <h1 className="text-4xl font-bold tracking-tight text-primary mb-3">N빵친구 {appUser?.role === 'admin' ? '(관리자 대시보드)' : appUser?.role === 'user' ? '(사용자 대시보드)' : appUser?.role === 'viewer' ? '(뷰어 대시보드)' : ''}</h1>
         <p className="text-xl text-muted-foreground">친구들과의 정산을 스마트하게 관리하세요!</p>
       </header>
 
@@ -117,7 +136,8 @@ export default function DashboardPage() {
         </section>
       )}
       
-      {(isAdmin || userRole === 'user') && (
+      {/* Recent Activity Section - visible to admin, user, viewer but content filtered by getMeetingsForUserAction */}
+      {appUser && appUser.role !== 'none' && (
         <section className="mb-12">
           <Card>
             <CardHeader>
@@ -126,24 +146,41 @@ export default function DashboardPage() {
                 최근 활동 요약
               </CardTitle>
             </CardHeader>
-            <CardContent className="space-y-6">
+            <CardContent className="space-y-4">
               <div>
-                <h3 className="font-semibold mb-2 text-lg">지난 모임 정산 현황</h3>
-                <p className="text-sm text-muted-foreground">
-                  {dataLoading ? "요약 로딩 중..." : recentMeetingSummary || "최근 모임 내역이 없습니다."}
-                </p>
+                <h3 className="font-semibold mb-2 text-lg">최근 모임</h3>
+                {isLoadingDashboardData ? (
+                  <p className="text-sm text-muted-foreground">요약 로딩 중...</p>
+                ) : recentMeetings.length > 0 ? (
+                  <ul className="space-y-1 list-disc list-inside">
+                    {recentMeetings.map(meeting => (
+                      <li key={meeting.id} className="text-sm text-muted-foreground">
+                        {renderMeetingSummary(meeting)}
+                        <Link href={`/meetings/${meeting.id}`} className="ml-2 text-xs text-primary hover:underline">
+                          [자세히 보기]
+                        </Link>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="text-sm text-muted-foreground flex items-center">
+                    <Info className="w-4 h-4 mr-2 text-blue-500"/>
+                    최근 모임 내역이 없습니다. 새 모임을 만들어보세요!
+                  </p>
+                )}
               </div>
-              {(
-                <div>
-                  <h3 className="font-semibold mb-2 text-lg">회비 잔액</h3>
-                  <p className="text-3xl font-bold text-primary">
-                    {dataLoading ? "잔액 로딩 중..." : reserveBalance === null ? "잔액 정보 없음" : `₩${reserveBalance.toLocaleString()}`}
+
+              {/* Reserve balance display can remain if relevant, or be conditional on selected group for non-admins */}
+              {/* For simplicity, if user is admin, this could be total balance or a specific group's balance */}
+              {/* If user is not admin, this part might be less relevant or show balance of a default/primary group */}
+              {isAdmin && reserveBalance !== null && (
+                 <div>
+                  <h3 className="font-semibold mb-1 text-lg">특정 그룹 회비 잔액 (예시)</h3>
+                  <p className="text-2xl font-bold text-primary">
+                     {isLoadingDashboardData ? "잔액 로딩 중..." : `₩${reserveBalance.toLocaleString()}`}
                   </p>
-                  <p className="text-sm text-muted-foreground">
-                    {(reserveBalance ?? 0) >= 1_000_000 ? "다음 모임을 위한 충분한 잔액이 남아있습니다." : "다음 모임을 위한 잔액이 부족합니다."}
-                  </p>
-                  <Button asChild variant="secondary" className="mt-4">
-                    <Link href="/reserve-fund">회비 내역 보기</Link>
+                   <Button asChild variant="secondary" size="sm" className="mt-2">
+                    <Link href="/reserve-fund">전체 회비 내역 보기</Link>
                   </Button>
                 </div>
               )}

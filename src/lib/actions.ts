@@ -81,27 +81,35 @@ export async function getAllFriendGroupsAction() {
 }
 
 // Admin Action: Assign friend groups to a user
-export async function assignFriendGroupsToUserAction( // Renamed
-  adminUserId: string,
-  targetUserId: string,
-  friendGroupIds: string[] // Renamed
-) {
+export async function assignFriendGroupsToUserAction(payload: {
+  adminUserId?: string | null;
+  targetUserId?: string | null;
+  friendGroupIds?: string[] | null;
+}) {
+  const { adminUserId, targetUserId, friendGroupIds } = payload;
+
+  if (!adminUserId) {
+    return { success: false, error: "관리자 ID가 필요합니다." };
+  }
+  if (!targetUserId) {
+    return { success: false, error: "대상 사용자 ID가 필요합니다." };
+  }
+  // friendGroupIds can be an empty array [], so check for null or undefined specifically.
+  if (friendGroupIds === null || friendGroupIds === undefined) {
+    return { success: false, error: "할당할 그룹 목록 정보가 필요합니다 (빈 배열일 수 있음)." };
+  }
+
   try {
-    if (!adminUserId) {
-      return { success: false, error: "관리자 인증 정보가 없습니다. 로그인이 필요합니다." };
-    }
     const adminUser = await dbGetUserById(adminUserId);
     if (!adminUser || adminUser.role !== 'admin') {
       return { success: false, error: "권한이 없습니다. 관리자만 사용자에게 친구 그룹을 할당할 수 있습니다." };
     }
 
-    if (!targetUserId) {
-      return { success: false, error: "대상 사용자 ID가 지정되지 않았습니다." };
-    }
-    // Ensure friendGroupIds is an array, even if empty, to avoid Firestore errors.
-    const validFriendGroupIds = Array.isArray(friendGroupIds) ? friendGroupIds : []; // Renamed
+    // Ensure friendGroupIds is an array, even if empty. This check is technically redundant
+    // if the null/undefined check above is comprehensive, but kept for safety.
+    const validFriendGroupIds = Array.isArray(friendGroupIds) ? friendGroupIds : [];
 
-    const updatedUser = await dbUpdateUser(targetUserId, { friendGroupIds: validFriendGroupIds }); // Renamed field in updates
+    const updatedUser = await dbUpdateUser(targetUserId, { friendGroupIds: validFriendGroupIds });
     if (!updatedUser) {
       return { success: false, error: "대상 사용자 정보 업데이트에 실패했습니다. 사용자를 찾을 수 없거나 업데이트 중 오류가 발생했습니다." };
     }

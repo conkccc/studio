@@ -85,11 +85,12 @@ export default function NewMeetingPage() {
     );
   }
   
-  if (!isAdmin) { 
+  // Allow 'admin' or 'user' to access this page
+  if (!(isAdmin || userRole === 'user')) {
     return (
       <div className="container mx-auto py-8 text-center">
         <h1 className="text-2xl font-bold mb-4">접근 권한 없음</h1>
-        <p className="text-muted-foreground">새 모임 만들기는 관리자만 가능합니다.</p>
+        <p className="text-muted-foreground">새 모임 만들기는 관리자 또는 사용자만 가능합니다.</p>
          <Button asChild className="mt-4">
           <Link href="/">대시보드로 돌아가기</Link>
         </Button>

@@ -200,18 +200,26 @@ export function ReserveFundClient() {
     <div className="space-y-6">
       <Card className="shadow-lg">
         <CardHeader>
-          <CardTitle className="flex items-center"><Users className="mr-2 h-6 w-6 text-primary" />그룹 선택</CardTitle>
-           <Select onValueChange={handleGroupSelect} value={selectedGroup?.id || ""}>
-            <SelectTrigger id="group-select" aria-label="그룹 선택">
-              <SelectValue placeholder="회비 정보를 볼 그룹을 선택하세요..." />
-            </SelectTrigger>
-            <SelectContent>
-              {accessibleGroups.map(group => (
-                <SelectItem key={group.id} value={group.id}>{group.name} {group.isOwned ? '(내 그룹)' : ''}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <CardTitle className="flex items-center mb-2"> {/* Added mb-2 for spacing below title */}
+            <Users className="mr-2 h-6 w-6 text-primary" />
+            그룹 선택
+          </CardTitle>
         </CardHeader>
+        <CardContent> {/* Moved Select into CardContent for better layout control */}
+          <div className="flex items-center space-x-2 mb-4"> {/* Container for Label + Select */}
+            <Label htmlFor="group-select-dropdown" className="text-sm font-medium">선택된 그룹:</Label>
+            <Select onValueChange={handleGroupSelect} value={selectedGroup?.id || ""}>
+              <SelectTrigger id="group-select-dropdown" aria-label="그룹 선택" className="w-auto min-w-[250px] max-w-xs">
+                <SelectValue placeholder="회비 정보를 볼 그룹을 선택하세요..." />
+              </SelectTrigger>
+              <SelectContent>
+                {accessibleGroups.map(group => (
+                  <SelectItem key={group.id} value={group.id}>{group.name} {group.isOwned ? '(내 그룹)' : ''}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </CardContent>
       </Card>
 
       {selectedGroup && (
@@ -219,10 +227,10 @@ export function ReserveFundClient() {
           <Card className="shadow-md">
             <CardHeader className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
               <div className="flex-1">
-                <CardTitle className="flex items-center gap-2">
+                <CardTitle className="flex items-center gap-2 mb-1"> {/* Added mb-1 */}
                     <Edit className="h-5 w-5 text-primary"/> {cardTitle} - 잔액 설정
                 </CardTitle>
-                <CardDescription>
+                <CardDescription className="mt-1"> {/* Added mt-1 for spacing if CardTitle had mb-0 */}
                     현재 설정된 회비 잔액은 <strong className="text-primary">{isLoadingFundDetails ? <Loader2 className="h-4 w-4 animate-spin inline-block"/> : (currentBalance !== null ? currentBalance.toLocaleString() + '원' : '정보 없음')}</strong> 입니다.
                     모임에서 회비를 사용하면 이 잔액에서 자동으로 차감됩니다.
                 </CardDescription>
@@ -283,10 +291,12 @@ export function ReserveFundClient() {
 
           <Card className="shadow-md">
             <CardHeader>
-              <CardTitle className="flex items-center gap-2"><History className="h-5 w-5 text-primary"/>{cardTitle} - 변경 내역</CardTitle>
+              <CardTitle className="flex items-center gap-2 mb-2"> {/* Added mb-2 */}
+                <History className="h-5 w-5 text-primary"/>{cardTitle} - 변경 내역
+              </CardTitle>
               <CardDescription>모임에서의 회비 사용 또는 수동 잔액 설정 내역입니다.</CardDescription>
             </CardHeader>
-            <CardContent>
+            <CardContent className="pt-2"> {/* Added pt-2 if CardHeader has padding-bottom already */}
               {isLoadingFundDetails ? (
                 <div className="flex justify-center items-center h-40"><Loader2 className="h-8 w-8 animate-spin text-primary" /> <p className="ml-2">회비 내역 로딩 중...</p></div>
               ) : transactions.length > 0 ? (

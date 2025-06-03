@@ -4,11 +4,12 @@ import {
   createFriendGroupAction,
   // updateFriendGroupAction, // Add if/when edit functionality is implemented
   deleteFriendGroupAction,
-  getFriendGroupsForUserAction
+  getFriendGroupsForUserAction,
+  getFriendsByGroupAction // Added for fetching friends
 } from '@/lib/actions';
-import type { FriendGroup, User } from '@/lib/types';
+import type { FriendGroup, User, Friend } from '@/lib/types'; // Added Friend
 import { useToast } from '@/hooks/use-toast'; // Assuming this path is correct
-import { Loader2, Edit, Trash2, PlusCircle } from 'lucide-react'; // Added icons
+import { Loader2, Edit, Trash2, PlusCircle, ChevronDown, ChevronRight } from 'lucide-react'; // Added icons
 import { Button } from '@/components/ui/button'; // Assuming shadcn Button
 import { Input } from '@/components/ui/input'; // Assuming shadcn Input
 import { useAuth } from '@/contexts/AuthContext'; // Corrected path
@@ -23,9 +24,15 @@ export default function FriendGroupListClient() {
   const { currentUser, appUser, loading: authLoading } = useAuth(); // Added appUser and authLoading
   const [groups, setGroups] = useState<DisplayFriendGroup[]>([]);
   const [newGroupName, setNewGroupName] = useState('');
-  const [isLoading, setIsLoading] = useState(true); // For initial load
+  const [isLoading, setIsLoading] = useState(true); // For initial group list load
   const [isSubmitting, setIsSubmitting] = useState(false); // For form submissions
   const { toast } = useToast();
+
+  // State for selected group and its friends
+  const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
+  const [friendsInSelectedGroup, setFriendsInSelectedGroup] = useState<Friend[]>([]);
+  const [isLoadingFriends, setIsLoadingFriends] = useState(false);
+
 
   const fetchGroups = useCallback(async () => {
     if (authLoading || !currentUser?.uid || !appUser) { // Updated guard
@@ -104,7 +111,44 @@ export default function FriendGroupListClient() {
   //   console.log("Edit group:", group);
   // };
 
-  if (isLoading) {
+  const handleSelectGroup = (groupId: string) => {
+    if (selectedGroupId === groupId) {
+      setSelectedGroupId(null); // Toggle off if same group is clicked
+      setFriendsInSelectedGroup([]);
+    } else {
+      setSelectedGroupId(groupId);
+    }
+  };
+
+  useEffect(() => {
+    const fetchFriendsForGroup = async () => {
+      if (!selectedGroupId) {
+        setFriendsInSelectedGroup([]);
+        return;
+      }
+      setIsLoadingFriends(true);
+      try {
+        const response = await getFriendsByGroupAction(selectedGroupId);
+        if (response.success && response.friends) {
+          setFriendsInSelectedGroup(response.friends);
+        } else {
+          setFriendsInSelectedGroup([]);
+          toast({ title: "오류", description: response.error || "선택된 그룹의 친구 목록을 가져오지 못했습니다.", variant: "destructive" });
+        }
+      } catch (error) {
+        setFriendsInSelectedGroup([]);
+        toast({ title: "오류", description: "친구 목록 조회 중 예외가 발생했습니다.", variant: "destructive" });
+        console.error("Error fetching friends by group:", error);
+      } finally {
+        setIsLoadingFriends(false);
+      }
+    };
+
+    fetchFriendsForGroup();
+  }, [selectedGroupId, toast]);
+
+
+  if (isLoading) { // Initial loading for groups
     return <div className="flex justify-center items-center h-32"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>;
   }
 
@@ -144,19 +188,33 @@ export default function FriendGroupListClient() {
           <h2 className="text-xl font-semibold mb-2">내가 만든 그룹</h2>
           <ul className="space-y-2">
             {ownedGroups.map(group => (
-              <li key={group.id} className="flex items-center gap-2 bg-card p-3 rounded-md shadow-sm">
-                <span className="flex-1 font-medium">{group.name}</span>
-                {/* Use appUser for role check */}
-                { appUser && (appUser.role === 'user' || appUser.role === 'admin') && (
-                  <>
-                    {/* <Button variant="outline" size="sm" onClick={() => handleEditGroup(group)} disabled={isSubmitting}>
-                      <Edit className="h-4 w-4 mr-1" /> 수정
-                    </Button> */}
-                    <Button variant="destructive" size="sm" onClick={() => handleDeleteGroup(group.id)} disabled={isSubmitting}>
-                      {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4 mr-1" />}
-                       삭제
+              <li key={group.id} className="bg-card p-3 rounded-md shadow-sm">
+                <div className="flex items-center justify-between">
+                  <button
+                    onClick={() => handleSelectGroup(group.id)}
+                    className="flex-1 text-left font-medium hover:text-primary transition-colors flex items-center"
+                  >
+                    {selectedGroupId === group.id ? <ChevronDown className="h-4 w-4 mr-1" /> : <ChevronRight className="h-4 w-4 mr-1" />}
+                    {group.name}
+                  </button>
+                  { appUser && (appUser.role === 'user' || appUser.role === 'admin') && (
+                    <Button variant="destructive" size="sm" onClick={(e) => { e.stopPropagation(); handleDeleteGroup(group.id);}} disabled={isSubmitting}>
+                      {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
                     </Button>
-                  </>
+                  )}
+                </div>
+                {selectedGroupId === group.id && (
+                  <div className="mt-2 pl-4 border-l-2 border-muted">
+                    {isLoadingFriends && <div className="flex items-center text-sm text-muted-foreground py-2"><Loader2 className="h-4 w-4 animate-spin mr-2"/>친구 목록 로딩 중...</div>}
+                    {!isLoadingFriends && friendsInSelectedGroup.length === 0 && <p className="text-sm text-muted-foreground py-2">이 그룹에는 친구가 없습니다.</p>}
+                    {!isLoadingFriends && friendsInSelectedGroup.length > 0 && (
+                      <ul className="space-y-1 pt-2">
+                        {friendsInSelectedGroup.map(friend => (
+                          <li key={friend.id} className="text-sm p-1 hover:bg-muted rounded">{friend.name}</li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
                 )}
               </li>
             ))}
@@ -169,10 +227,30 @@ export default function FriendGroupListClient() {
           <h2 className="text-xl font-semibold mb-2">공유된 그룹</h2>
           <ul className="space-y-2">
             {referencedGroups.map(group => (
-              <li key={group.id} className="flex items-center gap-2 bg-card p-3 rounded-md shadow-sm">
-                <span className="flex-1 font-medium">{group.name}</span>
-                 <span className="text-xs text-muted-foreground pr-2">(읽기 전용)</span>
-                {/* No edit/delete for referenced groups unless they are also owned, handled by ownedGroups section */}
+              <li key={group.id} className="bg-card p-3 rounded-md shadow-sm">
+                <div className="flex items-center justify-between">
+                   <button
+                    onClick={() => handleSelectGroup(group.id)}
+                    className="flex-1 text-left font-medium hover:text-primary transition-colors flex items-center"
+                  >
+                    {selectedGroupId === group.id ? <ChevronDown className="h-4 w-4 mr-1" /> : <ChevronRight className="h-4 w-4 mr-1" />}
+                    {group.name}
+                  </button>
+                  <span className="text-xs text-muted-foreground pr-2">(읽기 전용)</span>
+                </div>
+                {selectedGroupId === group.id && (
+                  <div className="mt-2 pl-4 border-l-2 border-muted">
+                    {isLoadingFriends && <div className="flex items-center text-sm text-muted-foreground py-2"><Loader2 className="h-4 w-4 animate-spin mr-2"/>친구 목록 로딩 중...</div>}
+                    {!isLoadingFriends && friendsInSelectedGroup.length === 0 && <p className="text-sm text-muted-foreground py-2">이 그룹에는 친구가 없습니다.</p>}
+                    {!isLoadingFriends && friendsInSelectedGroup.length > 0 && (
+                       <ul className="space-y-1 pt-2">
+                        {friendsInSelectedGroup.map(friend => (
+                          <li key={friend.id} className="text-sm p-1 hover:bg-muted rounded">{friend.name}</li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                )}
               </li>
             ))}
           </ul>

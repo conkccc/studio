@@ -34,7 +34,7 @@ export function AssignFriendGroupsDialog({ // Renamed component
   allFriendGroups,
   currentAdminId,
   onUserUpdated,
-}: AssignRefGroupsDialogProps) {
+}: AssignFriendGroupsDialogProps) { // Corrected interface name in function signature
   const [selectedGroupIds, setSelectedGroupIds] = useState<string[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const { toast } = useToast();
@@ -64,11 +64,11 @@ export function AssignFriendGroupsDialog({ // Renamed component
     }
     setIsSubmitting(true);
     try {
-      const result = await assignFriendGroupsToUserAction( // Renamed action
-        currentAdminId,
-        targetUser.id,
-        selectedGroupIds // This variable holds the list of IDs, name is fine
-      );
+      const result = await assignFriendGroupsToUserAction({ // Call with a single object
+        adminUserId: currentAdminId,
+        targetUserId: targetUser.id,
+        friendGroupIds: selectedGroupIds,
+      });
 
       if (result.success && result.user) {
         toast({ title: '성공', description: `${targetUser.name || targetUser.email}님의 참조 그룹이 업데이트되었습니다.` });
