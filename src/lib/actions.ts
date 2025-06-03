@@ -111,7 +111,7 @@ export async function createMeetingAction(
       dateTime: payload.dateTime,
       endTime: payload.endTime, // Firestore handles Date or null for Timestamps
       locationName: payload.locationName || '', // Store empty string if undefined
-      locationCoordinates: payload.locationCoordinates || undefined, // Store undefined if not present
+      locationCoordinates: payload.locationCoordinates || null, // Store null if undefined
       creatorId: currentUserId,
       groupId: payload.groupId || '',
       memo: payload.memo || undefined,
@@ -121,9 +121,9 @@ export async function createMeetingAction(
       useReserveFund: false,
       partialReserveFundAmount: undefined,
       nonReserveFundParticipants: [],
-      temporaryParticipants: Array.isArray(payload.temporaryParticipants) ? payload.temporaryParticipants : undefined,
-      totalFee: typeof payload.totalFee === 'number' ? payload.totalFee : undefined,
-      feePerPerson: typeof payload.feePerPerson === 'number' ? payload.feePerPerson : undefined,
+      temporaryParticipants: undefined,
+      totalFee: undefined,
+      feePerPerson: undefined,
       isShareEnabled: false, // Default for new meeting
       shareToken: null, // Default for new meeting
       shareExpiryDate: null, // Default for new meeting
@@ -134,19 +134,19 @@ export async function createMeetingAction(
       // totalFee 및 feePerPerson 처리 수정 for create
       if (payload.totalFee !== undefined && typeof payload.totalFee === 'number' && !isNaN(payload.totalFee)) {
         meetingDataToSave.totalFee = payload.totalFee;
-        meetingDataToSave.feePerPerson = undefined; // totalFee가 있으면 feePerPerson은 undefined
+        meetingDataToSave.feePerPerson = null; // totalFee가 있으면 feePerPerson은 null
       } else if (payload.feePerPerson !== undefined && typeof payload.feePerPerson === 'number' && !isNaN(payload.feePerPerson)) {
         meetingDataToSave.feePerPerson = payload.feePerPerson;
-        meetingDataToSave.totalFee = undefined; // feePerPerson이 있으면 totalFee는 undefined
+        meetingDataToSave.totalFee = null; // feePerPerson이 있으면 totalFee는 null
       } else {
-        // 둘 다 입력 안 했거나 유효하지 않으면 둘 다 undefined로 설정
-        meetingDataToSave.totalFee = undefined;
-        meetingDataToSave.feePerPerson = undefined;
+        // 둘 다 입력 안 했거나 유효하지 않으면 둘 다 null로 설정 (undefined 방지)
+        meetingDataToSave.totalFee = null;
+        meetingDataToSave.feePerPerson = null;
       }
       // Ensure regular meeting fields are not set or are default
       meetingDataToSave.participantIds = [];
       meetingDataToSave.useReserveFund = false;
-      meetingDataToSave.partialReserveFundAmount = undefined; // Explicitly undefined for temporary meetings
+      meetingDataToSave.partialReserveFundAmount = null; // Explicitly null for temporary meetings
       meetingDataToSave.nonReserveFundParticipants = [];
     } else {
       // Regular meeting
@@ -160,14 +160,14 @@ export async function createMeetingAction(
           meetingDataToSave.partialReserveFundAmount = 0; // Default to 0 if useReserveFund is true but amount is invalid/undefined
         }
       } else {
-        meetingDataToSave.partialReserveFundAmount = undefined; // Set to undefined if useReserveFund is false
+        meetingDataToSave.partialReserveFundAmount = null; // Set to null if useReserveFund is false
       }
 
       meetingDataToSave.nonReserveFundParticipants = payload.nonReserveFundParticipants || [];
-      // Ensure temporary meeting fields are set to undefined for regular meetings
-      meetingDataToSave.temporaryParticipants = undefined;
-      meetingDataToSave.totalFee = undefined;
-      meetingDataToSave.feePerPerson = undefined;
+      // Ensure temporary meeting fields are set to null for regular meetings
+      meetingDataToSave.temporaryParticipants = null;
+      meetingDataToSave.totalFee = null;
+      meetingDataToSave.feePerPerson = null;
     }
 
     const newMeeting = await dbAddMeeting(meetingDataToSave);
@@ -184,7 +184,7 @@ export async function createMeetingAction(
 
 export async function updateMeetingAction(
   id: string,
-  payload: Partial<Omit<Meeting, 'id' | 'createdAt'>>, 
+  payload: Partial<Omit<Meeting, 'id' | 'createdAt'>>, // Changed 'updates' to 'payload' for clarity
   currentUserId?: string | null
 ) {
   if (!currentUserId) {
@@ -205,7 +205,7 @@ export async function updateMeetingAction(
     }
 
     // If reserve fund settings change and meeting was settled, unsettle and revert deduction
-    const reserveFundSettingsChanged = payload.useReserveFund !== undefined || payload.partialReserveFundAmount !== undefined || payload.nonReserveFundParticipants !== undefined;
+    const reserveFundSettingsChanged = updates.useReserveFund !== undefined || updates.partialReserveFundAmount !== undefined || updates.nonReserveFundParticipants !== undefined;
     if (meetingToUpdate.isSettled && reserveFundSettingsChanged) {
       await dbRevertMeetingDeduction(id);
       (payload as any).isSettled = false; // Unset isSettled if fund settings change
@@ -217,6 +217,36 @@ export async function updateMeetingAction(
     // The form logic would need to be more complex to allow switching meeting types.
     const meetingDataToUpdate: Partial<Omit<Meeting, 'id' | 'createdAt'>> = { ...payload };
 
+    // Handle share settings if isShareEnabled is in payload
+    if (payload.hasOwnProperty('isShareEnabled')) {
+      if (payload.isShareEnabled === false) {
+        meetingDataToUpdate.shareToken = null;
+        meetingDataToUpdate.shareExpiryDate = null;
+      } else if (payload.isShareEnabled === true) {
+        // If enabling sharing here, but no token/expiry provided in payload,
+        // rely on existing values or expect toggleMeetingShareAction to be used for proper setup.
+        // For safety, ensure they are not accidentally nulled if they had values from ...payload spread
+        // and payload.isShareEnabled was true but payload.shareToken/ExpiryDate were undefined.
+        if (payload.shareToken === undefined && meetingToUpdate.shareToken) {
+          meetingDataToUpdate.shareToken = meetingToUpdate.shareToken;
+        } else if (payload.shareToken === undefined) {
+           // This case implies enabling sharing without providing a token.
+           // This should ideally be handled by toggleMeetingShareAction to generate a token.
+           // For now, if it's enabled here without a token, we'll set to null,
+           // assuming toggleMeetingShareAction will be used later.
+           // Or, we prevent isShareEnabled:true if no token.
+           // Let's stick to the prompt: if UI for shareExpiryDate is not present, it's not set here.
+           // If isShareEnabled is true, and token/expiry are not in payload, they are left as is from ...payload spread.
+        }
+        if (payload.shareExpiryDate === undefined && meetingToUpdate.shareExpiryDate) {
+          meetingDataToUpdate.shareExpiryDate = meetingToUpdate.shareExpiryDate;
+        }
+        // No explicit setting of shareExpiryDate to a default here if enabling,
+        // as that's not the primary role of updateMeetingAction unless specific UI for expiry exists.
+      }
+    }
+
+
     // Handle location fields for Firestore compatibility
     if (meetingDataToUpdate.hasOwnProperty('locationName')) {
       meetingDataToUpdate.locationName = meetingDataToUpdate.locationName || '';
@@ -224,11 +254,11 @@ export async function updateMeetingAction(
     // If locationName is being set (even to empty) and locationCoordinates is not explicitly provided in payload,
     // or if locationName is cleared, locationCoordinates should be nulled out.
     if (meetingDataToUpdate.hasOwnProperty('locationCoordinates')) {
-      meetingDataToUpdate.locationCoordinates = meetingDataToUpdate.locationCoordinates || undefined;
+      meetingDataToUpdate.locationCoordinates = meetingDataToUpdate.locationCoordinates || null;
     } else if (meetingDataToUpdate.hasOwnProperty('locationName')) {
       // If locationName was changed/set, and coordinates are not in payload, set them to null
       // to ensure consistency, e.g. if a user clears a location search then types a name manually.
-      meetingDataToUpdate.locationCoordinates = undefined;
+      meetingDataToUpdate.locationCoordinates = null;
     }
 
 
@@ -244,33 +274,35 @@ export async function updateMeetingAction(
       if (payload.hasOwnProperty('totalFee')) {
         if (payload.totalFee !== undefined && typeof payload.totalFee === 'number' && !isNaN(payload.totalFee)) {
           meetingDataToUpdate.totalFee = payload.totalFee;
-          meetingDataToUpdate.feePerPerson = undefined;
+          meetingDataToUpdate.feePerPerson = null;
           feeTypeSetInPayload = true;
-        } else {
-          meetingDataToUpdate.totalFee = undefined;
+        } else { // Explicitly set to null if undefined or null in payload
+          meetingDataToUpdate.totalFee = null;
         }
       }
 
       if (payload.hasOwnProperty('feePerPerson')) {
         if (payload.feePerPerson !== undefined && typeof payload.feePerPerson === 'number' && !isNaN(payload.feePerPerson)) {
           meetingDataToUpdate.feePerPerson = payload.feePerPerson;
-          meetingDataToUpdate.totalFee = undefined;
+          // If totalFee was also in payload and valid, feePerPerson takes precedence or both are set (totalFee will be nulled by this path)
+          // If totalFee was not in payload or was invalid, this will correctly set feePerPerson and nullify totalFee.
+          meetingDataToUpdate.totalFee = null;
           feeTypeSetInPayload = true;
-        } else {
-          meetingDataToUpdate.feePerPerson = undefined;
+        } else { // Explicitly set to null if undefined or null in payload
+          meetingDataToUpdate.feePerPerson = null;
         }
       }
-      // If neither was in payload, existing values are kept unless one of them was already undefined and the other had a value.
-      // This logic ensures that if one is actively set, the other is undefined.
-      // If one is cleared (e.g. payload.totalFee = undefined) and the other is not in payload, the other remains.
-      // If both are cleared in payload, both become undefined.
+      // If neither was in payload, existing values are kept unless one of them was already null and the other had a value.
+      // This logic ensures that if one is actively set, the other is nulled.
+      // If one is cleared (e.g. payload.totalFee = null) and the other is not in payload, the other remains.
+      // If both are cleared in payload, both become null.
 
     } else { // If existing meeting is a regular meeting
       // Only update fields relevant to regular meetings
       delete meetingDataToUpdate.temporaryParticipants;
-      // Ensure temporary fee fields are undefined if they are somehow in payload for a regular meeting
-      if (payload.hasOwnProperty('totalFee')) meetingDataToUpdate.totalFee = undefined;
-      if (payload.hasOwnProperty('feePerPerson')) meetingDataToUpdate.feePerPerson = undefined;
+      // Ensure temporary fee fields are nulled if they are somehow in payload for a regular meeting
+      if (payload.hasOwnProperty('totalFee')) meetingDataToUpdate.totalFee = null;
+      if (payload.hasOwnProperty('feePerPerson')) meetingDataToUpdate.feePerPerson = null;
 
       // Handle useReserveFund and partialReserveFundAmount for regular meetings
       const willUseReserveFund = payload.hasOwnProperty('useReserveFund')
@@ -290,23 +322,34 @@ export async function updateMeetingAction(
             meetingDataToUpdate.partialReserveFundAmount = 0;
           }
         } else if (meetingDataToUpdate.useReserveFund && (meetingToUpdate.partialReserveFundAmount === undefined || typeof meetingToUpdate.partialReserveFundAmount !== 'number')) {
-           if(payload.hasOwnProperty('useReserveFund') && !!payload.useReserveFund) {
+          // useReserveFund is true (or becoming true via payload), but no amount in payload, and existing amount is not a valid number
+           if(payload.hasOwnProperty('useReserveFund') && !!payload.useReserveFund) { // only default to 0 if useReserveFund was explicitly set to true
             meetingDataToUpdate.partialReserveFundAmount = 0;
            } else if (!payload.hasOwnProperty('useReserveFund') && meetingToUpdate.useReserveFund && (meetingToUpdate.partialReserveFundAmount === null || typeof meetingToUpdate.partialReserveFundAmount !== 'number')) {
+             // If useReserveFund was already true, and no amount in payload, and existing amount is null/invalid, set to 0
              meetingDataToUpdate.partialReserveFundAmount = 0;
            }
+           // If useReserveFund was already true, and payload doesn't mention partialReserveFundAmount,
+           // existing valid partialReserveFundAmount (already spread from ...payload) will be kept if it was part of the payload.
+           // If payload.partialReserveFundAmount was undefined, it's now 0.
         }
+         // If payload has no 'partialReserveFundAmount' and existing 'useReserveFund' is true,
+         // meetingDataToUpdate.partialReserveFundAmount would have existing value from '...payload' spread.
+         // Ensure it's not undefined if useReserveFund is true.
          if (meetingDataToUpdate.useReserveFund && meetingDataToUpdate.partialReserveFundAmount === undefined) {
            meetingDataToUpdate.partialReserveFundAmount = 0;
          }
 
       } else {
-        meetingDataToUpdate.partialReserveFundAmount = undefined;
+        // useReserveFund is false (either from payload or existing)
+        meetingDataToUpdate.partialReserveFundAmount = null;
       }
 
+      // If nonReserveFundParticipants is in payload and useReserveFund is false, it should be empty or null
       if (!willUseReserveFund && payload.hasOwnProperty('nonReserveFundParticipants')) {
         meetingDataToUpdate.nonReserveFundParticipants = [];
       } else if (!willUseReserveFund && !payload.hasOwnProperty('nonReserveFundParticipants')) {
+        // If useReserveFund becomes false, and nonReserveFundParticipants was not in payload, ensure it's cleared
         if (meetingToUpdate.nonReserveFundParticipants && meetingToUpdate.nonReserveFundParticipants.length > 0) {
             meetingDataToUpdate.nonReserveFundParticipants = [];
         }

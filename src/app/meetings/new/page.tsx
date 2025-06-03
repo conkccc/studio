@@ -107,9 +107,26 @@ export default function NewMeetingPage() {
           <CardDescription>모임의 세부 정보를 입력하고 친구들을 초대하세요.</CardDescription>
         </CardHeader>
         <CardContent>
-          {/* 그룹 선택 드롭다운 - 임시 모임이 아닐 때만 표시 */}
+          {/*
+            CreateMeetingForm은 항상 렌더링되며, 이제 그룹 선택 UI보다 먼저 배치됩니다.
+            - 일반 모임이고 그룹 미선택 시: friends는 빈 배열, participantIds 필수는 스키마에서 처리.
+            - 임시 모임 시: friends는 빈 배열, groupId는 undefined.
+          */}
+          <CreateMeetingForm
+            friends={isTemporaryMeeting
+              ? []
+              : (selectedGroupId ? friends.filter(f => f.groupId === selectedGroupId) : [])
+            }
+            currentUserId={currentUserId}
+            groupId={selectedGroupId || undefined} // Pass undefined if null
+            // groups={groups} // Pass groups if CreateMeetingForm needs it (e.g. for a dropdown within it)
+            onTemporaryChange={handleTemporaryChange}
+            // initialData and isEditMode are not used for new page, but keeping for consistency if this was a shared component path
+          />
+
+          {/* 그룹 선택 드롭다운 - 임시 모임이 아닐 때만 표시되며, CreateMeetingForm 다음에 위치 */}
           {!isTemporaryMeeting && (
-            <div className="mb-4">
+            <div className="mt-6 mb-4"> {/* 상단 여백 추가 */}
               <label className="block mb-1 font-medium">친구 그룹 선택 <span className="text-destructive">*</span></label>
               <Popover open={!!groupPopoverOpen} onOpenChange={setGroupPopoverOpen}>
                 <PopoverTrigger asChild>
@@ -153,23 +170,6 @@ export default function NewMeetingPage() {
               </Popover>
             </div>
           )}
-
-          {/*
-            CreateMeetingForm은 항상 렌더링.
-            - 일반 모임이고 그룹 미선택 시: friends는 빈 배열, participantIds 필수는 스키마에서 처리.
-            - 임시 모임 시: friends는 빈 배열, groupId는 undefined.
-          */}
-          <CreateMeetingForm
-            friends={isTemporaryMeeting
-              ? []
-              : (selectedGroupId ? friends.filter(f => f.groupId === selectedGroupId) : [])
-            }
-            currentUserId={currentUserId}
-            groupId={selectedGroupId || undefined} // Pass undefined if null
-            // groups={groups} // Pass groups if CreateMeetingForm needs it (e.g. for a dropdown within it)
-            onTemporaryChange={handleTemporaryChange}
-            // initialData and isEditMode are not used for new page, but keeping for consistency if this was a shared component path
-          />
         </CardContent>
       </Card>
     </div>

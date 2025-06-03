@@ -353,6 +353,34 @@ export function MeetingDetailsClient({
               <CardDescription className="text-base mt-1">
                 만든이: {creatorName}
               </CardDescription>
+              {/* Share Expiry Date Display Logic */}
+              {(() => {
+                if (!meeting || !meeting.isShareEnabled) {
+                  return null;
+                }
+
+                let expiryDate: Date | null = null;
+                if (meeting.shareExpiryDate) {
+                  if (typeof meeting.shareExpiryDate === 'string') {
+                    expiryDate = new Date(meeting.shareExpiryDate);
+                  } else if ((meeting.shareExpiryDate as any)?.toDate && typeof (meeting.shareExpiryDate as any).toDate === 'function') {
+                    expiryDate = (meeting.shareExpiryDate as any).toDate();
+                  } else if (meeting.shareExpiryDate instanceof Date) {
+                    expiryDate = meeting.shareExpiryDate;
+                  }
+                }
+
+                if (expiryDate && !isNaN(expiryDate.getTime())) {
+                  const now = new Date();
+                  if (expiryDate < now) {
+                    return <p className="text-sm text-red-500 mt-2">공유가 만료되었습니다.</p>;
+                  } else {
+                    return <p className="text-sm text-gray-600 mt-2">공유 마감: {format(expiryDate, 'yyyy년 MM월 dd일 HH:mm', { locale: ko })}</p>;
+                  }
+                } else {
+                  return null; // No valid expiry date to display
+                }
+              })()}
             </div>
             {canManageMeetingActions && !isReadOnlyUser && (
               <div className="flex space-x-2 shrink-0">
@@ -487,10 +515,10 @@ export function MeetingDetailsClient({
                 <PiggyBank className="h-4 w-4 text-primary" />
                 <span className="font-medium">회비 정보 (임시 모임):</span>
               </div>
-              {typeof meeting.totalFee === 'number' && (
+              {meeting.totalFee !== undefined && (
                 <p className="text-muted-foreground pl-6">총 회비: {meeting.totalFee.toLocaleString()}원</p>
               )}
-              {typeof meeting.feePerPerson === 'number' && (
+              {meeting.feePerPerson !== undefined && (
                 <p className="text-muted-foreground pl-6">1인당 회비: {meeting.feePerPerson.toLocaleString()}원</p>
               )}
               {(meeting.totalFee === undefined && meeting.feePerPerson === undefined) && (
@@ -684,13 +712,13 @@ export function MeetingDetailsClient({
                  <CardDescription>임시 모임은 단순 회비 정보를 제공하며, 개별 정산 기능을 지원하지 않습니다.</CardDescription>
               </CardHeader>
               <CardContent className="space-y-2">
-                 {typeof meeting.totalFee === 'number' && (
+                 {meeting.totalFee !== undefined && (
                     <div className="flex justify-between items-center">
                       <span className="font-medium">총 회비:</span>
                       <span className="text-lg font-semibold">{meeting.totalFee.toLocaleString()}원</span>
                     </div>
                   )}
-                  {typeof meeting.feePerPerson === 'number' && (
+                  {meeting.feePerPerson !== undefined && (
                      <div className="flex justify-between items-center">
                         <span className="font-medium">1인당 회비:</span>
                         <span className="text-lg font-semibold">{meeting.feePerPerson.toLocaleString()}원</span>
