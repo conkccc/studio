@@ -1,5 +1,6 @@
 'use client';
 
+import React, { useState, useMemo } from 'react'; // Added useState, useMemo
 import type { Meeting, Friend } from '@/lib/types';
 import { MeetingCard } from './MeetingCard';
 import { useRouter, usePathname, useSearchParams } from 'next/navigation';
@@ -40,6 +41,7 @@ export function MeetingListClient({
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
+  const [filterType, setFilterType] = useState<'all' | 'regular' | 'temporary'>('all');
 
   const handleYearChange = (year: string) => {
     const current = new URLSearchParams(Array.from(searchParams.entries()));
@@ -62,6 +64,21 @@ export function MeetingListClient({
   };
   
   const currentDisplayYear = selectedYear ? selectedYear.toString() : "all";
+
+  const filteredMeetings = useMemo(() => {
+    let meetingsToFilter = initialMeetings;
+    if (selectedGroupId) {
+      meetingsToFilter = meetingsToFilter.filter(meeting => meeting.groupId === selectedGroupId);
+    }
+
+    if (filterType === 'regular') {
+      return meetingsToFilter.filter(meeting => !meeting.isTemporary);
+    }
+    if (filterType === 'temporary') {
+      return meetingsToFilter.filter(meeting => meeting.isTemporary);
+    }
+    return meetingsToFilter; // 'all' or default
+  }, [initialMeetings, filterType, selectedGroupId]);
 
   return (
     <Card>
@@ -100,14 +117,34 @@ export function MeetingListClient({
         </div>
       </CardHeader>
       <CardContent>
-        {initialMeetings.filter(m => !selectedGroupId || m.groupId === selectedGroupId).length > 0 ? (
+        <div className="flex space-x-2 mb-4">
+          <Button
+            variant={filterType === 'all' ? 'default' : 'outline'}
+            onClick={() => setFilterType('all')}
+          >
+            전체
+          </Button>
+          <Button
+            variant={filterType === 'regular' ? 'default' : 'outline'}
+            onClick={() => setFilterType('regular')}
+          >
+            일반 모임
+          </Button>
+          <Button
+            variant={filterType === 'temporary' ? 'default' : 'outline'}
+            onClick={() => setFilterType('temporary')}
+          >
+            임시 모임
+          </Button>
+        </div>
+        {filteredMeetings.length > 0 ? (
           <>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {initialMeetings.filter(m => !selectedGroupId || m.groupId === selectedGroupId).map((meeting) => (
+              {filteredMeetings.map((meeting) => (
                 <MeetingCard key={meeting.id} meeting={meeting} allFriends={allFriends} />
               ))}
             </div>
-            {totalPages > 1 && (
+            {totalPages > 1 && ( // Pagination should ideally also consider the filtered list length if done client-side, or be handled by server if filtering affects total pages.
               <div className="flex items-center justify-center space-x-2 pt-8">
                 <Button
                   variant="outline"

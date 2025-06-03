@@ -61,6 +61,10 @@ export type Meeting = {
   shareExpiryDate?: Date | null;
   memo?: string;
   groupId: string; // 소속 친구 그룹
+  isTemporary?: boolean;
+  temporaryParticipants?: { name: string }[];
+  totalFee?: number;
+  feePerPerson?: number;
 };
 
 export type ReserveFundTransaction = {

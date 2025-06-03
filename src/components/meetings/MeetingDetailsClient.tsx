@@ -451,14 +451,53 @@ export function MeetingDetailsClient({
               </div>
             </div>
           </div>
-           <div className="flex items-start gap-2">
+          {/* Participant Info Display */}
+          <div className="flex items-start gap-2">
             <UsersIcon className="h-5 w-5 mt-0.5 text-primary flex-shrink-0" />
             <div>
-                <span className="font-medium">참여자 ({participants.length}명):</span>
-                <p className="text-muted-foreground">{participants.map(p => p.name + (p.description ? ` (${p.description})` : '')).join(', ')}</p>
+              <span className="font-medium">
+                참여자 (
+                {meeting.isTemporary
+                  ? meeting.temporaryParticipants?.length || 0
+                  : participants.length}
+                명):
+              </span>
+              {meeting.isTemporary ? (
+                meeting.temporaryParticipants && meeting.temporaryParticipants.length > 0 ? (
+                  <ul className="list-disc pl-5 text-muted-foreground">
+                    {meeting.temporaryParticipants.map((p, index) => (
+                      <li key={index} className="text-sm">{p.name}</li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="text-sm text-muted-foreground">임시 참여자가 없습니다.</p>
+                )
+              ) : (
+                <p className="text-muted-foreground">
+                  {participants.map(p => p.name + (p.description ? ` (${p.description})` : '')).join(', ')}
+                </p>
+              )}
             </div>
           </div>
-          {meeting.useReserveFund && meeting.partialReserveFundAmount && meeting.partialReserveFundAmount > 0 ? (
+
+          {/* Fee Info Display */}
+          {meeting.isTemporary ? (
+            <div className="p-3 bg-secondary/30 rounded-md border text-sm space-y-1">
+              <div className="flex items-center gap-2">
+                <PiggyBank className="h-4 w-4 text-primary" />
+                <span className="font-medium">회비 정보 (임시 모임):</span>
+              </div>
+              {meeting.totalFee !== undefined && (
+                <p className="text-muted-foreground pl-6">총 회비: {meeting.totalFee.toLocaleString()}원</p>
+              )}
+              {meeting.feePerPerson !== undefined && (
+                <p className="text-muted-foreground pl-6">1인당 회비: {meeting.feePerPerson.toLocaleString()}원</p>
+              )}
+              {(meeting.totalFee === undefined && meeting.feePerPerson === undefined) && (
+                <p className="text-muted-foreground pl-6">설정된 회비 정보가 없습니다.</p>
+              )}
+            </div>
+          ) : meeting.useReserveFund && meeting.partialReserveFundAmount && meeting.partialReserveFundAmount > 0 ? (
             <div className="p-3 bg-secondary/30 rounded-md border border-primary/30 text-sm space-y-1">
               <div className="flex items-center gap-2">
                 <PiggyBank className="h-4 w-4 text-primary" />
@@ -593,7 +632,7 @@ export function MeetingDetailsClient({
             <CardHeader>
               <div className="flex items-center justify-between">
                 <CardTitle>지출 내역</CardTitle>
-                {canManageExpenses && (
+                {canManageExpenses && !meeting.isTemporary && ( // 임시 모임 시 지출 추가 버튼 숨김
                   <AddExpenseDialog
                     meetingId={meeting.id}
                     participants={participants}
@@ -605,11 +644,16 @@ export function MeetingDetailsClient({
                     }
                   />
                 )}
+                 {meeting.isTemporary && (
+                    <Badge variant="outline">임시 모임은 지출 내역을 지원하지 않습니다.</Badge>
+                 )}
               </div>
               <CardDescription>이 모임에서 발생한 모든 지출 항목입니다.</CardDescription>
             </CardHeader>
             <CardContent>
-              {expenses.length > 0 ? (
+              {meeting.isTemporary ? (
+                <p className="text-center text-muted-foreground py-8">임시 모임은 지출 내역 기능을 사용하지 않습니다.</p>
+              ) : expenses.length > 0 ? (
                   <ul className="space-y-4">
                     {expenses.map(expense => (
                       <ExpenseItem
@@ -621,6 +665,7 @@ export function MeetingDetailsClient({
                         onExpenseUpdated={handleExpenseUpdated}
                         onExpenseDeleted={handleExpenseDeleted}
                         isMeetingSettled={meeting.isSettled || false}
+                        //canManage={canManageExpenses} - isReadOnlyShare already covers this
                       />
                     ))}
                   </ul>
@@ -632,48 +677,86 @@ export function MeetingDetailsClient({
         </TabsContent>
 
         <TabsContent value="summary">
-          <Card>
-            <CardHeader>
-              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-                {canFinalize && !isReadOnlyUser && (
-                  <AlertDialog>
-                    <AlertDialogTrigger asChild>
-                      <Button disabled={isFinalizing || isDeleting} size="sm">
-                        {isFinalizing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <CheckCircle2 className="mr-2 h-4 w-4" />}
-                        정산 확정 및 회비 사용 기록
-                      </Button>
-                    </AlertDialogTrigger>
-                    <AlertDialogContent>
-                      <AlertDialogHeader>
-                        <AlertDialogTitle>정산을 확정하시겠습니까?</AlertDialogTitle>
-                        <AlertDialogDescription>
-                          이 작업은 되돌릴 수 없습니다. 회비 사용 내역이 기록되며, 이후에는 수정이 불가합니다.
-                        </AlertDialogDescription>
-                      </AlertDialogHeader>
-                      <AlertDialogFooter>
-                        <AlertDialogCancel disabled={isFinalizing || isDeleting}>취소</AlertDialogCancel>
-                        <AlertDialogAction onClick={handleFinalizeSettlement} disabled={isFinalizing || isDeleting} className="bg-primary">
-                          {isFinalizing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                          정산 확정
-                        </AlertDialogAction>
-                      </AlertDialogFooter>
-                    </AlertDialogContent>
-                  </AlertDialog>
+          {meeting.isTemporary ? (
+            <Card>
+              <CardHeader>
+                <CardTitle>정산 요약 (임시 모임)</CardTitle>
+                 <CardDescription>임시 모임은 단순 회비 정보를 제공하며, 개별 정산 기능을 지원하지 않습니다.</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-2">
+                 {meeting.totalFee !== undefined && (
+                    <div className="flex justify-between items-center">
+                      <span className="font-medium">총 회비:</span>
+                      <span className="text-lg font-semibold">{meeting.totalFee.toLocaleString()}원</span>
+                    </div>
+                  )}
+                  {meeting.feePerPerson !== undefined && (
+                     <div className="flex justify-between items-center">
+                        <span className="font-medium">1인당 회비:</span>
+                        <span className="text-lg font-semibold">{meeting.feePerPerson.toLocaleString()}원</span>
+                     </div>
+                  )}
+                  {(meeting.temporaryParticipants && meeting.temporaryParticipants.length > 0 && meeting.feePerPerson !== undefined) && (
+                     <div className="flex justify-between items-center pt-2 border-t">
+                        <span className="font-medium">총 예상액 (1인당):</span>
+                        <span className="text-lg font-bold text-primary">{(meeting.feePerPerson * meeting.temporaryParticipants.length).toLocaleString()}원</span>
+                     </div>
+                  )}
+                  {(meeting.temporaryParticipants && meeting.temporaryParticipants.length > 0 && meeting.totalFee !== undefined) && (
+                     <div className="flex justify-between items-center pt-2 border-t">
+                        <span className="font-medium">1인당 예상액 (총액 기준):</span>
+                        <span className="text-lg font-bold text-primary">{(meeting.totalFee / meeting.temporaryParticipants.length).toLocaleString('ko-KR', {maximumFractionDigits: 0})}원</span>
+                     </div>
+                  )}
+                 {(meeting.totalFee === undefined && meeting.feePerPerson === undefined) && (
+                    <p className="text-sm text-muted-foreground text-center py-4">설정된 회비 정보가 없습니다.</p>
+                 )}
+              </CardContent>
+            </Card>
+          ) : (
+            <Card>
+              <CardHeader>
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                  {canFinalize && !isReadOnlyUser && (
+                    <AlertDialog>
+                      <AlertDialogTrigger asChild>
+                        <Button disabled={isFinalizing || isDeleting || meeting.isTemporary} size="sm">
+                          {isFinalizing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <CheckCircle2 className="mr-2 h-4 w-4" />}
+                          정산 확정 및 회비 사용 기록
+                        </Button>
+                      </AlertDialogTrigger>
+                      <AlertDialogContent>
+                        <AlertDialogHeader>
+                          <AlertDialogTitle>정산을 확정하시겠습니까?</AlertDialogTitle>
+                          <AlertDialogDescription>
+                            이 작업은 되돌릴 수 없습니다. 회비 사용 내역이 기록되며, 이후에는 수정이 불가합니다.
+                          </AlertDialogDescription>
+                        </AlertDialogHeader>
+                        <AlertDialogFooter>
+                          <AlertDialogCancel disabled={isFinalizing || isDeleting}>취소</AlertDialogCancel>
+                          <AlertDialogAction onClick={handleFinalizeSettlement} disabled={isFinalizing || isDeleting} className="bg-primary">
+                            {isFinalizing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                            정산 확정
+                          </AlertDialogAction>
+                        </AlertDialogFooter>
+                      </AlertDialogContent>
+                    </AlertDialog>
+                  )}
+                </div>
+                {meeting.useReserveFund && meeting.isSettled && expenses.length > 0 && !isReadOnlyShare && (
+                   <CardDescription className="text-green-600 flex items-center gap-1 mt-2">
+                      <CheckCircle2 className="h-4 w-4"/> 이 모임의 회비 사용 정산이 확정되어 회비 내역에 기록되었습니다.
+                   </CardDescription>
                 )}
-              </div>
-              {meeting.useReserveFund && meeting.isSettled && expenses.length > 0 && !isReadOnlyShare && (
-                 <CardDescription className="text-green-600 flex items-center gap-1 mt-2">
-                    <CheckCircle2 className="h-4 w-4"/> 이 모임의 회비 사용 정산이 확정되어 회비 내역에 기록되었습니다.
-                 </CardDescription>
-              )}
-               {meeting.useReserveFund && !meeting.isSettled && expenses.length === 0 && meeting.partialReserveFundAmount && meeting.partialReserveFundAmount > 0 && !isReadOnlyShare &&(
-                 <CardDescription className="text-muted-foreground flex items-center gap-1 mt-2">
-                    <AlertCircle className="h-4 w-4"/> 지출 내역이 없어 회비 사용을 확정할 수 없습니다.
-                 </CardDescription>
-              )}
-            </CardHeader>
-            <PaymentSummary meeting={meeting} expenses={expenses} participants={participants} allFriends={allFriends} />
-          </Card>
+                 {meeting.useReserveFund && !meeting.isSettled && expenses.length === 0 && meeting.partialReserveFundAmount && meeting.partialReserveFundAmount > 0 && !isReadOnlyShare &&(
+                   <CardDescription className="text-muted-foreground flex items-center gap-1 mt-2">
+                      <AlertCircle className="h-4 w-4"/> 지출 내역이 없어 회비 사용을 확정할 수 없습니다.
+                   </CardDescription>
+                )}
+              </CardHeader>
+              <PaymentSummary meeting={meeting} expenses={expenses} participants={participants} allFriends={allFriends} />
+            </Card>
+          )}
         </TabsContent>
       </Tabs>
     </div>

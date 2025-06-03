@@ -97,24 +97,67 @@ export async function deleteFriendAction(id: string) {
 
 // Meeting Actions
 export async function createMeetingAction(
-  meetingData: Omit<Meeting, 'id' | 'createdAt' | 'isSettled' | 'isShareEnabled' | 'shareToken' | 'shareExpiryDate'>,
+  payload: Omit<Meeting, 'id' | 'createdAt' | 'isSettled' | 'isShareEnabled' | 'shareToken' | 'shareExpiryDate'>,
   currentUserId?: string | null
 ) {
   if (!currentUserId) {
     return { success: false, error: "인증되지 않은 사용자입니다. 로그인이 필요합니다." };
   }
-  // Basic permission check (assuming only admins can create meetings based on UI)
-  // For robust security, check user's role from Firestore here if needed.
-  // const callingUser = await dbGetUserById(currentUserId);
-  // if (!callingUser || callingUser.role !== 'admin') {
-  // return { success: false, error: "모임 생성 권한이 없습니다." };
-  // }
 
   try {
-    const newMeeting = await dbAddMeeting({
-      ...meetingData,
-      creatorId: currentUserId, // Ensure creatorId is set
-    });
+    const meetingDataToSave: Omit<Meeting, 'id' | 'createdAt' | 'isSettled'> = {
+      name: payload.name,
+      dateTime: payload.dateTime,
+      endTime: payload.endTime,
+      locationName: payload.locationName,
+      locationCoordinates: payload.locationCoordinates,
+      creatorId: currentUserId,
+      groupId: payload.groupId || '',
+      memo: payload.memo || undefined,
+      isTemporary: payload.isTemporary || false,
+      // Default values for fields that might not be present if not set
+      participantIds: [],
+      useReserveFund: false,
+      partialReserveFundAmount: undefined,
+      nonReserveFundParticipants: [],
+      temporaryParticipants: undefined,
+      totalFee: undefined,
+      feePerPerson: undefined,
+      isShareEnabled: false, // Default for new meeting
+      shareToken: null, // Default for new meeting
+      shareExpiryDate: null, // Default for new meeting
+    };
+
+    if (payload.isTemporary) {
+      meetingDataToSave.temporaryParticipants = payload.temporaryParticipants || [];
+      if (payload.totalFee !== undefined) {
+        meetingDataToSave.totalFee = payload.totalFee;
+        meetingDataToSave.feePerPerson = undefined;
+      } else if (payload.feePerPerson !== undefined) {
+        meetingDataToSave.feePerPerson = payload.feePerPerson;
+        meetingDataToSave.totalFee = undefined;
+      }
+      // Ensure regular meeting fields are not set or are default
+      meetingDataToSave.participantIds = [];
+      meetingDataToSave.useReserveFund = false;
+      meetingDataToSave.partialReserveFundAmount = undefined;
+      meetingDataToSave.nonReserveFundParticipants = [];
+    } else {
+      meetingDataToSave.participantIds = payload.participantIds || [];
+      meetingDataToSave.useReserveFund = payload.useReserveFund || false;
+      if (payload.useReserveFund && payload.partialReserveFundAmount !== undefined) {
+        meetingDataToSave.partialReserveFundAmount = payload.partialReserveFundAmount;
+      } else {
+        meetingDataToSave.partialReserveFundAmount = undefined;
+      }
+      meetingDataToSave.nonReserveFundParticipants = payload.nonReserveFundParticipants || [];
+      // Ensure temporary meeting fields are not set
+      meetingDataToSave.temporaryParticipants = undefined;
+      meetingDataToSave.totalFee = undefined;
+      meetingDataToSave.feePerPerson = undefined;
+    }
+
+    const newMeeting = await dbAddMeeting(meetingDataToSave);
     revalidatePath('/meetings');
     revalidatePath('/');
     revalidatePath(`/meetings/${newMeeting.id}`);
@@ -128,7 +171,7 @@ export async function createMeetingAction(
 
 export async function updateMeetingAction(
   id: string,
-  updates: Partial<Omit<Meeting, 'id' | 'createdAt'>>,
+  payload: Partial<Omit<Meeting, 'id' | 'createdAt'>>, // Changed 'updates' to 'payload' for clarity
   currentUserId?: string | null
 ) {
   if (!currentUserId) {
@@ -152,18 +195,53 @@ export async function updateMeetingAction(
     const reserveFundSettingsChanged = updates.useReserveFund !== undefined || updates.partialReserveFundAmount !== undefined || updates.nonReserveFundParticipants !== undefined;
     if (meetingToUpdate.isSettled && reserveFundSettingsChanged) {
       await dbRevertMeetingDeduction(id);
-      (updates as any).isSettled = false; // Unset isSettled if fund settings change
+      (payload as any).isSettled = false; // Unset isSettled if fund settings change
        revalidatePath('/reserve-fund');
     }
 
+    // Prepare data for update, respecting isTemporary status
+    // We assume isTemporary itself is NOT changed during an update in this version.
+    // The form logic would need to be more complex to allow switching meeting types.
+    const meetingDataToUpdate: Partial<Omit<Meeting, 'id' | 'createdAt'>> = { ...payload };
 
-    const updatedMeeting = await dbUpdateMeeting(id, updates);
+    if (meetingToUpdate.isTemporary) { // If existing meeting is temporary
+      // Only update fields relevant to temporary meetings
+      delete meetingDataToUpdate.participantIds;
+      delete meetingDataToUpdate.useReserveFund;
+      delete meetingDataToUpdate.partialReserveFundAmount;
+      delete meetingDataToUpdate.nonReserveFundParticipants;
+
+      if (payload.totalFee !== undefined) {
+        meetingDataToUpdate.totalFee = payload.totalFee;
+        meetingDataToUpdate.feePerPerson = undefined; // Or FieldValue.delete() if using Firestore directly
+      } else if (payload.feePerPerson !== undefined) {
+        meetingDataToUpdate.feePerPerson = payload.feePerPerson;
+        meetingDataToUpdate.totalFee = undefined; // Or FieldValue.delete()
+      }
+    } else { // If existing meeting is a regular meeting
+      // Only update fields relevant to regular meetings
+      delete meetingDataToUpdate.temporaryParticipants;
+      delete meetingDataToUpdate.totalFee;
+      delete meetingDataToUpdate.feePerPerson;
+
+      if (payload.useReserveFund === false) {
+        meetingDataToUpdate.partialReserveFundAmount = undefined; // Or FieldValue.delete()
+        meetingDataToUpdate.nonReserveFundParticipants = []; // Or FieldValue.delete()
+      } else if (payload.useReserveFund === true && payload.partialReserveFundAmount === undefined) {
+        // if useReserveFund is true, but no amount is provided, keep existing or set to 0 if that's the logic.
+        // For now, if payload.partialReserveFundAmount is undefined, it won't be in meetingDataToUpdate, so Firestore won't change it.
+        // If it needs to be explicitly cleared, handle here.
+      }
+    }
+
+
+    const updatedMeeting = await dbUpdateMeeting(id, meetingDataToUpdate);
     if (!updatedMeeting) throw new Error('모임 업데이트에 실패했습니다.');
 
     revalidatePath('/meetings');
     revalidatePath(`/meetings/${id}`);
     revalidatePath('/'); // Dashboard might show recent meeting
-    if (reserveFundSettingsChanged || (updates.isSettled !== undefined && !updates.isSettled)) {
+    if (reserveFundSettingsChanged || (payload.isSettled !== undefined && !payload.isSettled)) {
       revalidatePath('/reserve-fund');
     }
     return { success: true, meeting: updatedMeeting };
