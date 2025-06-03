@@ -131,12 +131,17 @@ export async function createMeetingAction(
 
     if (payload.isTemporary) {
       meetingDataToSave.temporaryParticipants = payload.temporaryParticipants || [];
-      if (payload.totalFee !== undefined) {
+      // totalFee 및 feePerPerson 처리 수정 for create
+      if (payload.totalFee !== undefined && typeof payload.totalFee === 'number' && !isNaN(payload.totalFee)) {
         meetingDataToSave.totalFee = payload.totalFee;
-        meetingDataToSave.feePerPerson = undefined;
-      } else if (payload.feePerPerson !== undefined) {
+        meetingDataToSave.feePerPerson = null; // totalFee가 있으면 feePerPerson은 null
+      } else if (payload.feePerPerson !== undefined && typeof payload.feePerPerson === 'number' && !isNaN(payload.feePerPerson)) {
         meetingDataToSave.feePerPerson = payload.feePerPerson;
-        meetingDataToSave.totalFee = undefined;
+        meetingDataToSave.totalFee = null; // feePerPerson이 있으면 totalFee는 null
+      } else {
+        // 둘 다 입력 안 했거나 유효하지 않으면 둘 다 null로 설정 (undefined 방지)
+        meetingDataToSave.totalFee = null;
+        meetingDataToSave.feePerPerson = null;
       }
       // Ensure regular meeting fields are not set or are default
       meetingDataToSave.participantIds = [];
@@ -159,10 +164,10 @@ export async function createMeetingAction(
       }
 
       meetingDataToSave.nonReserveFundParticipants = payload.nonReserveFundParticipants || [];
-      // Ensure temporary meeting fields are not set (already default to undefined above, which is fine for dbAddMeeting if it omits undefined)
-      meetingDataToSave.temporaryParticipants = undefined;
-      meetingDataToSave.totalFee = undefined;
-      meetingDataToSave.feePerPerson = undefined;
+      // Ensure temporary meeting fields are set to null for regular meetings
+      meetingDataToSave.temporaryParticipants = null;
+      meetingDataToSave.totalFee = null;
+      meetingDataToSave.feePerPerson = null;
     }
 
     const newMeeting = await dbAddMeeting(meetingDataToSave);
@@ -234,18 +239,40 @@ export async function updateMeetingAction(
       delete meetingDataToUpdate.partialReserveFundAmount;
       delete meetingDataToUpdate.nonReserveFundParticipants;
 
-      if (payload.totalFee !== undefined) {
-        meetingDataToUpdate.totalFee = payload.totalFee;
-        meetingDataToUpdate.feePerPerson = undefined; // Or FieldValue.delete() if using Firestore directly
-      } else if (payload.feePerPerson !== undefined) {
-        meetingDataToUpdate.feePerPerson = payload.feePerPerson;
-        meetingDataToUpdate.totalFee = undefined; // Or FieldValue.delete()
+      // totalFee와 feePerPerson 업데이트 로직 for temporary meeting update
+      let feeTypeSetInPayload = false;
+      if (payload.hasOwnProperty('totalFee')) {
+        if (payload.totalFee !== undefined && typeof payload.totalFee === 'number' && !isNaN(payload.totalFee)) {
+          meetingDataToUpdate.totalFee = payload.totalFee;
+          meetingDataToUpdate.feePerPerson = null;
+          feeTypeSetInPayload = true;
+        } else { // Explicitly set to null if undefined or null in payload
+          meetingDataToUpdate.totalFee = null;
+        }
       }
+
+      if (payload.hasOwnProperty('feePerPerson')) {
+        if (payload.feePerPerson !== undefined && typeof payload.feePerPerson === 'number' && !isNaN(payload.feePerPerson)) {
+          meetingDataToUpdate.feePerPerson = payload.feePerPerson;
+          // If totalFee was also in payload and valid, feePerPerson takes precedence or both are set (totalFee will be nulled by this path)
+          // If totalFee was not in payload or was invalid, this will correctly set feePerPerson and nullify totalFee.
+          meetingDataToUpdate.totalFee = null;
+          feeTypeSetInPayload = true;
+        } else { // Explicitly set to null if undefined or null in payload
+          meetingDataToUpdate.feePerPerson = null;
+        }
+      }
+      // If neither was in payload, existing values are kept unless one of them was already null and the other had a value.
+      // This logic ensures that if one is actively set, the other is nulled.
+      // If one is cleared (e.g. payload.totalFee = null) and the other is not in payload, the other remains.
+      // If both are cleared in payload, both become null.
+
     } else { // If existing meeting is a regular meeting
       // Only update fields relevant to regular meetings
       delete meetingDataToUpdate.temporaryParticipants;
-      delete meetingDataToUpdate.totalFee;
-      delete meetingDataToUpdate.feePerPerson;
+      // Ensure temporary fee fields are nulled if they are somehow in payload for a regular meeting
+      if (payload.hasOwnProperty('totalFee')) meetingDataToUpdate.totalFee = null;
+      if (payload.hasOwnProperty('feePerPerson')) meetingDataToUpdate.feePerPerson = null;
 
       // Handle useReserveFund and partialReserveFundAmount for regular meetings
       const willUseReserveFund = payload.hasOwnProperty('useReserveFund')

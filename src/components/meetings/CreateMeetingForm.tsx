@@ -144,6 +144,7 @@ interface MeetingFormProps {
   isEditMode?: boolean;
   initialData?: Meeting;
   groupId?: string; // 추가: 모임 생성 시 그룹 지정
+  onTemporaryChange?: (isTemporary: boolean) => void; // 콜백 prop 추가
 }
 
 const googleMapsLibraries: ("places" | "maps" | "marker")[] = ["places", "maps", "marker"];
@@ -325,6 +326,13 @@ export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, 
   const watchParticipantIds = form.watch('participantIds');
   const watchedLocationCoordinates = form.watch('locationCoordinates');
   const watchLocationName = form.watch('locationName');
+  const watchedIsTemporary = form.watch('isTemporary'); // Watch the form field
+
+  useEffect(() => {
+    if (props.onTemporaryChange) {
+      props.onTemporaryChange(watchedIsTemporary || false);
+    }
+  }, [watchedIsTemporary, props.onTemporaryChange]);
 
   useEffect(() => {
     const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
@@ -551,7 +559,7 @@ export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, 
           name: data.name,
           dateTime: data.dateTime,
           endTime: data.endTime,
-          locationName: data.locationName,
+          locationName: data.locationName || '', // Ensure string
           locationCoordinates: data.locationCoordinates || undefined,
           creatorId: currentUserId,
           groupId: groupId || (initialData?.groupId ?? ''),
@@ -571,7 +579,7 @@ export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, 
           name: data.name,
           dateTime: data.dateTime,
           endTime: data.endTime,
-          locationName: data.locationName,
+          locationName: data.locationName || '', // Ensure string
           locationCoordinates: data.locationCoordinates || undefined,
           participantIds: data.participantIds || [],
           creatorId: currentUserId,
