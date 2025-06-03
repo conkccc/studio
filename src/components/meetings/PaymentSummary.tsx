@@ -275,13 +275,7 @@ export function PaymentSummary({ meeting, expenses, participants, allFriends }: 
               </CardDescription>
               {meeting.isTemporary && Array.isArray(meeting.temporaryParticipants) && meeting.temporaryParticipants.length > 0 ? (
                 <div className="mb-4">
-                  <h3 className="text-md font-semibold mb-2 flex items-center gap-1.5">
-                    <Users className="h-4 w-4" />
-                    임시 모임 참여자
-                  </h3>
-                  <CardDescription>
-                    임시 모임도 정산 내역이 있으면 아래에 표시됩니다.<br />
-                  </CardDescription>
+                  {/* Removed h3 and CardDescription as per request */}
                   <div className="overflow-x-auto">
                     <ScrollArea className="pr-3 mt-2 min-w-[600px]">
                       <Table>
