@@ -33,48 +33,36 @@ interface ExpenseItemProps {
   onExpenseDeleted: (deletedExpenseId: string) => void;
   isMeetingSettled: boolean;
   isTemporaryMeeting?: boolean; // Added for temporary meeting handling
-  // canManage prop is now determined internally using AuthContext
 }
 
 export function ExpenseItem({ 
   expense, 
   meetingId,
   allFriends, 
-  participants, // Participants of the current meeting
+  participants,
   onExpenseUpdated, 
   onExpenseDeleted,
   isMeetingSettled,
   isTemporaryMeeting,
 }: ExpenseItemProps) {
-  const { currentUser, isAdmin } = useAuth(); // Get auth status
+  const { currentUser, isAdmin } = useAuth();
 
   let resolvedPayer: Friend | undefined;
   if (isTemporaryMeeting) {
     resolvedPayer = participants.find(p => p.id === expense.paidById);
-    // If not found in participants (which ideally shouldn't happen for temp meetings if data is consistent),
-    // then try finding in allFriends. This could cover an edge case where a registered user (in allFriends)
-    // pays for an item in a temporary meeting they are also part of (as a temporary participant).
     if (!resolvedPayer) {
       resolvedPayer = allFriends.find(f => f.id === expense.paidById);
     }
   } else {
     resolvedPayer = allFriends.find(f => f.id === expense.paidById);
   }
-  const payer = resolvedPayer; // Assign to existing payer variable for minimal JSX changes
+  const payer = resolvedPayer;
 
   const { toast } = useToast();
-  const [isDeleting, setIsDeleting] = useState(false); // For delete operation
-  const [isEditPending, setIsEditPending] = useState(false); // For edit dialog operations
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [isEditPending, setIsEditPending] = useState(false);
+  const canManage = isAdmin || (currentUser?.uid === expense.paidById) ; 
 
-  // Determine if the current user can manage this expense
-  // Assuming meeting creator or admin can manage.
-  // This requires knowing the meeting's creatorId, which is not directly passed.
-  // For simplicity, we'll rely on isAdmin for now, or pass meetingCreatorId if needed.
-  // Or, actions themselves should robustly check permissions.
-  // For UI, isAdmin is a good first check.
-  const canManage = isAdmin || (currentUser?.uid === expense.paidById) ; // Simplified: Admin or Payer (more granular would be meeting creator)
-                                                                      // This should ideally be currentUser.uid === meeting.creatorId or isAdmin
-  
   const getSplitDetails = () => { 
     if (expense.splitType === 'equally') {
       const involvedNames = (expense.splitAmongIds
@@ -83,7 +71,6 @@ export function ExpenseItem({
           if (isTemporaryMeeting) {
             friend = participants.find(p => p.id === splitId);
           }
-          // Fallback to allFriends if not found in participants (e.g., non-temporary meeting, or inconsistent data)
           if (!friend) {
             friend = allFriends.find(f => f.id === splitId);
           }
@@ -98,13 +85,10 @@ export function ExpenseItem({
         allMeetingParticipantsInvolved = splitAmongIdsSet.size === participantIdsSet.size &&
                                        [...splitAmongIdsSet].every(id => participantIdsSet.has(id));
       } else {
-        // For non-temporary meetings, the old logic based on names and descriptions might still be relevant
-        // or could be simplified if participant objects in `participants` prop are guaranteed to be from `allFriends`.
-        // Assuming `participants` for non-temp meetings are full Friend objects.
         const involvedParticipantNames = new Set(involvedNames);
         const meetingParticipantFullNames = new Set(participants.map(p => p.name + (p.description ? ` (${p.description})` : '')));
         allMeetingParticipantsInvolved = involvedNames.length === participants.length &&
-                                     participants.length > 0 && // ensure participants is not empty
+                                     participants.length > 0 && 
                                      [...meetingParticipantFullNames].every(name => involvedParticipantNames.has(name));
 
       }
@@ -142,11 +126,11 @@ export function ExpenseItem({
 
 
   const handleDelete = () => {
-    if (isMeetingSettled && !isAdmin) { // Admin might be able to delete even if settled (would unsettle meeting)
+    if (isMeetingSettled && !isAdmin) { 
       toast({ title: '오류', description: '정산이 완료된 모임의 지출은 삭제할 수 없습니다.', variant: 'destructive' });
       return;
     }
-    if (!canManage && !isAdmin) { // Double check, though button might be hidden
+    if (!canManage && !isAdmin) {
       toast({ title: '권한 없음', description: '이 지출 항목을 삭제할 권한이 없습니다.', variant: 'destructive' });
       return;
     }
@@ -162,7 +146,7 @@ export function ExpenseItem({
       setIsDeleting(false);
     });
   };
-  const [isTransitioning, startTransition] = useTransition(); // General pending state
+  const [isTransitioning, startTransition] = useTransition();
 
   return (
     <li className="p-4 border rounded-lg bg-background shadow-sm">
@@ -187,15 +171,15 @@ export function ExpenseItem({
           <span>분배: {getSplitDetails()}</span>
         </div>
       </div>
-      {(isAdmin) && ( // Simplified: only admin can manage expenses for now. Or pass meeting.creatorId for creator check.
+      {(isAdmin) && (
         <div className="mt-3 flex justify-end space-x-2">
           <EditExpenseDialog 
             expenseToEdit={expense}
             meetingId={meetingId}
-            participants={participants} // Pass actual meeting participants
-            allFriends={allFriends} // Pass all friends for payer/split among mapping
+            participants={participants}
+            allFriends={allFriends}
             onExpenseUpdated={onExpenseUpdated}
-            canManage={isAdmin} // Simplified canManage for dialog trigger
+            canManage={isAdmin}
             isMeetingSettled={isMeetingSettled}
             triggerButton={
               <Button variant="ghost" size="sm" className="text-xs" disabled={isTransitioning || (isMeetingSettled && !isAdmin)}>
