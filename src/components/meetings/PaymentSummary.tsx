@@ -27,185 +27,200 @@ interface FundPayoutToPayer {
 
 export function PaymentSummary({ meeting, expenses, participants, allFriends }: PaymentSummaryProps) {
   
-  const participantIdsInMeeting = useMemo(() => new Set(participants.map(p => p.id)), [participants]);
+  // --- 임시 모임일 경우: participants를 temporaryParticipants로 대체 (id 없으면 name+idx로 임시 id 부여) ---
+  const effectiveParticipants = useMemo<Friend[]>(() => {
+    if (meeting.isTemporary && Array.isArray(meeting.temporaryParticipants) && meeting.temporaryParticipants.length > 0) {
+      return meeting.temporaryParticipants.map((p, idx) => ({
+        id: 'id' in p && p.id ? String(p.id) : `${p.name}-${idx}`,
+        name: p.name,
+        description: (p as any).description || '',
+        groupId: 'temp',
+        createdAt: new Date(),
+      }));
+    }
+    return participants;
+  }, [meeting, participants]);
 
-  const calculationResults = useMemo(() => {
-    const totalExpenses = expenses.reduce((sum, e) => sum + e.totalAmount, 0);
-    const numParticipants = participants.length;
+  const participantIdsInMeeting = useMemo(() => new Set(effectiveParticipants.map(p => p.id)), [effectiveParticipants]);
 
+  // --- 리팩토링: 1인당 지출 내역 및 회비 적용 계산 ---
+  const perPersonCostDetails = useMemo<{
+    totalSpent: number;
+    perPersonCost: number;
+    fundUsed: number;
+    fundLeft: number;
+    perPersonCostWithFund: Record<string, number>;
+    fundApplicableIds: string[];
+    fundNonApplicableIds: string[];
+    fundDescription: string;
+    perFundApplicableCost: number;
+  }>(() => {
+    const totalSpent = expenses.reduce((sum, e) => sum + e.totalAmount, 0);
+    const participantIds = effectiveParticipants.map(p => p.id);
+    const numParticipants = participantIds.length;
     if (numParticipants === 0) {
       return {
-        totalExpenses,
-        meetingDues: 0,
-        expensesCoveredByDues: 0,
-        remainingDues: 0,
-        netExpensesToSplit: totalExpenses,
-        costPerPerson: 0,
-        amountPaidByEach: new Map<string, number>(),
-        duesContributedByEach: new Map<string, number>(), // How much each person 'paid' in dues
-        finalCostSharePerPerson: new Map<string, number>(), // Actual share of expenses after dues
-        netAmountForPerson: new Map<string, number>(),
-        settlementSuggestions: [],
-        feeDescription: "참여자가 없습니다.",
-        isReserveFundUsedForDisplay: false,
-        nonReserveFundParticipantsForDisplay: [],
+        totalSpent,
+        perPersonCost: 0,
+        fundUsed: 0,
+        fundLeft: 0,
+        perPersonCostWithFund: {},
+        fundApplicableIds: [],
+        fundNonApplicableIds: participantIds,
+        fundDescription: '참여자가 없습니다.',
+        perFundApplicableCost: 0 // 타입 일치
       };
     }
 
-    let meetingDues = 0; // Total dues collected for the meeting
-    const duesContributedByEach = new Map<string, number>(); // How much each person 'paid' in dues
-    let feeDescription = "";
-    let isReserveFundUsedForDisplay = false;
-    let nonReserveFundParticipantsForDisplay: string[] = [];
-
-
-    if (meeting.isTemporary) {
-      if (typeof meeting.totalFee === 'number' && meeting.totalFee >= 0) {
-        meetingDues = meeting.totalFee;
-        feeDescription = `임시 모임 총 회비: ${meetingDues.toLocaleString()}원`;
-        participants.forEach(p => duesContributedByEach.set(p.id, meetingDues / numParticipants));
-      } else if (typeof meeting.feePerPerson === 'number' && meeting.feePerPerson >= 0) {
-        meetingDues = meeting.feePerPerson * numParticipants;
-        feeDescription = `임시 모임 1인당 회비: ${meeting.feePerPerson.toLocaleString()}원 (총 ${meetingDues.toLocaleString()}원)`;
-        participants.forEach(p => duesContributedByEach.set(p.id, meeting.feePerPerson!));
-      } else {
-        feeDescription = '임시 모임 회비 없음';
-        participants.forEach(p => duesContributedByEach.set(p.id, 0));
-      }
-    } else { // Regular meeting
-      isReserveFundUsedForDisplay = meeting.useReserveFund;
-      nonReserveFundParticipantsForDisplay = meeting.nonReserveFundParticipants || [];
-      if (meeting.useReserveFund && typeof meeting.partialReserveFundAmount === 'number' && meeting.partialReserveFundAmount > 0) {
-        meetingDues = meeting.partialReserveFundAmount;
-        const applicableParticipants = participants.filter(p => !nonReserveFundParticipantsForDisplay.includes(p.id));
-        const numApplicable = applicableParticipants.length;
-        if (numApplicable > 0) {
-          const duePerApplicablePerson = meetingDues / numApplicable;
-          applicableParticipants.forEach(p => duesContributedByEach.set(p.id, duePerApplicablePerson));
-        }
-        nonReserveFundParticipantsForDisplay.forEach(id => duesContributedByEach.set(id, 0)); // These didn't contribute from reserve
-        feeDescription = `적립금 사용: ${meetingDues.toLocaleString()}원 (혜택 인원: ${numApplicable}명)`;
-      } else {
-        feeDescription = '적립금 미사용';
-        participants.forEach(p => duesContributedByEach.set(p.id, 0));
-      }
+    // 회비 적용 인원
+    let fundApplicableIds: string[] = participantIds;
+    let fundNonApplicableIds: string[] = [];
+    if (meeting.useReserveFund && Array.isArray(meeting.nonReserveFundParticipants) && meeting.nonReserveFundParticipants.length > 0) {
+      fundNonApplicableIds = meeting.nonReserveFundParticipants.filter(id => participantIds.includes(id));
+      fundApplicableIds = participantIds.filter(id => !fundNonApplicableIds.includes(id));
     }
 
-    const expensesCoveredByDues = Math.min(totalExpenses, meetingDues);
-    const remainingDues = meetingDues - expensesCoveredByDues; // If positive, dues were more than expenses
-    const netExpensesToSplit = totalExpenses - expensesCoveredByDues;
-    const costPerPerson = numParticipants > 0 ? netExpensesToSplit / numParticipants : 0;
+    const numFundApplicable = fundApplicableIds.length;
+    const numFundNonApplicable = fundNonApplicableIds.length;
+    const perPersonCost = numParticipants > 0 ? totalSpent / numParticipants : 0;
 
-    const amountPaidByEach = new Map<string, number>();
-    participants.forEach(p => {
-      amountPaidByEach.set(p.id, 0);
-    });
-    expenses.forEach(expense => {
-      amountPaidByEach.set(expense.paidById, (amountPaidByEach.get(expense.paidById) || 0) + expense.totalAmount);
-    });
-
-    const finalCostSharePerPerson = new Map<string, number>();
-    participants.forEach(p => {
-      finalCostSharePerPerson.set(p.id, costPerPerson);
-    });
-
-    // For regular meetings with nonReserveFundParticipants, their cost share might differ if reserve fund was used
-    // This part of the logic needs to be accurate based on how partialReserveFundAmount is meant to be applied.
-    // The current `costPerPerson` calculation splits `netExpensesToSplit` equally.
-    // If `nonReserveFundParticipants` should pay their raw share of `totalExpenses` without benefit from `meetingDues` (from reserve),
-    // then `finalCostSharePerPerson` for them should be `totalExpenses / numParticipants` (overallPerPersonCost),
-    // and for others, it would be `(totalExpenses - (overallPerPersonCost * nonReserveFundParticipants.length) - expensesCoveredByDues) / applicableParticipants.length`.
-    // This is complex. For now, the simplified `costPerPerson` is used for all after general dues are applied.
-    // The previous `perPersonCostDetails.perPersonCostWithFund` had this distinction. Let's try to replicate it.
-    if (!meeting.isTemporary && meeting.useReserveFund && typeof meeting.partialReserveFundAmount === 'number' && meeting.partialReserveFundAmount > 0) {
-        const rawOverallPerPersonCost = numParticipants > 0 ? totalExpenses / numParticipants : 0;
-        const applicableParticipants = participants.filter(p => !nonReserveFundParticipantsForDisplay.includes(p.id));
-        const numApplicable = applicableParticipants.length;
-
-        nonReserveFundParticipantsForDisplay.forEach(id => {
-            finalCostSharePerPerson.set(id, rawOverallPerPersonCost);
-        });
-
-        if (numApplicable > 0) {
-            const expensesAttributedToNonApplicable = nonReserveFundParticipantsForDisplay.reduce((sum, id) => sum + (finalCostSharePerPerson.get(id) || 0), 0);
-            const expensesRemainingForApplicable = totalExpenses - expensesAttributedToNonApplicable;
-            const fundToUseForApplicable = Math.min(meeting.partialReserveFundAmount, expensesRemainingForApplicable);
-            const netExpensesForApplicableAfterFund = expensesRemainingForApplicable - fundToUseForApplicable;
-            const costPerApplicablePerson = netExpensesForApplicableAfterFund / numApplicable;
-            applicableParticipants.forEach(p => {
-                finalCostSharePerPerson.set(p.id, costPerApplicablePerson);
-            });
-            // Update actualFeeUsedAgainstExpenses based on this more precise calculation
-            // actualFeeUsedAgainstExpenses = fundToUseForApplicable; // This should be set
-        }
-    }
-
-
-    const netAmountForPerson = new Map<string, number>();
-    const peopleForSettlement: { friendId: string; finalAmount: number }[] = [];
-
-    participants.forEach(p => {
-      const finalShare = finalCostSharePerPerson.get(p.id) || 0;
-      const contributedDues = duesContributedByEach.get(p.id) || 0; // This is what they "paid" as fee
-      const paidForExpenses = amountPaidByEach.get(p.id) || 0;
-
-      // Net = (Paid for expenses + Fee they are credited for) - Their final share of expenses
-      // If feePerPerson model, they "paid" it. If totalFee model, their "credit" is totalFee/N.
-      // If reserve fund, their "credit" is partialReserveFundAmount/numApplicable.
-      const net = parseFloat((paidForExpenses + contributedDues - finalShare).toFixed(2));
-      netAmountForPerson.set(p.id, net);
-      peopleForSettlement.push({ friendId: p.id, finalAmount: net });
-    });
-
-    const sortedToReceive = peopleForSettlement.filter(p => p.finalAmount > 0.01).sort((a, b) => b.finalAmount - a.finalAmount);
-    const sortedToPay = peopleForSettlement.filter(p => p.finalAmount < -0.01).sort((a, b) => a.finalAmount - b.finalAmount);
-
-    const settlementSuggestionsList: { from: string; to: string; amount: number }[] = [];
-    let receiverIdx = 0;
-    let payerIdx = 0;
-
-    while (receiverIdx < sortedToReceive.length && payerIdx < sortedToPay.length) {
-      const receiver = sortedToReceive[receiverIdx];
-      const payer = sortedToPay[payerIdx];
-      const amountToTransfer = Math.min(receiver.finalAmount, -payer.finalAmount);
-
-      if (amountToTransfer >= 0.01) {
-        settlementSuggestionsList.push({
-          from: payer.friendId,
-          to: receiver.friendId,
-          amount: parseFloat(amountToTransfer.toFixed(2)),
-        });
-        receiver.finalAmount = parseFloat((receiver.finalAmount - amountToTransfer).toFixed(2));
-        payer.finalAmount = parseFloat((payer.finalAmount + amountToTransfer).toFixed(2));
-      }
-      if (Math.abs(receiver.finalAmount) < 0.01) receiverIdx++;
-      if (Math.abs(payer.finalAmount) < 0.01) payerIdx++;
+    let fundUsed = 0;
+    let fundLeft = 0;
+    let perPersonCostWithFund: Record<string, number> = {};
+    let fundDescription = '';
+    let perFundApplicableCost = 0;
+    if (meeting.useReserveFund && meeting.partialReserveFundAmount && meeting.partialReserveFundAmount > 0 && numFundApplicable > 0) {
+      // 회비 적용 인원 총지출
+      const fundApplicableTotal = totalSpent - (numFundNonApplicable * perPersonCost);
+      fundUsed = Math.min(meeting.partialReserveFundAmount, fundApplicableTotal);
+      fundLeft = meeting.partialReserveFundAmount - fundUsed;
+      const fundAppliedLeftCost = fundApplicableTotal - fundUsed;
+      perFundApplicableCost = numFundApplicable > 0 ? fundAppliedLeftCost / numFundApplicable : 0;
+      fundApplicableIds.forEach(id => {
+        perPersonCostWithFund[id] = perFundApplicableCost;
+      });
+      fundNonApplicableIds.forEach(id => {
+        perPersonCostWithFund[id] = perPersonCost;
+      });
+      fundDescription = `회비 적용 인원 ${numFundApplicable}명, 미적용 인원 ${numFundNonApplicable}명, 실제 사용 회비: ${fundUsed.toLocaleString()}원${fundLeft > 0.01 ? `, 미사용 회비: ${fundLeft.toLocaleString()}원` : ''}`;
+    } else {
+      // 회비 없음
+      participantIds.forEach(id => {
+        perPersonCostWithFund[id] = perPersonCost;
+      });
+      fundDescription = '회비 미적용';
     }
 
     return {
-      totalExpenses,
-      meetingDues, // 총 걷은 회비
-      expensesCoveredByDues: actualFeeUsedAgainstExpenses, // 회비로 처리된 지출
-      remainingDues: remainingFeeFromCollection, // 남은 회비 (환급 가능?)
-      netExpensesToSplit, // 회비 처리 후 분담할 순수 지출
-      costPerPerson, // 회비 처리 후 1인당 분담액 (일괄 적용 시)
-      amountPaidByEach,
-      duesContributedByEach,
-      finalCostSharePerPerson, // 각자의 최종 비용 분담액 (nonReserve 등을 고려한)
-      netAmountForPerson,
-      settlementSuggestions: settlementSuggestionsList,
-      feeDescription,
-      isReserveFundUsedForDisplay,
-      nonReserveFundParticipantsForDisplay,
+      totalSpent,
+      perPersonCost,
+      fundUsed,
+      fundLeft,
+      perPersonCostWithFund: perPersonCostWithFund as Record<string, number>,
+      fundApplicableIds,
+      fundNonApplicableIds,
+      fundDescription,
+      perFundApplicableCost // 추가: 회비 적용 인원 1인당 부담액
     };
-  }, [expenses, participants, meeting, allFriends]); // allFriends might not be needed here if getFriendName is outside or pure
+  }, [expenses, effectiveParticipants, meeting]);
+
+  // --- settlementSuggestions 계산 리팩토링 ---
+  // settlementSuggestions useMemo 중복 선언 제거 (한 번만 선언)
+  const mappedExpenses = useMemo(() => {
+    if (meeting.isTemporary && Array.isArray(meeting.temporaryParticipants) && meeting.temporaryParticipants.length > 0) {
+      return expenses.map(e => {
+        let newExpense = { ...e };
+        // 결제자 보정
+        if (!effectiveParticipants.some(f => f.id === e.paidById)) {
+          const found = effectiveParticipants.find(f => f.name === e.paidById);
+          if (found) newExpense.paidById = found.id;
+        }
+        // 분배자(splitAmongIds) 보정
+        if (Array.isArray(e.splitAmongIds)) {
+          newExpense.splitAmongIds = e.splitAmongIds.map((idOrName: string) => {
+            // id로 매칭 안되면 name으로 매칭
+            const found = effectiveParticipants.find(f => f.id === idOrName || f.name === idOrName);
+            return found ? found.id : idOrName;
+          });
+        }
+        return newExpense;
+      });
+    }
+    return expenses;
+  }, [expenses, meeting, effectiveParticipants]);
+
+  // settlementSuggestions useMemo 중복 선언 제거, mappedExpenses 사용
+  const settlementSuggestions = useMemo(() => {
+    // 1. 개인별 최종 정산액(finalAmount) 계산
+    const people = effectiveParticipants.map(p => {
+      const totalPaid = mappedExpenses.filter(e => e.paidById === p.id).reduce((sum, e) => sum + e.totalAmount, 0);
+      const shouldPay = perPersonCostDetails.perPersonCostWithFund[p.id] || 0;
+      const finalAmount = parseFloat((totalPaid - shouldPay).toFixed(2));
+      return { friendId: p.id, finalAmount };
+    });
+    // 2. 내림차순 정렬 (많이 받을 사람부터)
+    const sorted = [...people].sort((a, b) => b.finalAmount - a.finalAmount);
+    // 3. 회비 지원 송금 제안 (받을 돈이 있는 사람부터 회비에서 지급)
+    let fundLeft = perPersonCostDetails.fundUsed;
+    const fundPayouts: { to: string; amount: number }[] = [];
+    const afterFund: { friendId: string; amount: number }[] = [];
+    for (const person of sorted) {
+      if (person.finalAmount > 0.01 && fundLeft > 0.01) {
+        const payout = Math.min(person.finalAmount, fundLeft);
+        fundPayouts.push({ to: person.friendId, amount: payout });
+        afterFund.push({ friendId: person.friendId, amount: parseFloat((person.finalAmount - payout).toFixed(2)) });
+        fundLeft -= payout;
+      } else {
+        afterFund.push({ friendId: person.friendId, amount: person.finalAmount });
+      }
+    }
+    // 4. 남은 금액 기준으로 일반 송금 제안 (그리디 매칭)
+    const receivers = afterFund.filter(p => p.amount > 0.01).sort((a, b) => b.amount - a.amount);
+    const senders = afterFund.filter(p => p.amount < -0.01).sort((a, b) => a.amount - b.amount);
+    const suggestions: { from: string; to: string; amount: number }[] = [];
+    let i = 0, j = 0;
+    while (i < senders.length && j < receivers.length) {
+      const send = senders[i];
+      const recv = receivers[j];
+      const amount = Math.min(-send.amount, recv.amount);
+      if (amount >= 0.01) {
+        suggestions.push({ from: send.friendId, to: recv.friendId, amount: parseFloat(amount.toFixed(2)) });
+        send.amount += amount;
+        recv.amount -= amount;
+      }
+      if (Math.abs(send.amount) < 0.01) i++;
+      if (Math.abs(recv.amount) < 0.01) j++;
+    }
+    return { fundPayouts, suggestions };
+  }, [mappedExpenses, effectiveParticipants, perPersonCostDetails]);
   
-  // getFriendName can be outside useMemo if allFriends doesn't change, or pass allFriends to useMemo
+  // getFriendName: allFriends와 effectiveParticipants 모두에서 찾도록 개선
   const getFriendName = (friendId: string) => {
-    const friend = allFriends.find(f => f.id === friendId);
+    const friend = allFriends.find(f => f.id === friendId)
+      || effectiveParticipants.find(f => f.id === friendId);
     if (!friend) return '알 수 없음';
     return friend.name + (friend.description ? ` (${friend.description})` : '');
   };
+
+  if (participants.length === 0 && meeting.isTemporary && Array.isArray(meeting.temporaryParticipants) && meeting.temporaryParticipants.length > 0) {
+    // 임시 모임: temporaryParticipants 이름만 표시
+    return (
+      <Card>
+        <CardHeader>
+          <CardDescription>임시 모임의 최종 정산 내역입니다.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="mb-2 text-muted-foreground">참여자 목록:</div>
+          <ul className="mb-4 pl-5 list-disc text-sm text-muted-foreground">
+            {meeting.temporaryParticipants.map((p, idx) => (
+              <li key={idx}>{p.name}</li>
+            ))}
+          </ul>
+          <p className="text-muted-foreground text-center py-4">정산 내역을 표시할 수 없습니다. (임시 모임은 참여자 이름만 표시)</p>
+        </CardContent>
+      </Card>
+    );
+  }
 
   if (participants.length === 0) {
     return (
@@ -225,26 +240,22 @@ export function PaymentSummary({ meeting, expenses, participants, allFriends }: 
       <CardHeader>
         <CardDescription className="space-y-1 mt-1">
           <div>
-            총 지출: {calculationResults.totalExpenses.toLocaleString(undefined, { maximumFractionDigits: 0 })}원
+            총 지출: {perPersonCostDetails.totalSpent.toLocaleString(undefined, { maximumFractionDigits: 0 })}원
           </div>
-          {/* Display overall per-person cost before any fee application if it makes sense */}
-          {/* For example:
-            participants.length > 0 && !meeting.isTemporary && !calculationResults.isReserveFundUsedForDisplay && (
+          {participants.length > 0 && (
             <div>
-              참여자 1인당 부담액: {(calculationResults.totalExpenses / participants.length).toLocaleString(undefined, { maximumFractionDigits: 0 })}원
+              참여자 1인당 부담액 (회비 적용 전): {perPersonCostDetails.perPersonCost.toLocaleString(undefined, { maximumFractionDigits: 0 })}원
             </div>
-          )} */}
-          {/* The feeDescription now aims to summarize fee application */}
-          <div className={`text-sm ${calculationResults.expensesCoveredByDues > 0.01 ? 'text-primary' : 'text-muted-foreground'}`}>
-            <PiggyBank className="inline-block h-4 w-4 mr-1 align-middle" />
-            {calculationResults.feeDescription}
-          </div>
-          {calculationResults.remainingDues > 0.01 && (
-             <div className="text-sm text-blue-600">
-               <Info className="inline-block h-4 w-4 mr-1 align-middle" />
-               회비에서 남은 금액: {calculationResults.remainingDues.toLocaleString(undefined, {maximumFractionDigits: 0})}원 (정산에 반영됨)
-             </div>
           )}
+          {perPersonCostDetails.fundUsed > 0.01 && (
+            <div>
+                회비적용 인원 1인당 부담액: {perPersonCostDetails.perFundApplicableCost.toLocaleString(undefined, { maximumFractionDigits: 0 })}원
+            </div>
+          )}
+          <div className={`text-sm ${perPersonCostDetails.fundUsed > 0.01 ? 'text-primary' : 'text-muted-foreground'}`}>
+            <PiggyBank className="inline-block h-4 w-4 mr-1 align-middle" />
+            {perPersonCostDetails.fundDescription}
+          </div>
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -262,64 +273,119 @@ export function PaymentSummary({ meeting, expenses, participants, allFriends }: 
               <CardDescription>
                 회비 및 지출 내역이 모두 반영된 개인별 최종 부담액입니다.<br />
               </CardDescription>
-              <div className="overflow-x-auto">
-                <ScrollArea className="pr-3 mt-2 min-w-[600px]">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>참여자</TableHead>
-                        <TableHead className="text-right">총 지출액</TableHead>
-                        <TableHead className="text-right">본인부담액</TableHead>
-                        <TableHead className="text-right">최종 정산액</TableHead>
-                        <TableHead className="text-right">상태</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {participants.map(p => {
-                        const totalPaidForItems = calculationResults.amountPaidByEach.get(p.id) || 0;
-                        const actualCostShare = calculationResults.finalCostSharePerPerson.get(p.id) || 0;
-                        const finalAmount = calculationResults.netAmountForPerson.get(p.id) || 0;
-                        // const feePaidOrCredited = calculationResults.duesContributedByEach.get(p.id) || 0;
-
-                        return (
-                          <TableRow key={p.id}>
-                            <TableCell className="font-medium flex items-center">
-                              <UserCircle className="h-4 w-4 mr-2 opacity-70" />
-                              {getFriendName(p.id)}
-                              {!meeting.isTemporary && calculationResults.isReserveFundUsedForDisplay && calculationResults.nonReserveFundParticipantsForDisplay.includes(p.id) && (
-                                <Badge variant="outline" className="ml-2 text-xs">적립금 미적용</Badge>
-                              )}
-                            </TableCell>
-                            <TableCell className="text-right">
-                              {totalPaidForItems.toLocaleString(undefined, { maximumFractionDigits: 0 })}원
-                            </TableCell>
-                            <TableCell className="text-right">
-                              {/* 본인부담액: 최종적으로 지출에 대해 부담해야 하는 금액 */}
-                              {actualCostShare.toLocaleString(undefined, { maximumFractionDigits: 0 })}원
-                            </TableCell>
-                            <TableCell className={`text-right font-semibold ${finalAmount > 0.01 ? 'text-green-600' : finalAmount < -0.01 ? 'text-red-600' : 'text-muted-foreground'}`}> 
-                              {Math.abs(finalAmount) < 0.01 ? '-' : `${finalAmount > 0 ? '+' : ''}${finalAmount.toLocaleString(undefined, { maximumFractionDigits: 0 })}원`}
-                            </TableCell>
-                            <TableCell className="text-right">
-                              {finalAmount > 0.01 ? (
-                                <span className="inline-flex items-center text-xs text-green-700 bg-green-100 px-2 py-0.5 rounded-full">
-                                  <TrendingUp className="h-3 w-3 mr-1" /> 받을 돈
-                                </span>
-                              ) : finalAmount < -0.01 ? (
-                                <span className="inline-flex items-center text-xs text-red-700 bg-red-100 px-2 py-0.5 rounded-full">
-                                  <TrendingDown className="h-3 w-3 mr-1" /> 내야할 돈
-                                </span>
-                              ) : (
-                                <span className="text-xs text-muted-foreground">정산 완료</span>
-                              )}
-                            </TableCell>
+              {meeting.isTemporary && Array.isArray(meeting.temporaryParticipants) && meeting.temporaryParticipants.length > 0 ? (
+                <div className="mb-4">
+                  <h3 className="text-md font-semibold mb-2 flex items-center gap-1.5">
+                    <Users className="h-4 w-4" />
+                    임시 모임 참여자
+                  </h3>
+                  <CardDescription>
+                    임시 모임도 정산 내역이 있으면 아래에 표시됩니다.<br />
+                  </CardDescription>
+                  <div className="overflow-x-auto">
+                    <ScrollArea className="pr-3 mt-2 min-w-[600px]">
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>참여자</TableHead>
+                            <TableHead className="text-right">총 지출액</TableHead>
+                            <TableHead className="text-right">본인부담액</TableHead>
+                            <TableHead className="text-right">최종 정산액</TableHead>
+                            <TableHead className="text-right">상태</TableHead>
                           </TableRow>
-                        );
-                      })}
-                    </TableBody>
-                  </Table>
-                </ScrollArea>
-              </div>
+                        </TableHeader>
+                        <TableBody>
+                          {effectiveParticipants.map((p, idx) => {
+                            const totalPaid = mappedExpenses.filter(e => e.paidById === p.id).reduce((sum, e) => sum + e.totalAmount, 0);
+                            const shouldPay = perPersonCostDetails.perPersonCostWithFund[p.id] || 0;
+                            const finalAmount = parseFloat((totalPaid - shouldPay).toFixed(2));
+                            return (
+                              <TableRow key={p.id}>
+                                <TableCell className="font-medium flex items-center">
+                                  <UserCircle className="h-4 w-4 mr-2 opacity-70" />
+                                  {p.name}
+                                </TableCell>
+                                <TableCell className="text-right">{totalPaid ? totalPaid.toLocaleString(undefined, { maximumFractionDigits: 0 }) + '원' : '-'}</TableCell>
+                                <TableCell className="text-right">{shouldPay ? shouldPay.toLocaleString(undefined, { maximumFractionDigits: 0 }) + '원' : '-'}</TableCell>
+                                <TableCell className="text-right font-semibold">{Math.abs(finalAmount) < 0.01 ? '-' : `${finalAmount > 0 ? '+' : ''}${finalAmount.toLocaleString(undefined, { maximumFractionDigits: 0 })}원`}</TableCell>
+                                <TableCell className="text-right">
+                                  {finalAmount > 0.01 ? (
+                                    <span className="inline-flex items-center text-xs text-green-700 bg-green-100 px-2 py-0.5 rounded-full">
+                                      <TrendingUp className="h-3 w-3 mr-1" /> 받을 돈
+                                    </span>
+                                  ) : finalAmount < -0.01 ? (
+                                    <span className="inline-flex items-center text-xs text-red-700 bg-red-100 px-2 py-0.5 rounded-full">
+                                      <TrendingDown className="h-3 w-3 mr-1" /> 내야할 돈
+                                    </span>
+                                  ) : (
+                                    <span className="text-xs text-muted-foreground">정산 완료</span>
+                                  )}
+                                </TableCell>
+                              </TableRow>
+                            );
+                          })}
+                        </TableBody>
+                      </Table>
+                    </ScrollArea>
+                  </div>
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <ScrollArea className="pr-3 mt-2 min-w-[600px]">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>참여자</TableHead>
+                          <TableHead className="text-right">총 지출액</TableHead>
+                          <TableHead className="text-right">본인부담액</TableHead>
+                          <TableHead className="text-right">최종 정산액</TableHead>
+                          <TableHead className="text-right">상태</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {participants.map(p => {
+                          const totalPaid = mappedExpenses.filter(e => e.paidById === p.id).reduce((sum, e) => sum + e.totalAmount, 0);
+                          const shouldPay = perPersonCostDetails.perPersonCostWithFund[p.id] || 0;
+                          const finalAmount = parseFloat((totalPaid - shouldPay).toFixed(2));
+                          return (
+                            <TableRow key={p.id}>
+                              <TableCell className="font-medium flex items-center">
+                                <UserCircle className="h-4 w-4 mr-2 opacity-70" />
+                                {getFriendName(p.id)}
+                                {perPersonCostDetails.fundUsed > 0.01 && perPersonCostDetails.fundNonApplicableIds.includes(p.id) && (
+                                  <Badge variant="outline" className="ml-2 text-xs">회비 미적용</Badge>
+                                )}
+                              </TableCell>
+                              <TableCell className="text-right">
+                                {totalPaid.toLocaleString(undefined, { maximumFractionDigits: 0 })}원
+                              </TableCell>
+                              <TableCell className="text-right">
+                                {shouldPay.toLocaleString(undefined, { maximumFractionDigits: 0 })}원
+                              </TableCell>
+                              <TableCell className={`text-right font-semibold ${finalAmount > 0.01 ? 'text-green-600' : finalAmount < -0.01 ? 'text-red-600' : 'text-muted-foreground'}`}> 
+                                {Math.abs(finalAmount) < 0.01 ? '-' : `${finalAmount > 0 ? '+' : ''}${finalAmount.toLocaleString(undefined, { maximumFractionDigits: 0 })}원`}
+                              </TableCell>
+                              <TableCell className="text-right">
+                                {finalAmount > 0.01 ? (
+                                  <span className="inline-flex items-center text-xs text-green-700 bg-green-100 px-2 py-0.5 rounded-full">
+                                    <TrendingUp className="h-3 w-3 mr-1" /> 받을 돈
+                                  </span>
+                                ) : finalAmount < -0.01 ? (
+                                  <span className="inline-flex items-center text-xs text-red-700 bg-red-100 px-2 py-0.5 rounded-full">
+                                    <TrendingDown className="h-3 w-3 mr-1" /> 내야할 돈
+                                  </span>
+                                ) : (
+                                  <span className="text-xs text-muted-foreground">정산 완료</span>
+                                )}
+                              </TableCell>
+                            </TableRow>
+                          );
+                        })}
+                      </TableBody>
+                    </Table>
+                  </ScrollArea>
+                </div>
+              )}
             </div>
 
             {settlementSuggestions.suggestions.length > 0 && (
@@ -339,18 +405,31 @@ export function PaymentSummary({ meeting, expenses, participants, allFriends }: 
                           <TableHead>보내는 사람</TableHead>
                           <TableHead>받는 사람</TableHead>
                           <TableHead className="text-right">금액</TableHead>
-                          {/* <TableHead className="text-right">비고</TableHead> */}
+                          <TableHead className="text-right">비고</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {calculationResults.settlementSuggestions.map((debt, index) => (
+                        {/* 회비에서 결제자에게 송금된 내역 먼저 표시 */}
+                        {meeting.useReserveFund && perPersonCostDetails.fundUsed > 0.01 && 
+                        settlementSuggestions.fundPayouts.map((debt, index) => (
+                          <TableRow key={`fundPayout-${index}`}>
+                            <TableCell className="text-muted-foreground">N빵친구 회비</TableCell>
+                            <TableCell>{getFriendName(debt.to)}</TableCell>
+                            <TableCell className="text-right font-medium">
+                              {debt.amount.toLocaleString(undefined, { maximumFractionDigits: 0 })}원
+                            </TableCell>
+                            <TableCell className="text-right text-xs text-primary">회비 지원</TableCell>
+                          </TableRow>
+                        ))}
+                        {/* 일반 송금 제안: 기존 개인별 최종 정산 현황(본인부담액 반영) 기준으로만 계산 */}
+                        {settlementSuggestions.suggestions.map((debt, index) => (
                           <TableRow key={`suggestion-${index}`}>
                             <TableCell>{getFriendName(debt.from)}</TableCell>
                             <TableCell>{getFriendName(debt.to)}</TableCell>
                             <TableCell className="text-right font-medium">
                               {debt.amount.toLocaleString(undefined, { maximumFractionDigits: 0 })}원
                             </TableCell>
-                            {/* <TableCell className="text-right text-xs text-muted-foreground">일반 정산</TableCell> */}
+                            <TableCell className="text-right text-xs text-muted-foreground">일반 정산</TableCell>
                           </TableRow>
                         ))}
                       </TableBody>
@@ -360,7 +439,7 @@ export function PaymentSummary({ meeting, expenses, participants, allFriends }: 
               </div>
             )}
 
-            {calculationResults.settlementSuggestions.length === 0 && expenses.length > 0 && (
+            {settlementSuggestions.suggestions.length === 0 && expenses.length > 0 && (
               <p className="text-center text-muted-foreground py-3">모든 정산이 완료되었거나 추가 송금이 필요하지 않습니다.</p>
             )}
           </div>
@@ -370,11 +449,8 @@ export function PaymentSummary({ meeting, expenses, participants, allFriends }: 
         <CardFooter>
           <p className="text-xs text-muted-foreground">
             참고: 소수점 계산으로 인해 10원 미만의 오차가 발생할 수 있습니다.
-            {calculationResults.expensesCoveredByDues > 0.01 && !meeting.isTemporary && (
-              ' 적립금 사용액이 혜택 대상자들의 부담금을 줄이는 데 사용됩니다.'
-            )}
-             {calculationResults.expensesCoveredByDues > 0.01 && meeting.isTemporary && (
-              ' 설정된 회비가 참여자들의 부담금을 줄이는 데 사용됩니다.'
+            {perPersonCostDetails.fundUsed > 0.01 && (
+              ' 회비 사용액이 혜택 대상자들의 부담금을 줄이는 데 사용됩니다.'
             )}
           </p>
         </CardFooter>

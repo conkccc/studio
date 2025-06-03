@@ -777,7 +777,6 @@ export function MeetingDetailsClient({
               expenses={expenses}
               participants={displayParticipants}
               allFriends={allFriends}
-              currentUserId={currentUser?.uid}
             />
           </Card>
         </TabsContent>

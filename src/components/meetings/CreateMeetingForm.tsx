@@ -14,7 +14,7 @@ import { Calendar } from '@/components/ui/calendar';
 import { cn } from '@/lib/utils';
 import { format } from 'date-fns';
 import { ko } from 'date-fns/locale';
-import type { Friend, Meeting } from '@/lib/types';
+import type { Friend, Meeting, FriendGroup } from '@/lib/types';
 import { createMeetingAction, updateMeetingAction } from '@/lib/actions';
 import { useToast } from '@/hooks/use-toast';
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
@@ -128,9 +128,6 @@ const meetingSchema = meetingSchemaBase
     // The refine was for "one of them must be present". That's what needs to go.
     // The negative check part of that refine is redundant with min(0).
     // So, just removing that specific refine block that checks `data.totalFee === undefined && data.feePerPerson === undefined` is the primary goal.
-    // The provided "변경 후 예시" still had a refine. Let's stick to the goal: remove the MANDATORY part.
-    // The min(0) in the base schema is sufficient for "if present, must be >= 0".
-    // So, the refine that checks `if (data.isTemporary && data.totalFee === undefined && data.feePerPerson === undefined)` will be removed.
     // The other part of that refine `if (data.isTemporary && data.totalFee !== undefined && data.totalFee < 0) return false;` is covered by `totalFee: z.number().min(0)...`
     // Thus, the entire refine block for temporary fee validation can be removed.
     // This means the last .refine in the provided code will be deleted.
@@ -143,8 +140,11 @@ interface MeetingFormProps {
   currentUserId: string;
   isEditMode?: boolean;
   initialData?: Meeting;
-  groupId?: string; // 추가: 모임 생성 시 그룹 지정
-  onTemporaryChange?: (isTemporary: boolean) => void; // 콜백 prop 추가
+  groupId?: string;
+  onTemporaryChange?: (isTemporary: boolean) => void;
+  groups?: FriendGroup[];
+  selectedGroupId?: string | null;
+  setSelectedGroupId?: (id: string | null) => void;
 }
 
 const googleMapsLibraries: ("places" | "maps" | "marker")[] = ["places", "maps", "marker"];
@@ -263,7 +263,7 @@ function LocationSearchInput({ form, isPending, isMapsLoaded, mapsLoadError, onL
 }
 
 
-export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, initialData, groupId }: MeetingFormProps) {
+export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, initialData, groupId, onTemporaryChange, groups = [], selectedGroupId = null, setSelectedGroupId }: MeetingFormProps) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const { toast } = useToast();
@@ -285,6 +285,8 @@ export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, 
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<google.maps.Map | null>(null);
   const markerInstanceRef = useRef<google.maps.marker.AdvancedMarkerElement | null>(null);
+
+  const [groupPopoverOpen, setGroupPopoverOpen] = useState(false);
 
 
   const form = useForm<MeetingFormData>({
@@ -329,8 +331,8 @@ export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, 
   const watchedIsTemporary = form.watch('isTemporary'); // Watch the form field
 
   useEffect(() => {
-    props.onTemporaryChange?.(watchedIsTemporary || false);
-  }, [watchedIsTemporary, props.onTemporaryChange]);
+    onTemporaryChange?.(watchedIsTemporary || false);
+  }, [watchedIsTemporary, onTemporaryChange]);
 
   useEffect(() => {
     const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
@@ -668,29 +670,65 @@ export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, 
       {/* Temporary Meeting Switch moved here */}
       <div className="mb-4">
         <div className="flex items-center space-x-2 mt-2">
-          {/* Using existing Switch logic, not Controller as initially suggested, to maintain consistency with isTemporaryMeeting state handling */}
           <Switch
             id="temporaryMeetingSwitch"
-            checked={isTemporaryMeeting} // Controlled by local state, synced to form via useEffect
+            checked={isTemporaryMeeting}
             onCheckedChange={(checked) => {
-              // In edit mode, if the meeting is settled, prevent changing its type.
-              // The problem statement mentioned initialData.isTemporary !== undefined for disabling,
-              // but the original disabled logic was `(isEditMode && initialData?.isSettled)`.
-              // Let's refine this: if isEditMode, and initialData.isTemporary is defined (meaning it's a persisted meeting),
-              // and it's settled, then it should be disabled.
-              // Or, if we decide type cannot be changed in edit mode at all (as per previous discussion on updateAction),
-              // then it should be `disabled={isPending || (isEditMode && initialData?.id !== undefined)}`
-              // For now, sticking to "settled" makes it non-editable.
               if (isEditMode && initialData?.isSettled) return;
-              setIsTemporaryMeeting(checked); // This will trigger useEffect to update form.setValue('isTemporary', checked)
+              setIsTemporaryMeeting(checked);
             }}
-            // Disable if pending, or if in edit mode and the meeting is settled.
             disabled={isPending || (isEditMode && initialData?.isSettled)}
           />
           <Label htmlFor="temporaryMeetingSwitch" className={cn("cursor-pointer", (isPending || (isEditMode && initialData?.isSettled)) && "text-muted-foreground cursor-not-allowed")}>임시 모임 만들기</Label>
         </div>
         {form.formState.errors.isTemporary && <p className="text-sm text-destructive mt-1">{form.formState.errors.isTemporary.message}</p>}
       </div>
+
+      {/* 그룹 선택 드롭다운: 임시 모임이 아닐 때만 표시, 임시 모임 UI 바로 아래 */}
+      {!isTemporaryMeeting && groups && setSelectedGroupId && (
+        <div className="mt-2 mb-4">
+          <label className="block mb-1 font-medium">친구 그룹 선택 <span className="text-destructive">*</span></label>
+          <Popover open={groupPopoverOpen} onOpenChange={setGroupPopoverOpen}>
+            <PopoverTrigger asChild>
+              <Button
+                variant="outline"
+                role="combobox"
+                aria-expanded={groupPopoverOpen}
+                className="w-full justify-between"
+                onClick={() => setGroupPopoverOpen((prev) => !prev)}
+              >
+                {selectedGroupId
+                  ? (groups.find(g => g.id === selectedGroupId)?.name || '그룹 선택...')
+                  : '그룹 선택...'}
+                <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-[--radix-popover-trigger-width] p-0">
+              <Command>
+                <CommandInput placeholder="그룹 이름 검색..." />
+                <CommandList>
+                  <CommandEmpty>그룹을 찾을 수 없습니다.</CommandEmpty>
+                  <CommandGroup>
+                    {groups.map(group => (
+                      <CommandItem
+                        key={group.id}
+                        value={group.name}
+                        onSelect={() => {
+                          setSelectedGroupId(group.id);
+                          setGroupPopoverOpen(false);
+                        }}
+                      >
+                        <Check className={cn("mr-2 h-4 w-4", selectedGroupId === group.id ? "opacity-100" : "opacity-0")} />
+                        <span>{group.name}</span>
+                      </CommandItem>
+                    ))}
+                  </CommandGroup>
+                </CommandList>
+              </Command>
+            </PopoverContent>
+          </Popover>
+        </div>
+      )}
 
       <div>
         <Label htmlFor="dateTime" className={cn((isEditMode && initialData?.isSettled) && "text-muted-foreground")}>시작 날짜 및 시간 <span className="text-destructive">*</span></Label>
@@ -734,7 +772,7 @@ export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, 
                 defaultValue={dateTimeValue ? format(dateTimeValue, "HH:mm") : "12:00"}
                 onChange={(e) => {
                   const newTime = e.target.value;
-                  const currentDateTime = form.watch('dateTime') || new Date(); // Fallback to new Date() if dateTime is undefined
+                  const currentDateTime = dateTimeValue || new Date(); // Fallback to new Date() if dateTime is undefined
                   const [hours, minutes] = newTime.split(':').map(Number);
                   const newDate = new Date(currentDateTime); // Create a new Date object to avoid mutating the original
                   newDate.setHours(hours, minutes, 0, 0);
@@ -1030,7 +1068,7 @@ export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, 
                         </div>
                       ))
                   ) : (
-                    <p className={cn("text-sm", (isEditMode && initialData?.isSettled) ? "text-muted-foreground/70" : "text-muted-foreground", isTemporaryMeeting && "text-muted-foreground/70" )}>참여자를 먼저 선택해주세요.</p>
+                    <p className={cn("text-sm", (isEditMode && initialData?.isSettled) ? "text-muted-foreground/70" : "text-mutedForeground", isTemporaryMeeting && "text-muted-foreground/70" )}>참여자를 먼저 선택해주세요.</p>
                   )}
                 </div>
                 {form.formState.errors.nonReserveFundParticipants && <p className="text-sm text-destructive mt-1">{form.formState.errors.nonReserveFundParticipants.message}</p>}
