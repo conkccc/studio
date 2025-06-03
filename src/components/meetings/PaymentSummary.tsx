@@ -31,11 +31,11 @@ export function PaymentSummary({ meeting, expenses, participants, allFriends }: 
   const effectiveParticipants = useMemo<Friend[]>(() => {
     if (meeting.isTemporary && Array.isArray(meeting.temporaryParticipants) && meeting.temporaryParticipants.length > 0) {
       return meeting.temporaryParticipants.map((p, idx) => ({
-        id: 'id' in p && p.id ? String(p.id) : `${p.name}-${idx}`,
+        id: `temp_${idx}_${p.name}`, // Corrected ID generation
         name: p.name,
-        description: (p as any).description || '',
-        groupId: 'temp',
-        createdAt: new Date(),
+        description: '(임시)', // Consistent with MeetingDetailsClient
+        groupId: meeting.groupId || 'temp_group', // Associate with meeting's group or a default
+        createdAt: new Date(), // Placeholder
       }));
     }
     return participants;
