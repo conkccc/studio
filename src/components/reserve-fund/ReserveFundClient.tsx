@@ -163,7 +163,8 @@ export function ReserveFundClient() {
     return isNaN(num) ? String(value) : num.toLocaleString();
   };
 
-  const isAdmin = appUser?.role === 'admin'; // Use appUser.role
+  const isAdmin = appUser?.role === 'admin';
+  const canSetBalance = appUser?.role === 'admin' || (appUser?.role === 'user' && selectedGroup?.isOwned === true);
   // const isViewer = appUser?.role === 'viewer'; // Not directly used, but good for clarity if needed
 
   const handleGroupSelect = (groupId: string) => {
@@ -227,16 +228,16 @@ export function ReserveFundClient() {
             <CardHeader className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
               <div className="flex-1">
                 <CardTitle className="flex items-center gap-2 mb-1">
-                    <PiggyBank className="h-5 w-5 text-primary"/> {/* Changed Icon to PiggyBank for balance display */}
+                    <PiggyBank className="h-5 w-5 text-primary"/>
                     {simpleGroupTitle}
                 </CardTitle>
-                <CardDescription className="mt-2"> {/* Increased spacing slightly */}
+                <CardDescription className="mt-2">
                     현재 잔액: <strong className="text-3xl font-bold text-primary">{isLoadingFundDetails ? <Loader2 className="h-4 w-4 animate-spin inline-block"/> : (currentBalance !== null ? currentBalance.toLocaleString() + '원' : '정보 없음')}</strong>
                     <br/>
                     <span className="text-xs">모임에서 회비를 사용하면 이 잔액에서 자동으로 차감됩니다.</span>
                 </CardDescription>
               </div>
-              {isAdmin && (
+              {canSetBalance && ( // Updated condition here
                 <AlertDialog open={isUpdateDialogOpen} onOpenChange={setIsUpdateDialogOpen}>
                   <AlertDialogTrigger asChild>
                     <Button variant="outline" disabled={isLoadingFundDetails || isSubmitting}>
@@ -291,9 +292,13 @@ export function ReserveFundClient() {
           <Card className="shadow-md">
             <CardHeader>
               <CardTitle className="flex items-center gap-2 mb-2">
-                <History className="h-5 w-5 text-primary"/>{simpleGroupTitle} - 변경 내역
+                <History className="h-5 w-5 text-primary"/>
+                변경 내역 {/* Static title as per refined interpretation */}
               </CardTitle>
-              <CardDescription>모임에서의 회비 사용 또는 수동 잔액 설정 내역입니다.</CardDescription>
+              <CardDescription>
+                {selectedGroup ? `'${selectedGroup.name}' 그룹의 ` : ""}
+                모임에서의 회비 사용 또는 수동 잔액 설정 내역입니다.
+              </CardDescription>
             </CardHeader>
             <CardContent className="pt-2">
               {isLoadingFundDetails ? (

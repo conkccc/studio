@@ -640,14 +640,36 @@ export async function deleteExpenseAction(expenseId: string, meetingId: string, 
 // Reserve Fund Actions
 export async function setReserveFundBalanceAction(groupId: string, newBalance: number, description?: string, currentUserId?: string | null) {
   if (!currentUserId) {
-    return { success: false, error: "인증되지 않은 사용자입니다. 로그인이 필요합니다." };
+    return { success: false, error: "인증되지 않은 사용자입니다. 사용자 ID가 필요합니다." };
   }
-  const callingUser = await dbGetUserById(currentUserId);
-  if (!callingUser || callingUser.role !== 'admin') {
-    return { success: false, error: "회비 잔액 설정 권한이 없습니다." };
+  if (!groupId) {
+    return { success: false, error: "그룹 ID가 필요합니다." };
   }
 
   try {
+    const callingUser = await dbGetUserById(currentUserId);
+    if (!callingUser) {
+      return { success: false, error: "사용자 정보를 찾을 수 없습니다." };
+    }
+
+    let hasPermission = false;
+    if (callingUser.role === 'admin') {
+      hasPermission = true;
+    } else if (callingUser.role === 'user') {
+      const groupDocRef = doc(db, 'friendGroups', groupId);
+      const groupSnap = await getDoc(groupDocRef);
+      if (groupSnap.exists()) {
+        const groupData = groupSnap.data() as FriendGroup;
+        if (groupData.ownerUserId === currentUserId) {
+          hasPermission = true;
+        }
+      }
+    }
+
+    if (!hasPermission) {
+      return { success: false, error: "회비 잔액을 설정할 권한이 없습니다. 그룹 소유자 또는 관리자만 가능합니다." };
+    }
+
     await dbSetReserveFundBalance(groupId, newBalance, description || "수동 잔액 조정");
     revalidatePath('/reserve-fund');
     revalidatePath('/'); // Dashboard shows reserve balance
