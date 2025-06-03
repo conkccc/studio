@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useMemo } from 'react'; // Added useMemo
 import {
   createFriendGroupAction,
   deleteFriendGroupAction,
