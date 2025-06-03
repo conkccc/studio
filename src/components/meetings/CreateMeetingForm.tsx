@@ -473,57 +473,112 @@ export function CreateMeetingForm({
 
   // This useEffect handles changes based on watchedIsTemporary
   useEffect(() => {
-    // form.setValue('isTemporary', watchedIsTemporary); // This line is redundant as watchedIsTemporary IS form.isTemporary
+    const setValueOptions = { shouldValidate: false, shouldDirty: false, shouldTouch: false };
+
     if (watchedIsTemporary) {
       // 임시 모임일 경우 기존 참여자/회비 관련 필드 초기화 또는 비활성화
-      form.setValue('participantIds', [], { shouldValidate: true, shouldDirty: true });
-      form.setValue('useReserveFund', false, { shouldValidate: true, shouldDirty: true });
-      form.setValue('partialReserveFundAmount', undefined, { shouldValidate: true, shouldDirty: true });
-      form.setValue('nonReserveFundParticipants', [], { shouldValidate: true, shouldDirty: true });
-      // Also reset temporary specific local states if needed, or ensure they are only used when watchedIsTemporary is true
-      setTemporaryParticipants(initialData?.isTemporary && initialData.temporaryParticipants ? initialData.temporaryParticipants : []);
-      setTempMeetingFeeType(initialData?.isTemporary && initialData.totalFee !== undefined ? 'total' : (initialData?.isTemporary && initialData.feePerPerson !== undefined ? 'perPerson' : 'total'));
-      setTempMeetingTotalFee(initialData?.isTemporary ? initialData.totalFee : undefined);
-      setTempMeetingFeePerPerson(initialData?.isTemporary ? initialData.feePerPerson : undefined);
+      if (JSON.stringify(form.getValues('participantIds')) !== JSON.stringify([])) {
+        form.setValue('participantIds', [], setValueOptions);
+      }
+      if (form.getValues('useReserveFund') !== false) {
+        form.setValue('useReserveFund', false, setValueOptions);
+      }
+      if (form.getValues('partialReserveFundAmount') !== undefined) {
+        form.setValue('partialReserveFundAmount', undefined, setValueOptions);
+      }
+      if (JSON.stringify(form.getValues('nonReserveFundParticipants')) !== JSON.stringify([])) {
+        form.setValue('nonReserveFundParticipants', [], setValueOptions);
+      }
+
+      // 로컬 상태 업데이트 (이 부분은 form.setValue와 직접적인 연관은 없지만, 상태 동기화 로직임)
+      const initialTempParticipants = initialData?.isTemporary && initialData.temporaryParticipants ? initialData.temporaryParticipants : [];
+      if (JSON.stringify(temporaryParticipants) !== JSON.stringify(initialTempParticipants)) {
+        setTemporaryParticipants(initialTempParticipants);
+      }
+
+      let initialFeeType = 'total';
+      if (initialData?.isTemporary && initialData.feePerPerson !== undefined) initialFeeType = 'perPerson';
+      else if (initialData?.isTemporary && initialData.totalFee !== undefined) initialFeeType = 'total';
+      if (tempMeetingFeeType !== initialFeeType) {
+        setTempMeetingFeeType(initialFeeType as 'total' | 'perPerson');
+      }
+
+      const initialTotalFee = initialData?.isTemporary ? initialData.totalFee : undefined;
+      if (tempMeetingTotalFee !== initialTotalFee) {
+        setTempMeetingTotalFee(initialTotalFee);
+      }
+
+      const initialFeePerPerson = initialData?.isTemporary ? initialData.feePerPerson : undefined;
+      if (tempMeetingFeePerPerson !== initialFeePerPerson) {
+        setTempMeetingFeePerPerson(initialFeePerPerson);
+      }
 
     } else {
       // 기존 모임으로 전환 시 임시 관련 필드 초기화
-      form.setValue('temporaryParticipants', undefined, { shouldValidate: true, shouldDirty: true });
-      form.setValue('totalFee', undefined, { shouldValidate: true, shouldDirty: true });
-      form.setValue('feePerPerson', undefined, { shouldValidate: true, shouldDirty: true });
+      if (form.getValues('temporaryParticipants') !== undefined) {
+        form.setValue('temporaryParticipants', undefined, setValueOptions);
+      }
+      if (form.getValues('totalFee') !== undefined) {
+        form.setValue('totalFee', undefined, setValueOptions);
+      }
+      if (form.getValues('feePerPerson') !== undefined) {
+        form.setValue('feePerPerson', undefined, setValueOptions);
+      }
 
-      // 기존 모임의 기본값으로 participantIds 재설정 (모든 친구 선택 또는 initialData 기반)
-      // This part might need careful review if `friends` prop changes or if default selection logic is complex
+      // 기존 모임의 기본값으로 participantIds 재설정
+      const defaultParticipantIds = friends.map(f => f.id);
       if (!isEditMode || !initialData?.participantIds) {
-         // Only set default participants if not in edit mode or if initialData doesn't specify them
-        form.setValue('participantIds', friends.map(f => f.id), { shouldValidate: true, shouldDirty: true });
+        if (JSON.stringify(form.getValues('participantIds')) !== JSON.stringify(defaultParticipantIds)) {
+          form.setValue('participantIds', defaultParticipantIds, setValueOptions);
+        }
       } else if (initialData?.participantIds) {
-        form.setValue('participantIds', initialData.participantIds, { shouldValidate: true, shouldDirty: true });
+        if (JSON.stringify(form.getValues('participantIds')) !== JSON.stringify(initialData.participantIds)) {
+          form.setValue('participantIds', initialData.participantIds, setValueOptions);
+        }
       }
     }
-  }, [watchedIsTemporary, isEditMode, initialData, friends, form.setValue]); // form.setValue is stable
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [watchedIsTemporary, isEditMode, initialData, friends]); // form.setValue 제거, form은 useEffect 내에서 직접 접근
 
   useEffect(() => {
-    if (watchedIsTemporary) { // Use watchedIsTemporary
-      form.setValue('temporaryParticipants', temporaryParticipants, { shouldValidate: true });
+    const setValueOptions = { shouldValidate: true, shouldDirty: false, shouldTouch: false }; // Validate for these
+    if (watchedIsTemporary) {
+      if (JSON.stringify(form.getValues('temporaryParticipants')) !== JSON.stringify(temporaryParticipants)) {
+        form.setValue('temporaryParticipants', temporaryParticipants, setValueOptions);
+      }
     }
-  }, [temporaryParticipants, watchedIsTemporary, form.setValue]); // Use watchedIsTemporary
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [temporaryParticipants, watchedIsTemporary]); // form.setValue 제거
 
   useEffect(() => {
-    if (watchedIsTemporary) { // Use watchedIsTemporary
+    const setValueOptions = { shouldValidate: true, shouldDirty: false, shouldTouch: false }; // Validate for these
+    if (watchedIsTemporary) {
       if (tempMeetingFeeType === 'total') {
-        form.setValue('totalFee', tempMeetingTotalFee, { shouldValidate: true });
-        form.setValue('feePerPerson', undefined, { shouldValidate: true });
-      } else {
-        form.setValue('feePerPerson', tempMeetingFeePerPerson, { shouldValidate: true });
-        form.setValue('totalFee', undefined, { shouldValidate: true });
+        if (form.getValues('totalFee') !== tempMeetingTotalFee) {
+          form.setValue('totalFee', tempMeetingTotalFee, setValueOptions);
+        }
+        if (form.getValues('feePerPerson') !== undefined) {
+          form.setValue('feePerPerson', undefined, setValueOptions);
+        }
+      } else { // perPerson
+        if (form.getValues('feePerPerson') !== tempMeetingFeePerPerson) {
+          form.setValue('feePerPerson', tempMeetingFeePerPerson, setValueOptions);
+        }
+        if (form.getValues('totalFee') !== undefined) {
+          form.setValue('totalFee', undefined, setValueOptions);
+        }
       }
     } else {
-      // These are also reset in the main watchedIsTemporary effect, but good to be sure
-      form.setValue('totalFee', undefined, { shouldValidate: true });
-      form.setValue('feePerPerson', undefined, { shouldValidate: true });
+      // Ensure these are cleared if not temporary (already done in the main effect, but for safety)
+      if (form.getValues('totalFee') !== undefined) {
+        form.setValue('totalFee', undefined, setValueOptions);
+      }
+      if (form.getValues('feePerPerson') !== undefined) {
+        form.setValue('feePerPerson', undefined, setValueOptions);
+      }
     }
-  }, [tempMeetingFeeType, tempMeetingTotalFee, tempMeetingFeePerPerson, watchedIsTemporary, form.setValue]); // Use watchedIsTemporary
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tempMeetingFeeType, tempMeetingTotalFee, tempMeetingFeePerPerson, watchedIsTemporary]); // form.setValue 제거
 
   // This effect is for initializing form when in edit mode or when initialData changes.
   // It also sets the initial local state for isTemporaryMeeting.
@@ -704,8 +759,10 @@ export function CreateMeetingForm({
             checked={watchedIsTemporary || false} // Controlled by form state
             onCheckedChange={(checked) => {
               if (isEditMode && initialData?.isSettled) return;
-              form.setValue('isTemporary', checked, { shouldDirty: true, shouldTouch: true });
-              // Local state setIsTemporaryMeeting is removed, effect on watchedIsTemporary will handle side effects.
+              // Only call setValue if the actual state is different to prevent loops if onCheckedChange is triggered by form.setValue itself
+              if (form.getValues('isTemporary') !== checked) {
+                form.setValue('isTemporary', checked, { shouldDirty: true, shouldTouch: true, shouldValidate: true });
+              }
             }}
             disabled={isPending || (isEditMode && initialData?.isSettled)}
           />
@@ -718,7 +775,7 @@ export function CreateMeetingForm({
       {/* Ensure `groups` is not empty and `onGroupChange` (renamed from setSelectedGroupId in parent) is provided */}
       {!watchedIsTemporary && groups && groups.length > 0 && typeof onGroupChange === 'function' && (
         <div className="mt-2 mb-4">
-          <label className="block mb-1 font-medium">친구 그룹 선택 <span className="text-destructive">*</span></label>
+          <label className="block mb-1 font-medium">친구 그룹 선택 {!initialData?.groupId && <span className="text-destructive">*</span>}</label> {/* Make asterisk conditional if group can be optional for existing meetings */}
           <Popover open={groupPopoverOpen} onOpenChange={setGroupPopoverOpen}>
             <PopoverTrigger asChild>
               <Button

@@ -86,6 +86,20 @@ export async function createFriendAction(payload: { name: string; description?: 
   }
 }
 
+export async function getMeetingByIdAction(meetingId: string) {
+  try {
+    const meeting = await dbGetMeetingById(meetingId);
+    if (!meeting) {
+      return { success: false, error: '모임을 찾을 수 없습니다.', meeting: null };
+    }
+    return { success: true, meeting };
+  } catch (error) {
+    console.error(`getMeetingByIdAction Error for meetingId ${meetingId}:`, error);
+    const errorMessage = error instanceof Error ? error.message : '모임 정보를 가져오는 중 오류가 발생했습니다.';
+    return { success: false, error: errorMessage, meeting: null };
+  }
+}
+
 export async function getAllFriendGroupsAction() {
   try {
     const groups = await dbGetAllFriendGroups();
