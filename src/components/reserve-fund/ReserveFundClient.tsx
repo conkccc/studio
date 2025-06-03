@@ -54,7 +54,7 @@ const balanceUpdateSchema = z.object({
 type BalanceUpdateFormData = z.infer<typeof balanceUpdateSchema>;
 
 export function ReserveFundClient() {
-  const { currentUser } = useAuth();
+  const { currentUser, appUser, loading: authLoading } = useAuth(); // Added appUser, authLoading
   const [accessibleGroups, setAccessibleGroups] = useState<DisplayFriendGroup[]>([]);
   const [selectedGroup, setSelectedGroup] = useState<DisplayFriendGroup | null>(null);
   const [transactions, setTransactions] = useState<ReserveFundTransaction[]>([]);
@@ -73,18 +73,18 @@ export function ReserveFundClient() {
 
   // Fetch accessible groups
   useEffect(() => {
-    if (!currentUser) {
+    if (authLoading || !currentUser?.uid || !appUser) { // Updated guard
       setIsLoadingGroups(false);
       setAccessibleGroups([]);
       return;
     }
     setIsLoadingGroups(true);
-    getFriendGroupsForUserAction(currentUser.id)
+    getFriendGroupsForUserAction(appUser.id) // Use appUser.id
       .then(result => {
         if (result.success && result.groups) {
           const processedGroups: DisplayFriendGroup[] = result.groups.map(g => ({
             ...g,
-            isOwned: g.ownerUserId === currentUser.id,
+            isOwned: g.ownerUserId === appUser.id, // Use appUser.id
           }));
           setAccessibleGroups(processedGroups);
           // Auto-select first group if available
@@ -98,7 +98,7 @@ export function ReserveFundClient() {
       })
       .catch(() => toast({ title: '오류', description: '그룹 목록 로딩 중 오류 발생.', variant: 'destructive' }))
       .finally(() => setIsLoadingGroups(false));
-  }, [currentUser, toast]);
+  }, [currentUser, appUser, authLoading, toast]); // Added appUser, authLoading
 
   // Fetch fund details when selectedGroup changes
   useEffect(() => {
@@ -126,14 +126,14 @@ export function ReserveFundClient() {
 
 
   const handleBalanceUpdate = (data: BalanceUpdateFormData) => {
-    if (!selectedGroup || !currentUser) return;
-    if (currentUser.role !== 'admin') {
+    if (!selectedGroup || !appUser) return; // Use appUser
+    if (appUser.role !== 'admin') { // Use appUser.role
       toast({ title: '권한 없음', description: '관리자만 잔액을 수정할 수 있습니다.', variant: 'destructive'});
       return;
     }
     startTransition(async () => {
       const newBalance = typeof data.newBalance === 'number' ? data.newBalance : parseFloat(String(data.newBalance));
-      const result = await setReserveFundBalanceAction(selectedGroup.id, newBalance, data.description || '', currentUser.id);
+      const result = await setReserveFundBalanceAction(selectedGroup.id, newBalance, data.description || '', appUser.id); // Use appUser.id
 
       if (result.success && result.newBalance !== undefined) {
         toast({ title: '성공', description: '회비 잔액이 업데이트되었습니다.' });
@@ -163,19 +163,19 @@ export function ReserveFundClient() {
     return isNaN(num) ? String(value) : num.toLocaleString();
   };
 
-  const isAdmin = currentUser?.role === 'admin';
-  const isViewer = currentUser?.role === 'viewer'; // Viewers cannot edit anything
+  const isAdmin = appUser?.role === 'admin'; // Use appUser.role
+  // const isViewer = appUser?.role === 'viewer'; // Not directly used, but good for clarity if needed
 
   const handleGroupSelect = (groupId: string) => {
     const group = accessibleGroups.find(g => g.id === groupId);
     setSelectedGroup(group || null);
   };
 
-  if (isLoadingGroups) {
-    return <div className="flex justify-center items-center h-40"><Loader2 className="h-8 w-8 animate-spin text-primary" /> <p className="ml-2">그룹 목록 로딩 중...</p></div>;
+  if (authLoading || isLoadingGroups) { // Combined loading state
+    return <div className="flex justify-center items-center h-40"><Loader2 className="h-8 w-8 animate-spin text-primary" /> <p className="ml-2">정보 로딩 중...</p></div>;
   }
 
-  if (!currentUser) {
+  if (!appUser) { // Check appUser for rendering content
      return <p className="text-center text-muted-foreground py-8">로그인이 필요합니다.</p>;
   }
 

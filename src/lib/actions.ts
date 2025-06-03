@@ -726,8 +726,11 @@ export async function toggleMeetingShareAction(meetingId: string, currentUserId:
     }
 
     const user = await dbGetUserById(currentUserId); // Fetch user data from Firestore
+    if (!user) { // Added check for user existence
+      return { success: false, error: "사용자 정보를 찾을 수 없습니다." };
+    }
     const isCreator = meeting.creatorId === currentUserId;
-    const isAdmin = user?.role === 'admin';
+    const isAdmin = user.role === 'admin'; // user is guaranteed to exist here
 
     if (!isCreator && !isAdmin) {
       return { success: false, error: "공유 설정을 변경할 권한이 없습니다." };

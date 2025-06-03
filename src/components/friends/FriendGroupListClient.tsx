@@ -20,7 +20,7 @@ type DisplayFriendGroup = FriendGroup & {
 };
 
 export default function FriendGroupListClient() {
-  const { currentUser } = useAuth();
+  const { currentUser, appUser, loading: authLoading } = useAuth(); // Added appUser and authLoading
   const [groups, setGroups] = useState<DisplayFriendGroup[]>([]);
   const [newGroupName, setNewGroupName] = useState('');
   const [isLoading, setIsLoading] = useState(true); // For initial load
@@ -28,15 +28,19 @@ export default function FriendGroupListClient() {
   const { toast } = useToast();
 
   const fetchGroups = useCallback(async () => {
-    if (!currentUser) return;
+    if (authLoading || !currentUser?.uid || !appUser) { // Updated guard
+      setIsLoading(false); // Ensure loading is false if we return early
+      setGroups([]);
+      return;
+    }
     setIsLoading(true);
     try {
-      const res = await getFriendGroupsForUserAction(currentUser.id);
+      const res = await getFriendGroupsForUserAction(appUser.id); // Use appUser.id
       if (res.success && res.groups) {
         const processedGroups: DisplayFriendGroup[] = res.groups.map(group => ({
           ...group,
-          isOwned: group.ownerUserId === currentUser.id,
-          isReferenced: !!(currentUser.friendGroupIds?.includes(group.id)), // Renamed
+          isOwned: group.ownerUserId === appUser.id, // Use appUser.id for ownership check
+          isReferenced: !!(appUser.friendGroupIds?.includes(group.id)),
         }));
         setGroups(processedGroups);
       } else {
@@ -49,23 +53,18 @@ export default function FriendGroupListClient() {
     } finally {
       setIsLoading(false);
     }
-  }, [currentUser, toast]);
+  }, [currentUser, appUser, authLoading, toast]); // Added appUser, authLoading to dependencies
 
   useEffect(() => {
-    if (currentUser) {
-      fetchGroups();
-    } else {
-      // Handle case where user is not logged in, though page access might be restricted higher up
-      setIsLoading(false);
-      setGroups([]);
-    }
-  }, [currentUser, fetchGroups]);
+    // fetchGroups will now internally check for currentUser/appUser and authLoading
+    fetchGroups();
+  }, [fetchGroups]); // fetchGroups itself is memoized with correct dependencies
 
   const handleCreateGroup = async () => {
-    if (!newGroupName.trim() || !currentUser) return;
+    if (!newGroupName.trim() || !appUser?.id) return; // Use appUser.id
     setIsSubmitting(true);
     try {
-      const res = await createFriendGroupAction(newGroupName, currentUser.id);
+      const res = await createFriendGroupAction(newGroupName, appUser.id); // Use appUser.id
       if (res.success) {
         setNewGroupName('');
         toast({ title: '성공', description: '새 그룹이 추가되었습니다.' });
@@ -81,11 +80,11 @@ export default function FriendGroupListClient() {
   };
 
   const handleDeleteGroup = async (groupId: string) => {
-    if (!currentUser) return;
+    if (!appUser?.id) return; // Use appUser.id
     setIsSubmitting(true);
     try {
       // The deleteFriendGroupAction now includes permission check with currentUserId
-      const res = await deleteFriendGroupAction(groupId, currentUser.id);
+      const res = await deleteFriendGroupAction(groupId, appUser.id); // Use appUser.id
       if (res.success) {
         toast({ title: '성공', description: '그룹이 삭제되었습니다.' });
         await fetchGroups(); // Refresh the list
@@ -113,7 +112,8 @@ export default function FriendGroupListClient() {
     return <p className="text-center text-muted-foreground">로그인이 필요합니다.</p>;
   }
 
-  const canCreateGroup = currentUser.role === 'admin' || currentUser.role === 'user';
+  // Use appUser for role check
+  const canCreateGroup = appUser && (appUser.role === 'admin' || appUser.role === 'user');
 
   const ownedGroups = groups.filter(g => g.isOwned);
   const referencedGroups = groups.filter(g => !g.isOwned && g.isReferenced); // Show only referenced if not owned
@@ -146,7 +146,8 @@ export default function FriendGroupListClient() {
             {ownedGroups.map(group => (
               <li key={group.id} className="flex items-center gap-2 bg-card p-3 rounded-md shadow-sm">
                 <span className="flex-1 font-medium">{group.name}</span>
-                { (currentUser.role === 'user' || currentUser.role === 'admin') && (
+                {/* Use appUser for role check */}
+                { appUser && (appUser.role === 'user' || appUser.role === 'admin') && (
                   <>
                     {/* <Button variant="outline" size="sm" onClick={() => handleEditGroup(group)} disabled={isSubmitting}>
                       <Edit className="h-4 w-4 mr-1" /> 수정

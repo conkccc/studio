@@ -26,7 +26,8 @@ interface MeetingListClientProps {
 }
 
 export function MeetingListClient({ allFriends }: MeetingListClientProps) {
-  const { currentUser } = useAuth();
+  // Destructure loading as authLoading to distinguish from internal isLoading state
+  const { currentUser, loading: authLoading, appUser } = useAuth();
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -46,8 +47,12 @@ export function MeetingListClient({ allFriends }: MeetingListClientProps) {
   const [filterType, setFilterType] = useState<'all' | 'regular' | 'temporary'>('all');
 
   const fetchMeetings = useCallback(async () => {
-    if (!currentUser) {
-      setIsLoading(false);
+    // Guard against fetching if auth is loading, or if currentUser/appUser is not yet available.
+    // Prefer appUser.id if available and if action expects our internal User ID structure,
+    // but getMeetingsForUserAction is designed to take requestingUserId (which can be uid) and fetch appUser itself.
+    // So, currentUser.uid is fine.
+    if (authLoading || !currentUser?.uid) {
+      setIsLoading(false); // Ensure loading is false if we return early
       setMeetings([]);
       setTotalPages(0);
       setAvailableYears([]);
@@ -56,8 +61,8 @@ export function MeetingListClient({ allFriends }: MeetingListClientProps) {
     setIsLoading(true);
     try {
       const yearToFetch = activeYear === "all" ? undefined : parseInt(activeYear, 10);
-      const result = await getMeetingsForUserAction({ // This action needs to be implemented
-        requestingUserId: currentUser.id,
+      const result = await getMeetingsForUserAction({
+        requestingUserId: currentUser.uid, // Use currentUser.uid
         year: yearToFetch,
         page: currentPage,
         limitParam: MEETINGS_PER_PAGE,
@@ -79,11 +84,12 @@ export function MeetingListClient({ allFriends }: MeetingListClientProps) {
     } finally {
       setIsLoading(false);
     }
-  }, [currentUser, activeYear, currentPage, toast]);
+  }, [currentUser, authLoading, activeYear, currentPage, toast]); // Added authLoading to dependencies
 
   useEffect(() => {
+    // fetchMeetings will now internally check for currentUser and authLoading
     fetchMeetings();
-  }, [fetchMeetings]);
+  }, [fetchMeetings]); // fetchMeetings itself is memoized with correct dependencies
 
   const handleYearChange = (year: string) => {
     const current = new URLSearchParams(Array.from(searchParams.entries()));
@@ -113,7 +119,9 @@ export function MeetingListClient({ allFriends }: MeetingListClientProps) {
     return meetings;
   }, [meetings, filterType]);
 
-  const canCreateMeeting = currentUser && (currentUser.role === 'user' || currentUser.role === 'admin');
+  // currentUser might be null here if still authLoading or logged out
+  // appUser is used here for role check as it's our Firestore-backed user profile
+  const canCreateMeeting = appUser && (appUser.role === 'user' || appUser.role === 'admin');
 
   return (
     <Card>
@@ -161,7 +169,10 @@ export function MeetingListClient({ allFriends }: MeetingListClientProps) {
           <>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 pt-4">
               {clientFilteredMeetings.map((meeting) => (
-                <MeetingCard key={meeting.id} meeting={meeting} allFriends={allFriends} currentUser={currentUser} />
+                // Pass appUser to MeetingCard if it needs role or friendGroupIds,
+                // or currentUser if it only needs basic info like ID for creator check.
+                // Assuming MeetingCard was updated to take appUser for role-based edit/delete.
+                <MeetingCard key={meeting.id} meeting={meeting} allFriends={allFriends} currentUser={appUser} />
               ))}
             </div>
             {totalPages > 1 && (

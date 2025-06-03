@@ -166,14 +166,23 @@ export function AppShell({ children }: { children: ReactNode }) {
     );
   }
 
-  const canShowAppShell = currentUser && userRole !== null;
+  // Refined condition to explicitly check for 'none' role
+  const canShowAppShell = currentUser && userRole !== null && userRole !== 'none';
 
-  if (pathname === '/login' && !canShowAppShell) {
-    return <main className="flex-1">{children}</main>; // Render login page without shell
+  if (pathname === '/login' && !canShowAppShell) { // If on login page and CANNOT show shell (e.g. already logged in with valid role)
+     // This case might need review: if already logged in with valid role, /login should redirect to /
+     // If currentUser exists and role is valid, canShowAppShell would be true.
+     // If !canShowAppShell is due to loading, the loading screen handles it.
+     // If !canShowAppShell is due to !currentUser or role=='none', then login page should render.
+     // The existing logic: "if on login page AND we are NOT in a state to show the app shell" -> render children (login form)
+     // This seems okay. If canShowAppShell is true while on /login, user should be redirected away from login.
+    return <main className="flex-1">{children}</main>;
   }
 
+  // If not on a public path and cannot show app shell (e.g. no user, or role is 'none' after loading)
   if (!canShowAppShell && pathname !== '/login' && !pathname.startsWith('/share/meeting')) {
-    // 미들웨어에서 인증 처리 못할 때만 fallback
+    // This state should ideally be brief as the useEffect for redirection will trigger.
+    // Showing "리디렉션 중..." is a good fallback.
     return (
       <div className="flex justify-center items-center min-h-screen">
         <p>리디렉션 중...</p>
@@ -181,8 +190,16 @@ export function AppShell({ children }: { children: ReactNode }) {
     );
   }
 
+  // If canShowAppShell is false (e.g. user is null or role is 'none')
+  // AND current path IS one of the public paths (login, share), then children should render without full shell.
+  // However, the main layout below is guarded by canShowAppShell for sidebar and main content structure.
+  // This means if canShowAppShell is false, the main layout with sidebar won't render.
+  // The login page case is handled above. For share/meeting, it might need special handling if it uses this shell.
+  // For now, the logic seems to protect rendering children within the full authed shell.
+
   return (
     <div className="flex min-h-screen w-full bg-muted/40">
+      {/* Sidebar is only rendered if canShowAppShell is true */}
       {!isMobile && canShowAppShell && (
         <Sidebar collapsible="icon" variant="sidebar" side="left" className="border-r group/sidebar">
           <SidebarHeader className="p-4">
