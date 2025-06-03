@@ -277,9 +277,6 @@ export function PaymentSummary({ meeting, expenses, participants, allFriends }: 
                 </h3>
                 <CardDescription>
                   개인 간 필요한 최종 송금 내역입니다.<br />
-                  {meeting.useReserveFund && perPersonCostDetails.fundUsed > 0.01 && (
-                    <span className="text-xs text-primary">(상단에 회비에서 결제자에게 송금된 내역도 함께 표시됩니다)</span>
-                  )}
                 </CardDescription>
                 <div className="overflow-x-auto">
                   <ScrollArea className="pr-3 mt-2 min-w-[600px]">

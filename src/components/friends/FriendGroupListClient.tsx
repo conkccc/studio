@@ -40,15 +40,10 @@ export default function FriendGroupListClient({ userId, initialGroups, onGroupsC
   const handleDelete = async (id: string) => {
     setLoading(true);
     await deleteFriendGroupAction(id);
-    // The actual removal from the list will happen when onGroupsChanged causes the parent to refetch and pass new initialGroups.
-    // setGroups(groups.filter(g => g.id !== id)); // Optimistic update removed to rely on parent's refresh
     toast({ title: '성공', description: '그룹이 삭제되었습니다.' });
     await onGroupsChanged();
     setLoading(false);
-    // TODO: Add error handling for deleteFriendGroupAction if it can fail and return an error
   };
-
-  // TODO: handle update (rename) if needed
 
   return (
     <div className="space-y-4">

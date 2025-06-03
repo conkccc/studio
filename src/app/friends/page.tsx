@@ -152,20 +152,20 @@ export default function FriendsPage() {
           <div className="text-center py-8 text-muted-foreground">생성된 그룹이 없습니다. 위에서 새 그룹을 추가해주세요.</div>
         )}
         {groups.length > 0 && (
-          <Accordion type="multiple" defaultValue={groups.length > 0 ? [groups[0].id] : []} className="bg-white rounded-md border px-2 md:px-4">
-          {groups.map((group, idx) => (
-            <AccordionItem key={group.id} value={group.id}>
-              <AccordionTrigger>{group.name}</AccordionTrigger>
-              <AccordionContent>
-                <FriendListByGroup 
-                  group={group} 
-                  onDeleteGroup={handleDeleteGroup}
-                  isDeletingThisGroup={deletingGroupId === group.id}
-                />
-              </AccordionContent>
-            </AccordionItem>
-          ))}
-        </Accordion>
+          <Accordion type="multiple" defaultValue={[]} className="bg-white rounded-md border px-2 md:px-4">
+            {groups.map((group, idx) => (
+              <AccordionItem key={group.id} value={group.id}>
+                <AccordionTrigger>{group.name}</AccordionTrigger>
+                <AccordionContent>
+                  <FriendListByGroup 
+                    group={group} 
+                    onDeleteGroup={handleDeleteGroup}
+                    isDeletingThisGroup={deletingGroupId === group.id}
+                  />
+                </AccordionContent>
+              </AccordionItem>
+            ))}
+          </Accordion>
         )}
       </div>
       {/* 기존 친구 목록 UI 등... */}
