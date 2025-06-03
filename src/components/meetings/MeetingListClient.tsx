@@ -114,32 +114,24 @@ export function MeetingListClient({
               </SelectContent>
             </Select>
           </div>
+          <div className="w-full sm:w-auto sm:min-w-[180px]"> {/* New Select for Meeting Type */}
+            <Select value={filterType} onValueChange={(value: 'all' | 'regular' | 'temporary') => setFilterType(value)}>
+              <SelectTrigger id="type-filter" aria-label="모임 종류 필터">
+                <SelectValue placeholder="모임 종류 선택" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">전체 종류</SelectItem>
+                <SelectItem value="regular">일반 모임</SelectItem>
+                <SelectItem value="temporary">임시 모임</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
         </div>
       </CardHeader>
       <CardContent>
-        <div className="flex space-x-2 mb-4">
-          <Button
-            variant={filterType === 'all' ? 'default' : 'outline'}
-            onClick={() => setFilterType('all')}
-          >
-            전체
-          </Button>
-          <Button
-            variant={filterType === 'regular' ? 'default' : 'outline'}
-            onClick={() => setFilterType('regular')}
-          >
-            일반 모임
-          </Button>
-          <Button
-            variant={filterType === 'temporary' ? 'default' : 'outline'}
-            onClick={() => setFilterType('temporary')}
-          >
-            임시 모임
-          </Button>
-        </div>
         {filteredMeetings.length > 0 ? (
           <>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 pt-4"> {/* Added pt-4 for spacing after header filters */}
               {filteredMeetings.map((meeting) => (
                 <MeetingCard key={meeting.id} meeting={meeting} allFriends={allFriends} />
               ))}

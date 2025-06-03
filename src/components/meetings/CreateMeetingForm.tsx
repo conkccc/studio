@@ -28,7 +28,7 @@ const meetingSchemaBase = z.object({
   name: z.string().min(1, '모임 이름을 입력해주세요.').max(100, '모임 이름은 100자 이내여야 합니다.'),
   dateTime: z.date({ required_error: '시작 날짜와 시간을 선택해주세요.' }),
   endTime: z.date().optional(),
-  locationName: z.string().min(1, '장소를 입력해주세요.').max(100, '장소 이름은 100자 이내여야 합니다.'),
+  locationName: z.string().max(100, '장소 이름은 100자 이내여야 합니다.').optional(), // min(1) 제거, optional 추가
   locationCoordinates: z.object({ lat: z.number(), lng: z.number() }).optional(),
   participantIds: z.array(z.string()).optional(), // Made optional, will be validated by refine
   useReserveFund: z.boolean().optional(), // Made optional
@@ -99,16 +99,41 @@ const meetingSchema = meetingSchemaBase
     message: '임시 모임에는 참여자를 최소 1명 추가해주세요.',
     path: ['temporaryParticipants'], // 실제 UI와 연결된 경로로 수정 필요할 수 있음
   })
-  .refine(data => { // 회비 검증 (임시 모임)
-    if (data.isTemporary && data.totalFee === undefined && data.feePerPerson === undefined) {
-      return false;
+  // Removed refine that made temporary fees mandatory. min(0) on fields themselves will validate if provided.
+  .refine(data => { // 임시 모임 회비 유효성 검사 (값이 있다면 0 이상) - This is already covered by min(0) in schema base.
+    if (data.isTemporary) { // This refine is now only for negative checks if min(0) was not present. Given min(0) exists, this refine is redundant or could be more specific.
+      if (data.totalFee !== undefined && data.totalFee < 0) { // min(0) already covers this
+        return false;
+      }
+      if (data.feePerPerson !== undefined && data.feePerPerson < 0) { // min(0) already covers this
+        return false;
+      }
     }
-    if (data.isTemporary && data.totalFee !== undefined && data.totalFee < 0) return false;
-    if (data.isTemporary && data.feePerPerson !== undefined && data.feePerPerson < 0) return false;
     return true;
   }, {
-    message: '임시 모임에는 총 회비 또는 1인당 회비를 0 이상으로 입력해주세요.',
-    path: ['totalFee'], // 또는 ['feePerPerson'] - 상황에 따라 첫번째 오류 필드로
+    // message: '회비는 0 이상의 값이어야 합니다.', // This message might be too generic if it flags.
+    // Specific field errors from Zod schema base for min(0) are likely better.
+    // For now, let's ensure no conflicting message if values are positive or undefined.
+    // Path can be tricky; if we keep this refine, it should point to a relevant path or be a form-level error.
+    // However, since min(0) is on the fields, this refine might be entirely removable.
+    // Let's simplify and rely on the field-level min(0).
+    // If specific cross-field validation for temp fees is needed later (e.g. if totalFee and feePerPerson are mutually exclusive), a refine would be appropriate.
+    // For now, removing the mandatory check is the main goal. The negative check is already there.
+    // To be safe and ensure no new error messages appear unexpectedly from this refine,
+    // let's just remove the previous mandatory check and ensure this one doesn't cause issues.
+    // The most straightforward way is to remove the previous mandatory refine block entirely.
+    // The min(0) on totalFee and feePerPerson in meetingSchemaBase handles the "0 이상" part.
+    // So, the entire block for "회비 검증 (임시 모임)" can be removed.
+    // Let's re-evaluate: The original task was to make it optional. min(0).optional() in base does this.
+    // The refine was for "one of them must be present". That's what needs to go.
+    // The negative check part of that refine is redundant with min(0).
+    // So, just removing that specific refine block that checks `data.totalFee === undefined && data.feePerPerson === undefined` is the primary goal.
+    // The provided "변경 후 예시" still had a refine. Let's stick to the goal: remove the MANDATORY part.
+    // The min(0) in the base schema is sufficient for "if present, must be >= 0".
+    // So, the refine that checks `if (data.isTemporary && data.totalFee === undefined && data.feePerPerson === undefined)` will be removed.
+    // The other part of that refine `if (data.isTemporary && data.totalFee !== undefined && data.totalFee < 0) return false;` is covered by `totalFee: z.number().min(0)...`
+    // Thus, the entire refine block for temporary fee validation can be removed.
+    // This means the last .refine in the provided code will be deleted.
   });
 
 type MeetingFormData = z.infer<typeof meetingSchema>;
@@ -634,19 +659,31 @@ export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, 
         {form.formState.errors.name && <p className="text-sm text-destructive mt-1">{form.formState.errors.name.message}</p>}
       </div>
 
-      <div>
-        <div className="flex items-center space-x-2 mt-4 mb-2">
+      {/* Temporary Meeting Switch moved here */}
+      <div className="mb-4">
+        <div className="flex items-center space-x-2 mt-2">
+          {/* Using existing Switch logic, not Controller as initially suggested, to maintain consistency with isTemporaryMeeting state handling */}
           <Switch
             id="temporaryMeetingSwitch"
-            checked={isTemporaryMeeting}
+            checked={isTemporaryMeeting} // Controlled by local state, synced to form via useEffect
             onCheckedChange={(checked) => {
-              if (isEditMode && initialData?.isSettled) return; // 정산 완료 시 임시 모임 전환 불가
-              setIsTemporaryMeeting(checked);
+              // In edit mode, if the meeting is settled, prevent changing its type.
+              // The problem statement mentioned initialData.isTemporary !== undefined for disabling,
+              // but the original disabled logic was `(isEditMode && initialData?.isSettled)`.
+              // Let's refine this: if isEditMode, and initialData.isTemporary is defined (meaning it's a persisted meeting),
+              // and it's settled, then it should be disabled.
+              // Or, if we decide type cannot be changed in edit mode at all (as per previous discussion on updateAction),
+              // then it should be `disabled={isPending || (isEditMode && initialData?.id !== undefined)}`
+              // For now, sticking to "settled" makes it non-editable.
+              if (isEditMode && initialData?.isSettled) return;
+              setIsTemporaryMeeting(checked); // This will trigger useEffect to update form.setValue('isTemporary', checked)
             }}
+            // Disable if pending, or if in edit mode and the meeting is settled.
             disabled={isPending || (isEditMode && initialData?.isSettled)}
           />
-          <Label htmlFor="temporaryMeetingSwitch" className={cn((isEditMode && initialData?.isSettled) && "text-muted-foreground cursor-not-allowed")}>임시 모임 만들기</Label>
+          <Label htmlFor="temporaryMeetingSwitch" className={cn("cursor-pointer", (isPending || (isEditMode && initialData?.isSettled)) && "text-muted-foreground cursor-not-allowed")}>임시 모임 만들기</Label>
         </div>
+        {form.formState.errors.isTemporary && <p className="text-sm text-destructive mt-1">{form.formState.errors.isTemporary.message}</p>}
       </div>
 
       <div>
@@ -775,7 +812,7 @@ export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, 
       </div>
 
       <div className="space-y-2">
-        <Label htmlFor="locationNameInput" className={cn((isEditMode && initialData?.isSettled) && "text-muted-foreground")}>장소 <span className="text-destructive">*</span></Label>
+        <Label htmlFor="locationNameInput" className={cn((isEditMode && initialData?.isSettled) && "text-muted-foreground")}>장소</Label> {/* Asterisk removed */}
         {isMapsLoaded && !mapsLoadError ? (
           <LocationSearchInput
             form={form}
@@ -811,18 +848,39 @@ export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, 
                 <Eye className="mr-2 h-4 w-4" />
                 {showMap ? '지도 숨기기' : '지도 보기'}
             </Button>
-            {watchedLocationCoordinates && (
+            {/* 외부 지도 보기 버튼 추가 */}
+            {(form.getValues('locationName') || watchedLocationCoordinates) && ( // Show if either name or coords exist
                 <Button
                     type="button"
                     variant="outline"
                     size="sm"
                     onClick={() => {
-                    const locationName = form.getValues('locationName');
-                    const url = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(locationName || '')}`;
+                    const placeName = form.getValues('locationName');
+                    // Using a more robust URL construction that includes coordinates if available,
+                    // falling back to name only. This can help disambiguate if name is common.
+                    let url = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(placeName || '')}`;
+                    if (watchedLocationCoordinates) {
+                        url = `https://www.google.com/maps/place/${encodeURIComponent(placeName || '')}/@${watchedLocationCoordinates.lat},${watchedLocationCoordinates.lng},15z/data=!3m1!4b1!4m6!3m5!1s0x0:0x0!7e2!8m2!3d${watchedLocationCoordinates.lat}!4d${watchedLocationCoordinates.lng}`;
+                        // A simpler alternative if place_id was available and stored:
+                        // url = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(placeName || '')}&query_place_id=YOUR_PLACE_ID_HERE`;
+                        // Sticking to a robust option that works with name and coords:
+                        // If name is primary:
+                        // url = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(placeName || '')}`;
+                        // If coords should pinpoint:
+                        // url = `https://www.google.com/maps?q=${watchedLocationCoordinates.lat},${watchedLocationCoordinates.lng}`;
+                        // The example from MeetingDetailsClient was just name, let's try to be consistent but slightly more helpful if coords exist
+                        if (placeName && watchedLocationCoordinates) {
+                             url = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(placeName)}&ll=${watchedLocationCoordinates.lat},${watchedLocationCoordinates.lng}`;
+                        } else if (placeName) {
+                             url = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(placeName)}`;
+                        } else if (watchedLocationCoordinates) { // Only coordinates available
+                             url = `https://www.google.com/maps?q=${watchedLocationCoordinates.lat},${watchedLocationCoordinates.lng}`;
+                        }
+                    }
                     window.open(url, '_blank', 'noopener,noreferrer');
                     }}
                     className="sm:w-auto"
-                    disabled={isPending || (isEditMode && initialData?.isSettled)}
+                    disabled={isPending || (isEditMode && initialData?.isSettled) || (!form.getValues('locationName') && !watchedLocationCoordinates)}
                 >
                     <ExternalLink className="mr-2 h-4 w-4" />
                     외부 지도에서 보기
@@ -1026,7 +1084,7 @@ export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, 
             </div>
           </div>
           <div className="space-y-2">
-            <Label>회비 설정 (임시 모임) <span className="text-destructive">*</span></Label>
+            <Label>회비 설정 (임시 모임) <span className="text-xs text-muted-foreground">(선택 사항)</span></Label>
             <RadioGroup
               value={tempMeetingFeeType}
               onValueChange={(value: 'total' | 'perPerson') => {
@@ -1046,7 +1104,7 @@ export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, 
             </RadioGroup>
             {tempMeetingFeeType === 'total' ? (
               <div>
-                <Label htmlFor="tempTotalFee" className={cn((isPending || (isEditMode && initialData?.isSettled)) && "text-muted-foreground")}>총 회비</Label>
+                <Label htmlFor="tempTotalFee" className={cn((isPending || (isEditMode && initialData?.isSettled)) && "text-muted-foreground")}>총 회비 <span className="text-xs text-muted-foreground">(선택 사항)</span></Label>
                 <Input
                   id="tempTotalFee"
                   type="number"
@@ -1058,7 +1116,7 @@ export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, 
               </div>
             ) : (
               <div>
-                <Label htmlFor="tempFeePerPersonInput" className={cn((isPending || (isEditMode && initialData?.isSettled)) && "text-muted-foreground")}>1인당 회비</Label>
+                <Label htmlFor="tempFeePerPersonInput" className={cn((isPending || (isEditMode && initialData?.isSettled)) && "text-muted-foreground")}>1인당 회비 <span className="text-xs text-muted-foreground">(선택 사항)</span></Label>
                 <Input
                   id="tempFeePerPersonInput"
                   type="number"

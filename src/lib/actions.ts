@@ -105,12 +105,13 @@ export async function createMeetingAction(
   }
 
   try {
+    // Prepare base data, ensuring undefined coordinates become null
     const meetingDataToSave: Omit<Meeting, 'id' | 'createdAt' | 'isSettled'> = {
       name: payload.name,
       dateTime: payload.dateTime,
-      endTime: payload.endTime,
-      locationName: payload.locationName,
-      locationCoordinates: payload.locationCoordinates,
+      endTime: payload.endTime, // Firestore handles Date or null for Timestamps
+      locationName: payload.locationName || '', // Store empty string if undefined
+      locationCoordinates: payload.locationCoordinates || null, // Store null if undefined
       creatorId: currentUserId,
       groupId: payload.groupId || '',
       memo: payload.memo || undefined,
@@ -203,6 +204,21 @@ export async function updateMeetingAction(
     // We assume isTemporary itself is NOT changed during an update in this version.
     // The form logic would need to be more complex to allow switching meeting types.
     const meetingDataToUpdate: Partial<Omit<Meeting, 'id' | 'createdAt'>> = { ...payload };
+
+    // Handle location fields for Firestore compatibility
+    if (meetingDataToUpdate.hasOwnProperty('locationName')) {
+      meetingDataToUpdate.locationName = meetingDataToUpdate.locationName || '';
+    }
+    // If locationName is being set (even to empty) and locationCoordinates is not explicitly provided in payload,
+    // or if locationName is cleared, locationCoordinates should be nulled out.
+    if (meetingDataToUpdate.hasOwnProperty('locationCoordinates')) {
+      meetingDataToUpdate.locationCoordinates = meetingDataToUpdate.locationCoordinates || null;
+    } else if (meetingDataToUpdate.hasOwnProperty('locationName')) {
+      // If locationName was changed/set, and coordinates are not in payload, set them to null
+      // to ensure consistency, e.g. if a user clears a location search then types a name manually.
+      meetingDataToUpdate.locationCoordinates = null;
+    }
+
 
     if (meetingToUpdate.isTemporary) { // If existing meeting is temporary
       // Only update fields relevant to temporary meetings
