@@ -1,6 +1,6 @@
 'use client';
 
-import type { ReserveFundTransaction } from '@/lib/types';
+// Removed specific import of ReserveFundTransaction as it's imported later with other types
 import React, { useState, useEffect, useCallback, useTransition } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -126,9 +126,10 @@ export function ReserveFundClient() {
 
 
   const handleBalanceUpdate = (data: BalanceUpdateFormData) => {
-    if (!selectedGroup || !appUser) return; // Use appUser
-    if (appUser.role !== 'admin') { // Use appUser.role
-      toast({ title: '권한 없음', description: '관리자만 잔액을 수정할 수 있습니다.', variant: 'destructive'});
+    if (!selectedGroup || !appUser) return;
+    // Updated permission check to align with UI visibility (canSetBalance logic)
+    if (!(appUser.role === 'admin' || (appUser.role === 'user' && selectedGroup.isOwned))) {
+      toast({ title: '권한 없음', description: '그룹 소유자 또는 관리자만 잔액을 수정할 수 있습니다.', variant: 'destructive'});
       return;
     }
     startTransition(async () => {

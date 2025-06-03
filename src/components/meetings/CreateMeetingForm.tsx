@@ -575,7 +575,7 @@ export function CreateMeetingForm({
           locationName: data.locationName || '', // Ensure string
           locationCoordinates: data.locationCoordinates || undefined,
           creatorId: currentUserId,
-          groupId: groupId || (initialData?.groupId ?? ''),
+          groupId: currentMeetingGroupId || (initialData?.groupId ?? ''), // Use currentMeetingGroupId
           memo: data.memo || undefined,
           isTemporary: true,
           temporaryParticipants: data.temporaryParticipants || [],
@@ -603,7 +603,7 @@ export function CreateMeetingForm({
               : undefined,
           nonReserveFundParticipants: data.nonReserveFundParticipants || [],
           memo: data.memo || undefined,
-          groupId: groupId || (initialData?.groupId ?? ''),
+          groupId: currentMeetingGroupId || (initialData?.groupId ?? ''), // Use currentMeetingGroupId
           isTemporary: false,
           // 임시 모임 필드는 초기화/제외
           temporaryParticipants: undefined,
@@ -698,7 +698,8 @@ export function CreateMeetingForm({
       </div>
 
       {/* 그룹 선택 드롭다운: 임시 모임이 아닐 때만 표시, 임시 모임 UI 바로 아래 */}
-      {!isTemporaryMeeting && groups && setSelectedGroupId && (
+      {/* Ensure `groups` is not empty and `onGroupChange` (renamed from setSelectedGroupId in parent) is provided */}
+      {!isTemporaryMeeting && groups && groups.length > 0 && typeof onGroupChange === 'function' && (
         <div className="mt-2 mb-4">
           <label className="block mb-1 font-medium">친구 그룹 선택 <span className="text-destructive">*</span></label>
           <Popover open={groupPopoverOpen} onOpenChange={setGroupPopoverOpen}>
@@ -710,8 +711,8 @@ export function CreateMeetingForm({
                 className="w-full justify-between"
                 onClick={() => setGroupPopoverOpen((prev) => !prev)}
               >
-                {selectedGroupId
-                  ? (groups.find(g => g.id === selectedGroupId)?.name || '그룹 선택...')
+                {currentMeetingGroupId /* Use aliased prop */
+                  ? (groups.find(g => g.id === currentMeetingGroupId)?.name || '그룹 선택...')
                   : '그룹 선택...'}
                 <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
               </Button>

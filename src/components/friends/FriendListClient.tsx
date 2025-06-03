@@ -5,7 +5,8 @@ import React, { useState, useTransition, Fragment, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useToast } from '@/hooks/use-toast';
-import { updateFriendAction, deleteFriendAction, getFriendsByGroupAction } from '@/lib/actions';
+import { updateFriendAction, deleteFriendAction, getFriendsByGroupAction } from '@/lib/actions'; // Consolidated imports
+import { useAuth } from '@/contexts/AuthContext'; // Import useAuth
 import {
   AlertDialog,
   AlertDialogAction,
@@ -19,6 +20,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Edit3, Trash2, User, Check, X, Loader2 } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+// Removed redundant getFriendsByGroupAction import as it's consolidated above
 
 interface FriendListClientProps {
   initialFriends: Friend[];
@@ -32,6 +34,7 @@ export function FriendListClient({ initialFriends, isReadOnly = false, onFriendA
   const [editForm, setEditForm] = useState<{ name: string; description?: string }>({ name: '', description: '' });
   const { toast } = useToast();
   const [isPending, startTransition] = useTransition();
+  const { appUser } = useAuth(); // Get appUser
 
   useEffect(() => {
     setFriends(initialFriends);
@@ -70,13 +73,35 @@ export function FriendListClient({ initialFriends, isReadOnly = false, onFriendA
     });
   };
 
-  const handleDelete = (id: string) => {
+  const handleDelete = (friendId: string) => {
+    const friendToDelete = friends.find(f => f.id === friendId);
+    if (!friendToDelete) {
+      toast({ title: '오류', description: '삭제할 친구 정보를 찾을 수 없습니다.', variant: 'destructive' });
+      return;
+    }
+    if (!friendToDelete.groupId) {
+      toast({ title: '오류', description: '친구의 그룹 정보가 없습니다. 삭제할 수 없습니다.', variant: 'destructive' });
+      return;
+    }
+    if (!appUser?.id) {
+      toast({ title: '오류', description: '사용자 인증 정보를 찾을 수 없습니다. 다시 로그인해주세요.', variant: 'destructive' });
+      return;
+    }
+
+    // Optional: Add window.confirm here if not relying solely on AlertDialog
+    // const confirmed = window.confirm(`'${friendToDelete.name}' 친구를 정말 삭제하시겠습니까?`);
+    // if (!confirmed) return;
+
     startTransition(async () => {
-      const result = await deleteFriendAction(id);
+      const result = await deleteFriendAction({
+        friendId: friendToDelete.id,
+        groupId: friendToDelete.groupId,
+        currentUserId: appUser.id,
+      });
       if (result.success) {
-        setFriends(prev => prev.filter(f => f.id !== id));
-        toast({ title: '성공', description: '친구가 삭제되었습니다.' });
-        onFriendDeleted?.(id);
+        setFriends(prev => prev.filter(f => f.id !== friendToDelete.id));
+        toast({ title: '성공', description: `'${friendToDelete.name}' 친구가 삭제되었습니다.` });
+        onFriendDeleted?.(friendToDelete.id);
       } else {
         toast({ title: '오류', description: result.error || '친구 삭제에 실패했습니다.', variant: 'destructive' });
       }

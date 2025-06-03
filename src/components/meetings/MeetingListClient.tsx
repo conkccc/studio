@@ -175,10 +175,8 @@ export function MeetingListClient({ allFriends }: MeetingListClientProps) {
           <>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 pt-4">
               {clientFilteredMeetings.map((meeting) => (
-                // Pass appUser to MeetingCard if it needs role or friendGroupIds,
-                // or currentUser if it only needs basic info like ID for creator check.
-                // Assuming MeetingCard was updated to take appUser for role-based edit/delete.
-                <MeetingCard key={meeting.id} meeting={meeting} allFriends={allFriends} currentUser={appUser} />
+                // MeetingCard uses its own useAuth() hook, so no need to pass currentUser or appUser from here.
+                <MeetingCard key={meeting.id} meeting={meeting} allFriends={allFriends} />
               ))}
             </div>
             {totalPages > 1 && (

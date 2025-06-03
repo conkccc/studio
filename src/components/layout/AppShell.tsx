@@ -29,6 +29,7 @@ import { Button } from '@/components/ui/button';
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
+import type { User } from '@/lib/types'; // Import User type
 
 interface NavItem {
   href: string;
