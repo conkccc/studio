@@ -5,7 +5,7 @@ import { getFriends } from '@/lib/data-store'; // Keep if general friend list is
 // import { FriendListClient } from '@/components/friends/FriendListClient'; // Keep if used
 import FriendGroupListClient from '@/components/friends/FriendGroupListClient'; // Import the new client component
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
-import { useAuth } from '@/context/AuthContext'; // Changed from @/contexts/AuthContext
+import { useAuth } from '@/contexts/AuthContext'; // Corrected path
 import type { Friend } from '@/lib/types';
 // Removed imports related to old group logic: FriendListByGroup, Accordion, deleteFriendGroupAction, getFriendsByGroupAction, FriendGroupForm, useToast (if only for group deletion)
 

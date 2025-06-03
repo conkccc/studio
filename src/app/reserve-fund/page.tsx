@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react'; // Kept for potential top-level loa
 // Removed: getReserveFundBalance, getLoggedReserveFundTransactions, Card components (if not used for page structure)
 // Removed: Tabs, useRouter, usePathname
 import { ReserveFundClient } from '@/components/reserve-fund/ReserveFundClient';
-import { useAuth } from '@/context/AuthContext';
+import { useAuth } from '@/contexts/AuthContext'; // Corrected path
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 // Removed: ReserveFundTransaction type (client handles its own types)

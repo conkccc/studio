@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import { useAuth } from '@/context/AuthContext'; // Corrected path
+import { useAuth } from '@/contexts/AuthContext'; // Corrected path
 import { getUsers } from '@/lib/data-store';
 import { getAllFriendGroupsAction } from '@/lib/actions'; // Assuming this action exists
 import type { User, FriendGroup } from '@/lib/types'; // Added FriendGroup

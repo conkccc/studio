@@ -11,7 +11,7 @@ import { useToast } from '@/hooks/use-toast'; // Assuming this path is correct
 import { Loader2, Edit, Trash2, PlusCircle } from 'lucide-react'; // Added icons
 import { Button } from '@/components/ui/button'; // Assuming shadcn Button
 import { Input } from '@/components/ui/input'; // Assuming shadcn Input
-import { useAuth } from '@/context/AuthContext'; // Assuming this is your auth context
+import { useAuth } from '@/contexts/AuthContext'; // Corrected path
 
 // Define a type for groups with added UI-specific flags
 type DisplayFriendGroup = FriendGroup & {

@@ -35,16 +35,15 @@ interface NavItem {
   label: string;
   icon: React.ElementType;
   matchExact?: boolean;
-  adminOnly?: boolean;
-  userOrAdmin?: boolean;
+  allowedRoles?: Array<User['role'] | 'authenticatedUser'>; // 'authenticatedUser' for any logged-in user
 }
 
 const navItems: NavItem[] = [
-  { href: '/', label: '대시보드', icon: Home, matchExact: true, userOrAdmin: true },
-  { href: '/friends', label: '친구 목록', icon: UsersRound, adminOnly: true },
-  { href: '/meetings', label: '모임 목록', icon: CalendarCheck, userOrAdmin: true },
-  { href: '/reserve-fund/group', label: '회비 관리', icon: PiggyBank, adminOnly: true }, // 그룹 회비로 바로 이동
-  { href: '/users', label: '사용자 관리', icon: Briefcase, adminOnly: true },
+  { href: '/', label: '대시보드', icon: Home, matchExact: true, allowedRoles: ['admin', 'user', 'viewer'] },
+  { href: '/friends', label: '친구 목록', icon: UsersRound, allowedRoles: ['admin', 'user', 'viewer'] },
+  { href: '/meetings', label: '모임 목록', icon: CalendarCheck, allowedRoles: ['admin', 'user', 'viewer'] },
+  { href: '/reserve-fund/group', label: '회비 관리', icon: PiggyBank, allowedRoles: ['admin', 'user', 'viewer'] },
+  { href: '/users', label: '사용자 관리', icon: Briefcase, allowedRoles: ['admin'] },
 ];
 
 export function AppShell({ children }: { children: ReactNode }) {
@@ -97,11 +96,16 @@ export function AppShell({ children }: { children: ReactNode }) {
     <SidebarMenu>
       {navItems
         .filter(item => {
-          if (loading) return false;
-          // 'none' 분기 제거, 인증 우회 분기 제거
-          if (item.adminOnly) return isAdmin;
-          if (item.userOrAdmin) return isAdmin || userRole === 'user';
-          return true;
+          if (loading || !appUser) return false; // Don't render if loading or no appUser
+          if (userRole === 'none') return false; // Hide all operational items for 'none' role
+
+          if (!item.allowedRoles) { // If no specific roles defined, show to any authenticated user (excluding 'none')
+            return true;
+          }
+          if (item.allowedRoles.includes('authenticatedUser')) { // Generic authenticated check
+            return true;
+          }
+          return item.allowedRoles.includes(appUser.role);
         })
         .map((item) => {
           const isActive = item.matchExact ? pathname === item.href : pathname.startsWith(item.href);

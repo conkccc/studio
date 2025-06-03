@@ -39,7 +39,7 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
-import { useAuth } from '@/context/AuthContext';
+import { useAuth } from '@/contexts/AuthContext'; // Corrected path
 
 type DisplayFriendGroup = FriendGroup & { isOwned: boolean };
 

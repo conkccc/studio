@@ -14,7 +14,7 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Button } from '@/components/ui/button';
 import { ChevronLeft, ChevronRight, PlusCircle, Loader2 } from 'lucide-react'; // Added icons
-import { useAuth } from '@/context/AuthContext'; // Assuming auth context
+import { useAuth } from '@/contexts/AuthContext'; // Corrected path
 import { getMeetingsForUserAction } from '@/lib/actions'; // Assuming this action will be created
 import { useToast } from '@/hooks/use-toast';
 import Link from 'next/link'; // For "새 모임 만들기" button
