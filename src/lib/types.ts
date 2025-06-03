@@ -65,6 +65,7 @@ export type Meeting = {
   temporaryParticipants?: { name: string }[];
   totalFee?: number;
   feePerPerson?: number;
+  expenses?: Expense[]; // Added to track expenses within a meeting
 };
 
 export type ReserveFundTransaction = {
