@@ -32,6 +32,7 @@ interface ExpenseItemProps {
   onExpenseUpdated: (updatedExpense: Expense) => void;
   onExpenseDeleted: (deletedExpenseId: string) => void;
   isMeetingSettled: boolean;
+  isTemporaryMeeting?: boolean; // Added for temporary meeting handling
   // canManage prop is now determined internally using AuthContext
 }
 
@@ -43,9 +44,25 @@ export function ExpenseItem({
   onExpenseUpdated, 
   onExpenseDeleted,
   isMeetingSettled,
+  isTemporaryMeeting,
 }: ExpenseItemProps) {
   const { currentUser, isAdmin } = useAuth(); // Get auth status
-  const payer = allFriends.find(f => f.id === expense.paidById);
+
+  let resolvedPayer: Friend | undefined;
+  if (isTemporaryMeeting) {
+    resolvedPayer = participants.find(p => p.id === expense.paidById);
+    if (!resolvedPayer) {
+      // Fallback to searching by name if paidById might be a name for temp participants
+      resolvedPayer = participants.find(p => p.name === expense.paidById);
+    }
+    if (!resolvedPayer) {
+      resolvedPayer = allFriends.find(f => f.id === expense.paidById);
+    }
+  } else {
+    resolvedPayer = allFriends.find(f => f.id === expense.paidById);
+  }
+  const payer = resolvedPayer; // Assign to existing payer variable for minimal JSX changes
+
   const { toast } = useToast();
   const [isDeleting, setIsDeleting] = useState(false); // For delete operation
   const [isEditPending, setIsEditPending] = useState(false); // For edit dialog operations
@@ -62,16 +79,28 @@ export function ExpenseItem({
   const getSplitDetails = () => { 
     if (expense.splitType === 'equally') {
       const involved = (expense.splitAmongIds
-        ?.map(id => {
-          const f = allFriends.find(f => f.id === id);
-          return f ? f.name + (f.description ? ` (${f.description})` : '') : undefined;
+        ?.map(idOrName => {
+          let friend: Friend | undefined;
+          if (isTemporaryMeeting) {
+            friend = participants.find(p => p.id === idOrName);
+            if (!friend) {
+              friend = participants.find(p => p.name === idOrName);
+            }
+          }
+          if (!friend) {
+            friend = allFriends.find(f => f.id === idOrName);
+          }
+          return friend ? friend.name + (friend.description ? ` (${friend.description})` : '') : undefined;
         })
         .filter(Boolean) || []) as string[];
+
       // Check if all *meeting* participants are involved in this specific equal split
+      // This logic might need review if participant names can have descriptions that differ from 'involved' names
       const meetingParticipantNames = new Set(participants.map(p => p.name + (p.description ? ` (${p.description})` : '')));
-      const allMeetingParticipantsInvolved = involved.length === meetingParticipantNames.size &&
-                                           involved.every(name => meetingParticipantNames.has(name));
-      if (allMeetingParticipantsInvolved) {
+      const allMeetingParticipantsInvolved = involved.length === participants.length && // Simpler check if all participants list passed are always involved
+                                           involved.every(name => meetingParticipantNames.has(name.replace(/ \([^)]+\)$/, ''))); // Strip description for matching if needed
+
+      if (allMeetingParticipantsInvolved && involved.length > 0) { // ensure involved is not empty
         return "모든 참여자";
       }
       if (involved.length === 0) return "참여자 정보 없음";
@@ -80,7 +109,16 @@ export function ExpenseItem({
     if (expense.splitType === 'custom' && expense.customSplits) {
       const details = expense.customSplits
         .map(split => {
-          const friend = allFriends.find(f => f.id === split.friendId);
+          let friend: Friend | undefined;
+          if (isTemporaryMeeting) {
+            friend = participants.find(p => p.id === split.friendId);
+            if (!friend) {
+              friend = participants.find(p => p.name === split.friendId);
+            }
+          }
+          if (!friend) {
+            friend = allFriends.find(f => f.id === split.friendId);
+          }
           return `${friend ? friend.name + (friend.description ? ` (${friend.description})` : '') : '?'}: ${split.amount.toLocaleString()}원`;
         })
         .join(' / ');

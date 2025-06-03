@@ -702,6 +702,7 @@ export function MeetingDetailsClient({
                         onExpenseUpdated={handleExpenseUpdated}
                         onExpenseDeleted={handleExpenseDeleted}
                         isMeetingSettled={meeting.isSettled || false}
+                        isTemporaryMeeting={meeting.isTemporary}
                       />
                     ))}
                   </ul>
