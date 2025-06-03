@@ -329,9 +329,7 @@ export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, 
   const watchedIsTemporary = form.watch('isTemporary'); // Watch the form field
 
   useEffect(() => {
-    if (props.onTemporaryChange) {
-      props.onTemporaryChange(watchedIsTemporary || false);
-    }
+    props.onTemporaryChange?.(watchedIsTemporary || false);
   }, [watchedIsTemporary, props.onTemporaryChange]);
 
   useEffect(() => {

@@ -515,13 +515,13 @@ export function MeetingDetailsClient({
                 <PiggyBank className="h-4 w-4 text-primary" />
                 <span className="font-medium">회비 정보 (임시 모임):</span>
               </div>
-              {meeting.totalFee !== undefined && (
+              {typeof meeting.totalFee === 'number' ? (
                 <p className="text-muted-foreground pl-6">총 회비: {meeting.totalFee.toLocaleString()}원</p>
-              )}
-              {meeting.feePerPerson !== undefined && (
+              ) : null}
+              {typeof meeting.feePerPerson === 'number' ? (
                 <p className="text-muted-foreground pl-6">1인당 회비: {meeting.feePerPerson.toLocaleString()}원</p>
-              )}
-              {(meeting.totalFee === undefined && meeting.feePerPerson === undefined) && (
+              ) : null}
+              {(typeof meeting.totalFee !== 'number' && typeof meeting.feePerPerson !== 'number') && (
                 <p className="text-muted-foreground pl-6">설정된 회비 정보가 없습니다.</p>
               )}
             </div>
@@ -712,31 +712,31 @@ export function MeetingDetailsClient({
                  <CardDescription>임시 모임은 단순 회비 정보를 제공하며, 개별 정산 기능을 지원하지 않습니다.</CardDescription>
               </CardHeader>
               <CardContent className="space-y-2">
-                 {meeting.totalFee !== undefined && (
+                 {typeof meeting.totalFee === 'number' ? (
                     <div className="flex justify-between items-center">
                       <span className="font-medium">총 회비:</span>
                       <span className="text-lg font-semibold">{meeting.totalFee.toLocaleString()}원</span>
                     </div>
-                  )}
-                  {meeting.feePerPerson !== undefined && (
+                  ) : null}
+                  {typeof meeting.feePerPerson === 'number' ? (
                      <div className="flex justify-between items-center">
                         <span className="font-medium">1인당 회비:</span>
                         <span className="text-lg font-semibold">{meeting.feePerPerson.toLocaleString()}원</span>
                      </div>
-                  )}
-                  {(meeting.temporaryParticipants && meeting.temporaryParticipants.length > 0 && meeting.feePerPerson !== undefined) && (
+                  ) : null}
+                  {(meeting.temporaryParticipants && meeting.temporaryParticipants.length > 0 && typeof meeting.feePerPerson === 'number') && (
                      <div className="flex justify-between items-center pt-2 border-t">
                         <span className="font-medium">총 예상액 (1인당):</span>
                         <span className="text-lg font-bold text-primary">{(meeting.feePerPerson * meeting.temporaryParticipants.length).toLocaleString()}원</span>
                      </div>
                   )}
-                  {(meeting.temporaryParticipants && meeting.temporaryParticipants.length > 0 && meeting.totalFee !== undefined) && (
+                  {(meeting.temporaryParticipants && meeting.temporaryParticipants.length > 0 && typeof meeting.totalFee === 'number') && (
                      <div className="flex justify-between items-center pt-2 border-t">
                         <span className="font-medium">1인당 예상액 (총액 기준):</span>
                         <span className="text-lg font-bold text-primary">{(meeting.totalFee / meeting.temporaryParticipants.length).toLocaleString('ko-KR', {maximumFractionDigits: 0})}원</span>
                      </div>
                   )}
-                 {(meeting.totalFee === undefined && meeting.feePerPerson === undefined) && (
+                 {(typeof meeting.totalFee !== 'number' && typeof meeting.feePerPerson !== 'number') && (
                     <p className="text-sm text-muted-foreground text-center py-4">설정된 회비 정보가 없습니다.</p>
                  )}
               </CardContent>
