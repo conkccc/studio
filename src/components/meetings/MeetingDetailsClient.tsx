@@ -203,7 +203,7 @@ export function MeetingDetailsClient({
       return meeting.temporaryParticipants?.map((p, index) => ({
         id: `temp_${index}_${p.name}`, // Synthetic ID for UI key/selection
         name: p.name,
-        description: '(임시)',
+        description: '',
         groupId: meeting.groupId, // Associate with the meeting's group if any
         createdAt: new Date(), // Placeholder
       })) || [];

@@ -17,11 +17,11 @@ interface PaymentSummaryProps {
 
 interface LedgerEntry {
   friendId: string;
-  amount: number; // Positive if owed by group, negative if owes to group
+  amount: number;
 }
 
 interface FundPayoutToPayer {
-  to: string; // friendId of the payer receiving from fund
+  to: string;
   amount: number;
 }
 
@@ -31,11 +31,11 @@ export function PaymentSummary({ meeting, expenses, participants, allFriends }: 
   const effectiveParticipants = useMemo<Friend[]>(() => {
     if (meeting.isTemporary && Array.isArray(meeting.temporaryParticipants) && meeting.temporaryParticipants.length > 0) {
       return meeting.temporaryParticipants.map((p, idx) => ({
-        id: `temp_${idx}_${p.name}`, // Corrected ID generation
+        id: `temp_${idx}_${p.name}`, 
         name: p.name,
-        description: '(임시)', // Consistent with MeetingDetailsClient
-        groupId: meeting.groupId || 'temp_group', // Associate with meeting's group or a default
-        createdAt: new Date(), // Placeholder
+        description: '', 
+        groupId: meeting.groupId || 'temp_group', 
+        createdAt: new Date(), 
       }));
     }
     return participants;
@@ -43,7 +43,7 @@ export function PaymentSummary({ meeting, expenses, participants, allFriends }: 
 
   const participantIdsInMeeting = useMemo(() => new Set(effectiveParticipants.map(p => p.id)), [effectiveParticipants]);
 
-  // --- 리팩토링: 1인당 지출 내역 및 회비 적용 계산 ---
+  // --- 1인당 지출 내역 및 회비 적용 계산 ---
   const perPersonCostDetails = useMemo<{
     totalSpent: number;
     perPersonCost: number;
@@ -124,8 +124,6 @@ export function PaymentSummary({ meeting, expenses, participants, allFriends }: 
     };
   }, [expenses, effectiveParticipants, meeting]);
 
-  // --- settlementSuggestions 계산 리팩토링 ---
-  // settlementSuggestions useMemo 중복 선언 제거 (한 번만 선언)
   const mappedExpenses = useMemo(() => {
     if (meeting.isTemporary && Array.isArray(meeting.temporaryParticipants) && meeting.temporaryParticipants.length > 0) {
       return expenses.map(e => {
@@ -149,7 +147,6 @@ export function PaymentSummary({ meeting, expenses, participants, allFriends }: 
     return expenses;
   }, [expenses, meeting, effectiveParticipants]);
 
-  // settlementSuggestions useMemo 중복 선언 제거, mappedExpenses 사용
   const settlementSuggestions = useMemo(() => {
     // 1. 개인별 최종 정산액(finalAmount) 계산
     const people = effectiveParticipants.map(p => {
@@ -194,7 +191,6 @@ export function PaymentSummary({ meeting, expenses, participants, allFriends }: 
     return { fundPayouts, suggestions };
   }, [mappedExpenses, effectiveParticipants, perPersonCostDetails]);
   
-  // getFriendName: allFriends와 effectiveParticipants 모두에서 찾도록 개선
   const getFriendName = (friendId: string) => {
     const friend = allFriends.find(f => f.id === friendId)
       || effectiveParticipants.find(f => f.id === friendId);
@@ -203,7 +199,6 @@ export function PaymentSummary({ meeting, expenses, participants, allFriends }: 
   };
 
   if (participants.length === 0 && meeting.isTemporary && Array.isArray(meeting.temporaryParticipants) && meeting.temporaryParticipants.length > 0) {
-    // 임시 모임: temporaryParticipants 이름만 표시
     return (
       <Card>
         <CardHeader>
@@ -264,7 +259,6 @@ export function PaymentSummary({ meeting, expenses, participants, allFriends }: 
         )}
         {expenses.length > 0 && (
           <div className="space-y-6">
-            {/* --- 개인별 최종 정산 현황 --- */}
             <div>
               <h3 className="text-md font-semibold mb-2 flex items-center gap-1.5">
                 <Users className="h-4 w-4" />
@@ -275,7 +269,6 @@ export function PaymentSummary({ meeting, expenses, participants, allFriends }: 
               </CardDescription>
               {meeting.isTemporary && Array.isArray(meeting.temporaryParticipants) && meeting.temporaryParticipants.length > 0 ? (
                 <div className="mb-4">
-                  {/* Removed h3 and CardDescription as per request */}
                   <div className="overflow-x-auto">
                     <ScrollArea className="pr-3 mt-2 min-w-[600px]">
                       <Table>
