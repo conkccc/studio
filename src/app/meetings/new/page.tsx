@@ -20,6 +20,16 @@ export default function NewMeetingPage() {
   const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
   const [dataLoading, setDataLoading] = useState(true);
   const [groupPopoverOpen, setGroupPopoverOpen] = useState(false);
+  const [isTemporaryMeeting, setIsTemporaryMeeting] = useState(false); // Added state
+
+  const handleTemporaryChange = (isTemporary: boolean) => { // Added handler
+    setIsTemporaryMeeting(isTemporary);
+    if (isTemporary) {
+      // Optionally, if a group was selected, clear it when switching to temporary
+      // setSelectedGroupId(null);
+      // This might be good UX, but the form itself will ignore friends/groupId if isTemporary is true.
+    }
+  };
 
   useEffect(() => {
     if (authLoading && process.env.NEXT_PUBLIC_DEV_MODE_SKIP_AUTH !== "true") {
@@ -97,56 +107,18 @@ export default function NewMeetingPage() {
           <CardDescription>모임의 세부 정보를 입력하고 친구들을 초대하세요.</CardDescription>
         </CardHeader>
         <CardContent>
-          {/* 그룹 선택 드롭다운을 참여자 선택과 같은 Popover+Command UI로 변경 */}
-          <div className="mb-4">
-            <label className="block mb-1 font-medium">친구 그룹 선택 <span className="text-destructive">*</span></label>
-            <Popover open={!!groupPopoverOpen} onOpenChange={setGroupPopoverOpen}>
-              <PopoverTrigger asChild>
-                <Button
-                  variant="outline"
-                  role="combobox"
-                  aria-expanded={!!groupPopoverOpen}
-                  className="w-full justify-between"
-                >
-                  {selectedGroupId
-                    ? (groups.find(g => g.id === selectedGroupId)?.name || '그룹 선택...')
-                    : '그룹 선택...'}
-                  <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent className="w-[--radix-popover-trigger-width] p-0">
-                <Command>
-                  <CommandInput placeholder="그룹 이름 검색..." />
-                  <CommandList>
-                    <CommandEmpty>그룹을 찾을 수 없습니다.</CommandEmpty>
-                    <CommandGroup>
-                      {groups.map(group => (
-                        <CommandItem
-                          key={group.id}
-                          value={group.name}
-                          onSelect={() => {
-                            setSelectedGroupId(group.id);
-                            setGroupPopoverOpen(false);
-                          }}
-                        >
-                          <Check className={cn("mr-2 h-4 w-4", selectedGroupId === group.id ? "opacity-100" : "opacity-0")} />
-                          <span>{group.name}</span>
-                        </CommandItem>
-                      ))}
-                    </CommandGroup>
-                  </CommandList>
-                </Command>
-              </PopoverContent>
-            </Popover>
-          </div>
-          {/* 그룹이 선택된 경우에만 폼 렌더 */}
-          {selectedGroupId && (
-            <CreateMeetingForm
-              friends={friends.filter(f => f.groupId === selectedGroupId)}
-              currentUserId={currentUserId}
-              groupId={selectedGroupId}
-            />
-          )}
+          <CreateMeetingForm
+            friends={isTemporaryMeeting
+              ? []
+              : (selectedGroupId ? friends.filter(f => f.groupId === selectedGroupId) : [])
+            }
+            currentUserId={currentUserId}
+            groupId={selectedGroupId || undefined}
+            groups={groups}
+            selectedGroupId={selectedGroupId}
+            setSelectedGroupId={setSelectedGroupId}
+            onTemporaryChange={handleTemporaryChange}
+          />
         </CardContent>
       </Card>
     </div>

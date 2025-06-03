@@ -97,24 +97,78 @@ export async function deleteFriendAction(id: string) {
 
 // Meeting Actions
 export async function createMeetingAction(
-  meetingData: Omit<Meeting, 'id' | 'createdAt' | 'isSettled' | 'isShareEnabled' | 'shareToken' | 'shareExpiryDate'>,
+  payload: Omit<Meeting, 'id' | 'createdAt' | 'isSettled' | 'isShareEnabled' | 'shareToken' | 'shareExpiryDate'>,
   currentUserId?: string | null
 ) {
   if (!currentUserId) {
     return { success: false, error: "인증되지 않은 사용자입니다. 로그인이 필요합니다." };
   }
-  // Basic permission check (assuming only admins can create meetings based on UI)
-  // For robust security, check user's role from Firestore here if needed.
-  // const callingUser = await dbGetUserById(currentUserId);
-  // if (!callingUser || callingUser.role !== 'admin') {
-  // return { success: false, error: "모임 생성 권한이 없습니다." };
-  // }
 
   try {
-    const newMeeting = await dbAddMeeting({
-      ...meetingData,
-      creatorId: currentUserId, // Ensure creatorId is set
-    });
+    // Prepare base data, ensuring undefined coordinates become null
+    const meetingDataToSave: Omit<Meeting, 'id' | 'createdAt' | 'isSettled'> = {
+      name: payload.name,
+      dateTime: payload.dateTime,
+      endTime: payload.endTime, // Firestore handles Date or null for Timestamps
+      locationName: payload.locationName || '', // Store empty string if undefined
+      locationCoordinates: payload.locationCoordinates || undefined, // Store null if undefined
+      creatorId: currentUserId,
+      groupId: payload.groupId || '',
+      memo: payload.memo || undefined,
+      isTemporary: payload.isTemporary || false,
+      // Default values for fields that might not be present if not set
+      participantIds: [],
+      useReserveFund: false,
+      partialReserveFundAmount: undefined,
+      nonReserveFundParticipants: [],
+      temporaryParticipants: undefined,
+      totalFee: undefined,
+      feePerPerson: undefined,
+      isShareEnabled: false, 
+      shareToken: null,
+      shareExpiryDate: null,
+      expenses: [],
+    };
+
+    if (payload.isTemporary) {
+      meetingDataToSave.temporaryParticipants = payload.temporaryParticipants || [];
+      if (payload.totalFee !== undefined && typeof payload.totalFee === 'number' && !isNaN(payload.totalFee)) {
+        meetingDataToSave.totalFee = payload.totalFee;
+        meetingDataToSave.feePerPerson = undefined;
+      } else if (payload.feePerPerson !== undefined && typeof payload.feePerPerson === 'number' && !isNaN(payload.feePerPerson)) {
+        meetingDataToSave.feePerPerson = payload.feePerPerson;
+        meetingDataToSave.totalFee = undefined;
+      } else {
+        meetingDataToSave.totalFee = undefined;
+        meetingDataToSave.feePerPerson = undefined;
+      }
+      // Ensure regular meeting fields are not set or are default
+      meetingDataToSave.participantIds = [];
+      meetingDataToSave.useReserveFund = false;
+      meetingDataToSave.partialReserveFundAmount = undefined;
+      meetingDataToSave.nonReserveFundParticipants = [];
+    } else {
+      // Regular meeting
+      meetingDataToSave.participantIds = payload.participantIds || [];
+      meetingDataToSave.useReserveFund = payload.useReserveFund || false;
+
+      if (meetingDataToSave.useReserveFund) {
+        if (typeof payload.partialReserveFundAmount === 'number' && !isNaN(payload.partialReserveFundAmount)) {
+          meetingDataToSave.partialReserveFundAmount = payload.partialReserveFundAmount;
+        } else {
+          meetingDataToSave.partialReserveFundAmount = 0;
+        }
+      } else {
+        meetingDataToSave.partialReserveFundAmount = undefined;
+      }
+
+      meetingDataToSave.nonReserveFundParticipants = payload.nonReserveFundParticipants || [];
+      meetingDataToSave.temporaryParticipants = undefined;
+      meetingDataToSave.totalFee = undefined;
+      meetingDataToSave.feePerPerson = undefined;
+    }
+
+    const newMeeting = await dbAddMeeting(meetingDataToSave);
     revalidatePath('/meetings');
     revalidatePath('/');
     revalidatePath(`/meetings/${newMeeting.id}`);
@@ -128,7 +182,7 @@ export async function createMeetingAction(
 
 export async function updateMeetingAction(
   id: string,
-  updates: Partial<Omit<Meeting, 'id' | 'createdAt'>>,
+  payload: Partial<Omit<Meeting, 'id' | 'createdAt'>>, // Changed 'updates' to 'payload' for clarity
   currentUserId?: string | null
 ) {
   if (!currentUserId) {
@@ -149,21 +203,165 @@ export async function updateMeetingAction(
     }
 
     // If reserve fund settings change and meeting was settled, unsettle and revert deduction
-    const reserveFundSettingsChanged = updates.useReserveFund !== undefined || updates.partialReserveFundAmount !== undefined || updates.nonReserveFundParticipants !== undefined;
+    // Corrected 'updates' to 'payload' for consistency with function signature
+    const reserveFundSettingsChanged = payload.useReserveFund !== undefined || payload.partialReserveFundAmount !== undefined || payload.nonReserveFundParticipants !== undefined;
     if (meetingToUpdate.isSettled && reserveFundSettingsChanged) {
       await dbRevertMeetingDeduction(id);
-      (updates as any).isSettled = false; // Unset isSettled if fund settings change
+      (payload as any).isSettled = false; // Unset isSettled if fund settings change
        revalidatePath('/reserve-fund');
     }
 
+    // Prepare data for update, respecting isTemporary status
+    // We assume isTemporary itself is NOT changed during an update in this version.
+    // The form logic would need to be more complex to allow switching meeting types.
+    const meetingDataToUpdate: Partial<Omit<Meeting, 'id' | 'createdAt'>> = { ...payload };
 
-    const updatedMeeting = await dbUpdateMeeting(id, updates);
+    // Handle share settings if isShareEnabled is in payload
+    if (payload.hasOwnProperty('isShareEnabled')) {
+      if (payload.isShareEnabled === false) {
+        meetingDataToUpdate.shareToken = null;
+        meetingDataToUpdate.shareExpiryDate = null;
+      } else if (payload.isShareEnabled === true) {
+        // If enabling sharing here, but no token/expiry provided in payload,
+        // rely on existing values or expect toggleMeetingShareAction to be used for proper setup.
+        // For safety, ensure they are not accidentally nulled if they had values from ...payload spread
+        // and payload.isShareEnabled was true but payload.shareToken/ExpiryDate were undefined.
+        if (payload.shareToken === undefined && meetingToUpdate.shareToken) {
+          meetingDataToUpdate.shareToken = meetingToUpdate.shareToken;
+        } else if (payload.shareToken === undefined) {
+           // This case implies enabling sharing without providing a token.
+           // This should ideally be handled by toggleMeetingShareAction to generate a token.
+           // For now, if it's enabled here without a token, we'll set to null,
+           // assuming toggleMeetingShareAction will be used later.
+           // Or, we prevent isShareEnabled:true if no token.
+           // Let's stick to the prompt: if UI for shareExpiryDate is not present, it's not set here.
+           // If isShareEnabled is true, and token/expiry are not in payload, they are left as is from ...payload spread.
+        }
+        if (payload.shareExpiryDate === undefined && meetingToUpdate.shareExpiryDate) {
+          meetingDataToUpdate.shareExpiryDate = meetingToUpdate.shareExpiryDate;
+        }
+        // No explicit setting of shareExpiryDate to a default here if enabling,
+        // as that's not the primary role of updateMeetingAction unless specific UI for expiry exists.
+      }
+    }
+
+
+    // Handle location fields for Firestore compatibility
+    if (meetingDataToUpdate.hasOwnProperty('locationName')) {
+      meetingDataToUpdate.locationName = meetingDataToUpdate.locationName || '';
+    }
+    // If locationName is being set (even to empty) and locationCoordinates is not explicitly provided in payload,
+    // or if locationName is cleared, locationCoordinates should be nulled out.
+    if (meetingDataToUpdate.hasOwnProperty('locationCoordinates')) {
+      meetingDataToUpdate.locationCoordinates = meetingDataToUpdate.locationCoordinates || undefined;
+    } else if (meetingDataToUpdate.hasOwnProperty('locationName')) {
+      // If locationName was changed/set, and coordinates are not in payload, set them to null
+      // to ensure consistency, e.g. if a user clears a location search then types a name manually.
+      meetingDataToUpdate.locationCoordinates = undefined;
+    }
+
+
+    if (meetingToUpdate.isTemporary) { // If existing meeting is temporary
+      // Only update fields relevant to temporary meetings
+      delete meetingDataToUpdate.participantIds;
+      delete meetingDataToUpdate.useReserveFund;
+      delete meetingDataToUpdate.partialReserveFundAmount;
+      delete meetingDataToUpdate.nonReserveFundParticipants;
+
+      // totalFee와 feePerPerson 업데이트 로직 for temporary meeting update
+      let feeTypeSetInPayload = false;
+      if (payload.hasOwnProperty('totalFee')) {
+        if (payload.totalFee !== undefined && typeof payload.totalFee === 'number' && !isNaN(payload.totalFee)) {
+          meetingDataToUpdate.totalFee = payload.totalFee;
+          meetingDataToUpdate.feePerPerson = undefined;
+          feeTypeSetInPayload = true;
+        } else {
+          meetingDataToUpdate.totalFee = undefined;
+        }
+      }
+
+      if (payload.hasOwnProperty('feePerPerson')) {
+        if (payload.feePerPerson !== undefined && typeof payload.feePerPerson === 'number' && !isNaN(payload.feePerPerson)) {
+          meetingDataToUpdate.feePerPerson = payload.feePerPerson;
+          // If totalFee was also in payload and valid, feePerPerson takes precedence or both are set (totalFee will be nulled by this path)
+          // If totalFee was not in payload or was invalid, this will correctly set feePerPerson and nullify totalFee.
+          meetingDataToUpdate.totalFee = undefined;
+          feeTypeSetInPayload = true;
+        } else {
+          meetingDataToUpdate.feePerPerson = undefined;
+        }
+      }
+      // If neither was in payload, existing values are kept unless one of them was already null and the other had a value.
+      // This logic ensures that if one is actively set, the other is nulled.
+      // If one is cleared (e.g. payload.totalFee = null) and the other is not in payload, the other remains.
+      // If both are cleared in payload, both become null.
+
+    } else { // If existing meeting is a regular meeting
+      // Only update fields relevant to regular meetings
+      delete meetingDataToUpdate.temporaryParticipants;
+      // Ensure temporary fee fields are nulled if they are somehow in payload for a regular meeting
+      if (payload.hasOwnProperty('totalFee')) meetingDataToUpdate.totalFee = undefined;
+      if (payload.hasOwnProperty('feePerPerson')) meetingDataToUpdate.feePerPerson = undefined;
+
+      // Handle useReserveFund and partialReserveFundAmount for regular meetings
+      const willUseReserveFund = payload.hasOwnProperty('useReserveFund')
+        ? !!payload.useReserveFund
+        : meetingToUpdate.useReserveFund; // Fallback to existing value if not in payload
+
+      if (payload.hasOwnProperty('useReserveFund')) { // If useReserveFund is explicitly in payload
+        meetingDataToUpdate.useReserveFund = willUseReserveFund;
+      }
+
+      if (willUseReserveFund) {
+        if (payload.hasOwnProperty('partialReserveFundAmount')) {
+          if (typeof payload.partialReserveFundAmount === 'number' && !isNaN(payload.partialReserveFundAmount)) {
+            meetingDataToUpdate.partialReserveFundAmount = payload.partialReserveFundAmount;
+          } else {
+            // Invalid amount in payload while useReserveFund is true (or becoming true)
+            meetingDataToUpdate.partialReserveFundAmount = 0;
+          }
+        } else if (meetingDataToUpdate.useReserveFund && (meetingToUpdate.partialReserveFundAmount === undefined || typeof meetingToUpdate.partialReserveFundAmount !== 'number')) {
+          // useReserveFund is true (or becoming true via payload), but no amount in payload, and existing amount is not a valid number
+           if(payload.hasOwnProperty('useReserveFund') && !!payload.useReserveFund) { // only default to 0 if useReserveFund was explicitly set to true
+            meetingDataToUpdate.partialReserveFundAmount = 0;
+           } else if (!payload.hasOwnProperty('useReserveFund') && meetingToUpdate.useReserveFund && (meetingToUpdate.partialReserveFundAmount === null || typeof meetingToUpdate.partialReserveFundAmount !== 'number')) {
+             // If useReserveFund was already true, and no amount in payload, and existing amount is null/invalid, set to 0
+             meetingDataToUpdate.partialReserveFundAmount = 0;
+           }
+           // If useReserveFund was already true, and payload doesn't mention partialReserveFundAmount,
+           // existing valid partialReserveFundAmount (already spread from ...payload) will be kept if it was part of the payload.
+           // If payload.partialReserveFundAmount was undefined, it's now 0.
+        }
+         // If payload has no 'partialReserveFundAmount' and existing 'useReserveFund' is true,
+         // meetingDataToUpdate.partialReserveFundAmount would have existing value from '...payload' spread.
+         // Ensure it's not undefined if useReserveFund is true.
+         if (meetingDataToUpdate.useReserveFund && meetingDataToUpdate.partialReserveFundAmount === undefined) {
+           meetingDataToUpdate.partialReserveFundAmount = 0;
+         }
+
+      } else {
+        meetingDataToUpdate.partialReserveFundAmount = undefined;
+      }
+
+      // If nonReserveFundParticipants is in payload and useReserveFund is false, it should be empty or null
+      if (!willUseReserveFund && payload.hasOwnProperty('nonReserveFundParticipants')) {
+        meetingDataToUpdate.nonReserveFundParticipants = [];
+      } else if (!willUseReserveFund && !payload.hasOwnProperty('nonReserveFundParticipants')) {
+        // If useReserveFund becomes false, and nonReserveFundParticipants was not in payload, ensure it's cleared
+        if (meetingToUpdate.nonReserveFundParticipants && meetingToUpdate.nonReserveFundParticipants.length > 0) {
+            meetingDataToUpdate.nonReserveFundParticipants = [];
+        }
+      }
+    }
+
+
+    const updatedMeeting = await dbUpdateMeeting(id, meetingDataToUpdate);
     if (!updatedMeeting) throw new Error('모임 업데이트에 실패했습니다.');
 
     revalidatePath('/meetings');
     revalidatePath(`/meetings/${id}`);
     revalidatePath('/'); // Dashboard might show recent meeting
-    if (reserveFundSettingsChanged || (updates.isSettled !== undefined && !updates.isSettled)) {
+    if (reserveFundSettingsChanged || (payload.isSettled !== undefined && !payload.isSettled)) {
       revalidatePath('/reserve-fund');
     }
     return { success: true, meeting: updatedMeeting };
@@ -222,9 +420,11 @@ export async function createExpenseAction(expenseData: Omit<Expense, 'id' | 'cre
     const newExpense = await dbAddExpense(expenseData);
     
     if (meeting.isSettled) {
-      await dbUpdateMeeting(expenseData.meetingId, { isSettled: false });
-      await dbRevertMeetingDeduction(expenseData.meetingId);
-      revalidatePath('/reserve-fund');
+      await dbUpdateMeeting(meeting.id, { isSettled: false });
+      if (!meeting.isTemporary && meeting.useReserveFund && meeting.partialReserveFundAmount && meeting.partialReserveFundAmount > 0) {
+        await dbRevertMeetingDeduction(meeting.id);
+        revalidatePath('/reserve-fund');
+      }
     }
     revalidatePath(`/meetings/${expenseData.meetingId}`);
     return { success: true, expense: newExpense };
@@ -263,9 +463,11 @@ export async function updateExpenseAction(
     if (!updatedExpense) throw new Error('지출 항목 업데이트에 실패했습니다.');
     
     if (meeting.isSettled) {
-      await dbUpdateMeeting(meetingId, { isSettled: false });
-      await dbRevertMeetingDeduction(meetingId);
-      revalidatePath('/reserve-fund');
+      await dbUpdateMeeting(meeting.id, { isSettled: false });
+      if (!meeting.isTemporary && meeting.useReserveFund && meeting.partialReserveFundAmount && meeting.partialReserveFundAmount > 0) {
+        await dbRevertMeetingDeduction(meeting.id);
+        revalidatePath('/reserve-fund');
+      }
     }
     revalidatePath(`/meetings/${meetingId}`);
     return { success: true, expense: updatedExpense };
@@ -298,9 +500,11 @@ export async function deleteExpenseAction(expenseId: string, meetingId: string, 
     await dbDeleteExpense(meetingId, expenseId);
 
     if (meeting.isSettled) {
-      await dbUpdateMeeting(meetingId, { isSettled: false });
-      await dbRevertMeetingDeduction(meetingId);
-      revalidatePath('/reserve-fund');
+      await dbUpdateMeeting(meeting.id, { isSettled: false });
+      if (!meeting.isTemporary && meeting.useReserveFund && meeting.partialReserveFundAmount && meeting.partialReserveFundAmount > 0) {
+        await dbRevertMeetingDeduction(meeting.id);
+        revalidatePath('/reserve-fund');
+      }
     }
     revalidatePath(`/meetings/${meetingId}`);
     return { success: true };

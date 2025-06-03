@@ -61,6 +61,11 @@ export type Meeting = {
   shareExpiryDate?: Date | null;
   memo?: string;
   groupId: string; // 소속 친구 그룹
+  isTemporary?: boolean;
+  temporaryParticipants?: { name: string }[];
+  totalFee?: number;
+  feePerPerson?: number;
+  expenses?: Expense[]; // Added to track expenses within a meeting
 };
 
 export type ReserveFundTransaction = {
