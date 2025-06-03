@@ -51,10 +51,9 @@ export function ExpenseItem({
   let resolvedPayer: Friend | undefined;
   if (isTemporaryMeeting) {
     resolvedPayer = participants.find(p => p.id === expense.paidById);
-    if (!resolvedPayer) {
-      // Fallback to searching by name if paidById might be a name for temp participants
-      resolvedPayer = participants.find(p => p.name === expense.paidById);
-    }
+    // If not found in participants (which ideally shouldn't happen for temp meetings if data is consistent),
+    // then try finding in allFriends. This could cover an edge case where a registered user (in allFriends)
+    // pays for an item in a temporary meeting they are also part of (as a temporary participant).
     if (!resolvedPayer) {
       resolvedPayer = allFriends.find(f => f.id === expense.paidById);
     }
@@ -78,48 +77,56 @@ export function ExpenseItem({
   
   const getSplitDetails = () => { 
     if (expense.splitType === 'equally') {
-      const involved = (expense.splitAmongIds
-        ?.map(idOrName => {
+      const involvedNames = (expense.splitAmongIds
+        ?.map(splitId => {
           let friend: Friend | undefined;
           if (isTemporaryMeeting) {
-            friend = participants.find(p => p.id === idOrName);
-            if (!friend) {
-              friend = participants.find(p => p.name === idOrName);
-            }
+            friend = participants.find(p => p.id === splitId);
           }
+          // Fallback to allFriends if not found in participants (e.g., non-temporary meeting, or inconsistent data)
           if (!friend) {
-            friend = allFriends.find(f => f.id === idOrName);
+            friend = allFriends.find(f => f.id === splitId);
           }
           return friend ? friend.name + (friend.description ? ` (${friend.description})` : '') : undefined;
         })
         .filter(Boolean) || []) as string[];
 
-      // Check if all *meeting* participants are involved in this specific equal split
-      // This logic might need review if participant names can have descriptions that differ from 'involved' names
-      const meetingParticipantNames = new Set(participants.map(p => p.name + (p.description ? ` (${p.description})` : '')));
-      const allMeetingParticipantsInvolved = involved.length === participants.length && // Simpler check if all participants list passed are always involved
-                                           involved.every(name => meetingParticipantNames.has(name.replace(/ \([^)]+\)$/, ''))); // Strip description for matching if needed
+      let allMeetingParticipantsInvolved = false;
+      if (isTemporaryMeeting) {
+        const splitAmongIdsSet = new Set(expense.splitAmongIds || []);
+        const participantIdsSet = new Set(participants.map(p => p.id));
+        allMeetingParticipantsInvolved = splitAmongIdsSet.size === participantIdsSet.size &&
+                                       [...splitAmongIdsSet].every(id => participantIdsSet.has(id));
+      } else {
+        // For non-temporary meetings, the old logic based on names and descriptions might still be relevant
+        // or could be simplified if participant objects in `participants` prop are guaranteed to be from `allFriends`.
+        // Assuming `participants` for non-temp meetings are full Friend objects.
+        const involvedParticipantNames = new Set(involvedNames);
+        const meetingParticipantFullNames = new Set(participants.map(p => p.name + (p.description ? ` (${p.description})` : '')));
+        allMeetingParticipantsInvolved = involvedNames.length === participants.length &&
+                                     participants.length > 0 && // ensure participants is not empty
+                                     [...meetingParticipantFullNames].every(name => involvedParticipantNames.has(name));
 
-      if (allMeetingParticipantsInvolved && involved.length > 0) { // ensure involved is not empty
+      }
+
+      if (allMeetingParticipantsInvolved && involvedNames.length > 0) {
         return "모든 참여자";
       }
-      if (involved.length === 0) return "참여자 정보 없음";
-      return `균등 분배 (${involved.join(', ')})`;
+      if (involvedNames.length === 0) return "참여자 정보 없음";
+      return `균등 분배 (${involvedNames.join(', ')})`;
     }
     if (expense.splitType === 'custom' && expense.customSplits) {
       const details = expense.customSplits
-        .map(split => {
+        .map(customSplit => {
           let friend: Friend | undefined;
           if (isTemporaryMeeting) {
-            friend = participants.find(p => p.id === split.friendId);
-            if (!friend) {
-              friend = participants.find(p => p.name === split.friendId);
-            }
+            friend = participants.find(p => p.id === customSplit.friendId);
           }
+          // Fallback for non-temp or if not found for temp
           if (!friend) {
-            friend = allFriends.find(f => f.id === split.friendId);
+            friend = allFriends.find(f => f.id === customSplit.friendId);
           }
-          return `${friend ? friend.name + (friend.description ? ` (${friend.description})` : '') : '?'}: ${split.amount.toLocaleString()}원`;
+          return `${friend ? friend.name + (friend.description ? ` (${friend.description})` : '') : '?'}: ${customSplit.amount.toLocaleString()}원`;
         })
         .join(' / ');
       return `개별: ${details}`;
