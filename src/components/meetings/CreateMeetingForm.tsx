@@ -284,7 +284,7 @@ export function CreateMeetingForm({
   const [startDateOpen, setStartDateOpen] = useState(false);
   const [endDateOpen, setEndDateOpen] = useState(false);
 
-  const [isTemporaryMeeting, setIsTemporaryMeeting] = useState(false);
+  // Removed local isTemporaryMeeting state, will use form.watch('isTemporary') directly
   const [temporaryParticipants, setTemporaryParticipants] = useState<{ name: string }[]>([]);
   const [currentTempParticipantName, setCurrentTempParticipantName] = useState('');
   const [tempMeetingFeeType, setTempMeetingFeeType] = useState<'total' | 'perPerson'>('total');
@@ -341,10 +341,15 @@ export function CreateMeetingForm({
   const watchParticipantIds = form.watch('participantIds');
   const watchedLocationCoordinates = form.watch('locationCoordinates');
   const watchLocationName = form.watch('locationName');
-  const watchedIsTemporary = form.watch('isTemporary'); // Watch the form field
+  const watchedIsTemporary = form.watch('isTemporary');
 
   useEffect(() => {
-    onTemporaryChange?.(watchedIsTemporary || false);
+    // This effect calls the onTemporaryChange prop when the form's isTemporary value changes.
+    // It's important that onTemporaryChange itself doesn't cause a re-render that changes watchedIsTemporary again.
+    // (Assuming onTemporaryChange is a stable function or handled correctly by parent)
+    if (onTemporaryChange) {
+      onTemporaryChange(watchedIsTemporary || false);
+    }
   }, [watchedIsTemporary, onTemporaryChange]);
 
   useEffect(() => {
@@ -457,87 +462,98 @@ export function CreateMeetingForm({
          form.setValue('nonReserveFundParticipants', newNonParticipants, { shouldValidate: true });
       }
     }
-  }, [watchParticipantIds, form, isTemporaryMeeting]);
+  }, [watchParticipantIds, form, watchedIsTemporary]); // Use watchedIsTemporary
 
   useEffect(() => {
-    if (!isTemporaryMeeting && !watchUseReserveFund) {
+    if (!watchedIsTemporary && !watchUseReserveFund) { // Use watchedIsTemporary
       form.setValue('partialReserveFundAmount', undefined, { shouldValidate: true });
       form.setValue('nonReserveFundParticipants', [], { shouldValidate: true });
     }
-  }, [watchUseReserveFund, form, isTemporaryMeeting]);
+  }, [watchUseReserveFund, form, watchedIsTemporary]); // Use watchedIsTemporary and form.setValue (stable)
 
+  // This useEffect handles changes based on watchedIsTemporary
   useEffect(() => {
-    form.setValue('isTemporary', isTemporaryMeeting);
-    if (isTemporaryMeeting) {
+    // form.setValue('isTemporary', watchedIsTemporary); // This line is redundant as watchedIsTemporary IS form.isTemporary
+    if (watchedIsTemporary) {
       // 임시 모임일 경우 기존 참여자/회비 관련 필드 초기화 또는 비활성화
-      form.setValue('participantIds', []);
-      form.setValue('useReserveFund', false);
-      form.setValue('partialReserveFundAmount', undefined);
-      form.setValue('nonReserveFundParticipants', []);
+      form.setValue('participantIds', [], { shouldValidate: true, shouldDirty: true });
+      form.setValue('useReserveFund', false, { shouldValidate: true, shouldDirty: true });
+      form.setValue('partialReserveFundAmount', undefined, { shouldValidate: true, shouldDirty: true });
+      form.setValue('nonReserveFundParticipants', [], { shouldValidate: true, shouldDirty: true });
+      // Also reset temporary specific local states if needed, or ensure they are only used when watchedIsTemporary is true
+      setTemporaryParticipants(initialData?.isTemporary && initialData.temporaryParticipants ? initialData.temporaryParticipants : []);
+      setTempMeetingFeeType(initialData?.isTemporary && initialData.totalFee !== undefined ? 'total' : (initialData?.isTemporary && initialData.feePerPerson !== undefined ? 'perPerson' : 'total'));
+      setTempMeetingTotalFee(initialData?.isTemporary ? initialData.totalFee : undefined);
+      setTempMeetingFeePerPerson(initialData?.isTemporary ? initialData.feePerPerson : undefined);
+
     } else {
       // 기존 모임으로 전환 시 임시 관련 필드 초기화
-      form.setValue('temporaryParticipants', undefined);
-      form.setValue('totalFee', undefined);
-      form.setValue('feePerPerson', undefined);
+      form.setValue('temporaryParticipants', undefined, { shouldValidate: true, shouldDirty: true });
+      form.setValue('totalFee', undefined, { shouldValidate: true, shouldDirty: true });
+      form.setValue('feePerPerson', undefined, { shouldValidate: true, shouldDirty: true });
+
       // 기존 모임의 기본값으로 participantIds 재설정 (모든 친구 선택 또는 initialData 기반)
+      // This part might need careful review if `friends` prop changes or if default selection logic is complex
       if (!isEditMode || !initialData?.participantIds) {
-        form.setValue('participantIds', friends.map(f => f.id));
+         // Only set default participants if not in edit mode or if initialData doesn't specify them
+        form.setValue('participantIds', friends.map(f => f.id), { shouldValidate: true, shouldDirty: true });
       } else if (initialData?.participantIds) {
-        form.setValue('participantIds', initialData.participantIds);
+        form.setValue('participantIds', initialData.participantIds, { shouldValidate: true, shouldDirty: true });
       }
     }
-  }, [isTemporaryMeeting, form, isEditMode, initialData, friends]);
+  }, [watchedIsTemporary, isEditMode, initialData, friends, form.setValue]); // form.setValue is stable
 
   useEffect(() => {
-    if (isTemporaryMeeting) {
-      form.setValue('temporaryParticipants', temporaryParticipants);
+    if (watchedIsTemporary) { // Use watchedIsTemporary
+      form.setValue('temporaryParticipants', temporaryParticipants, { shouldValidate: true });
     }
-  }, [temporaryParticipants, isTemporaryMeeting, form]);
+  }, [temporaryParticipants, watchedIsTemporary, form.setValue]); // Use watchedIsTemporary
 
   useEffect(() => {
-    if (isTemporaryMeeting) {
+    if (watchedIsTemporary) { // Use watchedIsTemporary
       if (tempMeetingFeeType === 'total') {
-        form.setValue('totalFee', tempMeetingTotalFee);
-        form.setValue('feePerPerson', undefined);
+        form.setValue('totalFee', tempMeetingTotalFee, { shouldValidate: true });
+        form.setValue('feePerPerson', undefined, { shouldValidate: true });
       } else {
-        form.setValue('feePerPerson', tempMeetingFeePerPerson);
-        form.setValue('totalFee', undefined);
+        form.setValue('feePerPerson', tempMeetingFeePerPerson, { shouldValidate: true });
+        form.setValue('totalFee', undefined, { shouldValidate: true });
       }
     } else {
-      form.setValue('totalFee', undefined);
-      form.setValue('feePerPerson', undefined);
+      // These are also reset in the main watchedIsTemporary effect, but good to be sure
+      form.setValue('totalFee', undefined, { shouldValidate: true });
+      form.setValue('feePerPerson', undefined, { shouldValidate: true });
     }
-  }, [tempMeetingFeeType, tempMeetingTotalFee, tempMeetingFeePerPerson, isTemporaryMeeting, form]);
+  }, [tempMeetingFeeType, tempMeetingTotalFee, tempMeetingFeePerPerson, watchedIsTemporary, form.setValue]); // Use watchedIsTemporary
 
+  // This effect is for initializing form when in edit mode or when initialData changes.
+  // It also sets the initial local state for isTemporaryMeeting.
   useEffect(() => {
     if (isEditMode && initialData) {
-      setIsTemporaryMeeting(initialData.isTemporary || false);
+      // Set the form's isTemporary field first
+      form.setValue('isTemporary', initialData.isTemporary || false, {shouldDirty: true});
+      // The local state for temporaryParticipants, tempMeetingFeeType etc.
+      // will be set based on initialData when watchedIsTemporary changes (handled by other useEffect)
+      // This helps avoid direct setIsTemporaryMeeting here.
       if (initialData.isTemporary) {
         setTemporaryParticipants(initialData.temporaryParticipants || []);
         if (initialData.totalFee !== undefined) {
           setTempMeetingFeeType('total');
-          setTempMeetingTotalFee(initialData.totalFee);
+            setTempMeetingTotalFee(initialData.totalFee || undefined); // Ensure undefined if null/0 from data
           setTempMeetingFeePerPerson(undefined);
         } else if (initialData.feePerPerson !== undefined) {
           setTempMeetingFeeType('perPerson');
-          setTempMeetingFeePerPerson(initialData.feePerPerson);
+            setTempMeetingFeePerPerson(initialData.feePerPerson || undefined);
           setTempMeetingTotalFee(undefined);
+          } else { // Default if isTemporary but no fee info
+            setTempMeetingFeeType('total');
+            setTempMeetingTotalFee(undefined);
+            setTempMeetingFeePerPerson(undefined);
         }
-        // 기존 친구/회비 관련 form 값 초기화
-        form.setValue('participantIds', []);
-        form.setValue('useReserveFund', false);
-        form.setValue('partialReserveFundAmount', undefined);
-        form.setValue('nonReserveFundParticipants', []);
-      } else {
-        // 기존 모임 데이터 로드 (이미 defaultValues에서 처리됨)
-        // 임시 모임 관련 form 값 초기화
-        form.setValue('temporaryParticipants', undefined);
-        form.setValue('totalFee', undefined);
-        form.setValue('feePerPerson', undefined);
       }
+        // Other fields are reset by the useEffect watching `watchedIsTemporary`
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isEditMode, initialData, form ]); // Removed state setters from deps as per react-hooks/exhaustive-deps suggestion in original problem, form is enough
+    }, [isEditMode, initialData, form.setValue]); // Only include form.setValue as it's stable
 
   const formatNumberInput = (value: number | string | undefined) => {
     if (value === undefined || value === '' || value === null) return '';
@@ -685,10 +701,11 @@ export function CreateMeetingForm({
         <div className="flex items-center space-x-2 mt-2">
           <Switch
             id="temporaryMeetingSwitch"
-            checked={isTemporaryMeeting}
+            checked={watchedIsTemporary || false} // Controlled by form state
             onCheckedChange={(checked) => {
               if (isEditMode && initialData?.isSettled) return;
-              setIsTemporaryMeeting(checked);
+              form.setValue('isTemporary', checked, { shouldDirty: true, shouldTouch: true });
+              // Local state setIsTemporaryMeeting is removed, effect on watchedIsTemporary will handle side effects.
             }}
             disabled={isPending || (isEditMode && initialData?.isSettled)}
           />

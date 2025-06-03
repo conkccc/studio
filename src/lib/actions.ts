@@ -227,70 +227,83 @@ export async function createMeetingAction(
       return { success: false, error: "모임을 생성할 권한이 없습니다. 'admin' 또는 'user' 역할만 가능합니다." };
     }
 
-    // Prepare base data, ensuring undefined coordinates become null
-    const meetingDataToSave: Omit<Meeting, 'id' | 'createdAt' | 'isSettled'> = {
-      name: payload.name,
-      dateTime: payload.dateTime,
-      endTime: payload.endTime, // Firestore handles Date or null for Timestamps
-      locationName: payload.locationName || '', // Store empty string if undefined
-      locationCoordinates: payload.locationCoordinates || undefined, // Store null if undefined
+    const {
+      locationCoordinates,
+      locationName,
+      participantIds,
+      nonReserveFundParticipants,
+      temporaryParticipants,
+      partialReserveFundAmount,
+      memo,
+      totalFee,
+      feePerPerson,
+      endTime,
+      // Destructure all fields from payload to ensure they are handled
+      name,
+      dateTime,
+      groupId,
+      isTemporary,
+      useReserveFund,
+      // Explicitly list all fields from Omit<Meeting, 'id' | 'createdAt' | 'isSettled' | 'isShareEnabled' | 'shareToken' | 'shareExpiryDate' | 'expenses'>
+      // Any other fields in payload that are not part of Meeting type (excluding above) will be caught by ...otherPayloadData if it were used.
+      // However, since payload is already typed, we can be more direct.
+    } = payload;
+
+    const meetingDataToSaveBase = {
+      name,
+      dateTime,
       creatorId: currentUserId,
-      groupId: payload.groupId || '',
-      memo: payload.memo || undefined,
-      isTemporary: payload.isTemporary || false,
-      // Default values for fields that might not be present if not set
-      participantIds: [],
-      useReserveFund: false,
-      partialReserveFundAmount: undefined,
-      nonReserveFundParticipants: [],
-      temporaryParticipants: undefined,
-      totalFee: undefined,
-      feePerPerson: undefined,
-      isShareEnabled: false, 
-      shareToken: null,
-      shareExpiryDate: null,
-      expenses: [],
+      groupId: groupId || '',
+      locationName: locationName || '',
+      isTemporary: isTemporary || false,
+      // Default values for optional fields that should always exist with a default
+      participantIds: participantIds || [],
+      useReserveFund: useReserveFund || false,
+      nonReserveFundParticipants: nonReserveFundParticipants || [],
+      // Fields that are truly optional and should be omitted if undefined
+      ...(endTime !== undefined && { endTime }),
+      ...(locationCoordinates !== undefined && { locationCoordinates }),
+      ...(memo !== undefined && { memo }),
+      ...(partialReserveFundAmount !== undefined && { partialReserveFundAmount }),
+      ...(temporaryParticipants !== undefined && { temporaryParticipants }),
     };
 
-    if (payload.isTemporary) {
-      meetingDataToSave.temporaryParticipants = payload.temporaryParticipants || [];
-      if (payload.totalFee !== undefined && typeof payload.totalFee === 'number' && !isNaN(payload.totalFee)) {
-        meetingDataToSave.totalFee = payload.totalFee;
-        meetingDataToSave.feePerPerson = undefined;
-      } else if (payload.feePerPerson !== undefined && typeof payload.feePerPerson === 'number' && !isNaN(payload.feePerPerson)) {
-        meetingDataToSave.feePerPerson = payload.feePerPerson;
-        meetingDataToSave.totalFee = undefined;
-      } else {
-        meetingDataToSave.totalFee = undefined;
-        meetingDataToSave.feePerPerson = undefined;
-      }
-      // Ensure regular meeting fields are not set or are default
-      meetingDataToSave.participantIds = [];
-      meetingDataToSave.useReserveFund = false;
-      meetingDataToSave.partialReserveFundAmount = undefined;
-      meetingDataToSave.nonReserveFundParticipants = [];
+    let meetingDataToSave: any = meetingDataToSaveBase;
+
+    if (meetingDataToSave.isTemporary) {
+      meetingDataToSave.temporaryParticipants = temporaryParticipants || [];
+      if (totalFee !== undefined) meetingDataToSave.totalFee = totalFee;
+      if (feePerPerson !== undefined) meetingDataToSave.feePerPerson = feePerPerson;
+
+      // Ensure regular meeting fields are set to defaults or omitted
+      meetingDataToSave.participantIds = []; // Or ensure it's already [] from base
+      meetingDataToSave.useReserveFund = false; // Or ensure it's already false
+      // These will be omitted if undefined due to the spread syntax or explicit check later
+      delete meetingDataToSave.partialReserveFundAmount;
+      delete meetingDataToSave.nonReserveFundParticipants;
     } else {
       // Regular meeting
-      meetingDataToSave.participantIds = payload.participantIds || [];
-      meetingDataToSave.useReserveFund = payload.useReserveFund || false;
-
+      // participantIds, useReserveFund, nonReserveFundParticipants are already handled by base or conditional spread
       if (meetingDataToSave.useReserveFund) {
-        if (typeof payload.partialReserveFundAmount === 'number' && !isNaN(payload.partialReserveFundAmount)) {
-          meetingDataToSave.partialReserveFundAmount = payload.partialReserveFundAmount;
-        } else {
-          meetingDataToSave.partialReserveFundAmount = 0;
-        }
+        meetingDataToSave.partialReserveFundAmount = (typeof partialReserveFundAmount === 'number' && !isNaN(partialReserveFundAmount))
+          ? partialReserveFundAmount
+          : 0; // Default to 0 if useReserveFund is true but amount is not valid or undefined
       } else {
-        meetingDataToSave.partialReserveFundAmount = undefined;
+         delete meetingDataToSave.partialReserveFundAmount;
       }
-
-      meetingDataToSave.nonReserveFundParticipants = payload.nonReserveFundParticipants || [];
-      meetingDataToSave.temporaryParticipants = undefined;
-      meetingDataToSave.totalFee = undefined;
-      meetingDataToSave.feePerPerson = undefined;
+      // These will be omitted if undefined
+      delete meetingDataToSave.temporaryParticipants;
+      delete meetingDataToSave.totalFee;
+      delete meetingDataToSave.feePerPerson;
     }
 
-    const newMeeting = await dbAddMeeting(meetingDataToSave);
+    // The call to dbAddMeeting will handle its own defaults for isSettled, isShareEnabled etc.
+    // and convert dates to Timestamps.
+    // The object passed to dbAddMeeting should be Omit<Meeting, 'id' | 'createdAt' | 'isSettled' | 'isShareEnabled' | 'shareToken' | 'shareExpiryDate' | 'expenses'> & {creatorId: string}
+    // The current `meetingDataToSave` is being constructed to fit this.
+    // The dbAddMeeting function in data-store.ts will then add other defaults like createdAt, isSettled, etc.
+
+    const newMeeting = await dbAddMeeting(meetingDataToSave as Omit<Meeting, 'id' | 'createdAt' | 'isSettled' | 'isShareEnabled' | 'shareToken' | 'shareExpiryDate' | 'expenses'> & {creatorId: string});
     revalidatePath('/meetings');
     revalidatePath('/');
     revalidatePath(`/meetings/${newMeeting.id}`);

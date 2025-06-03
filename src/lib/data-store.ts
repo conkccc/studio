@@ -339,31 +339,77 @@ export const getMeetingById = async (id: string): Promise<Meeting | undefined> =
   return dataFromSnapshot<Meeting>(snapshot);
 };
 
-export const addMeeting = async (meetingData: Omit<Meeting, 'id' | 'createdAt' | 'isSettled' | 'isShareEnabled' | 'shareToken' | 'shareExpiryDate'>): Promise<Meeting> => {
-  // partialReserveFundAmount가 undefined면 아예 필드에서 제외
+// The payload from createMeetingAction is Omit<Meeting, 'id' | 'createdAt' | 'isSettled' | 'isShareEnabled' | 'shareToken' | 'shareExpiryDate' | 'expenses'> & {creatorId: string}
+// Let's make the parameter type here compatible.
+export const addMeeting = async (
+  meetingPayloadFromAction: Partial<Omit<Meeting, 'id' | 'createdAt' | 'isSettled' | 'isShareEnabled' | 'shareToken' | 'shareExpiryDate' | 'expenses'>> &
+                            { creatorId: string; dateTime: Date | Timestamp } // Required fields from payload
+): Promise<Meeting> => {
+
   const dataToStore: any = {
-    ...meetingData,
-    dateTime: Timestamp.fromDate(new Date(meetingData.dateTime)),
-    endTime: meetingData.endTime ? Timestamp.fromDate(new Date(meetingData.endTime)) : null,
-    createdAt: Timestamp.now(),
+    // Default values for fields that Firestore expects or have app-level defaults
     isSettled: false,
     isShareEnabled: false,
     shareToken: null,
     shareExpiryDate: null,
-    nonReserveFundParticipants: meetingData.nonReserveFundParticipants || [],
-    useReserveFund: meetingData.useReserveFund || false,
-    memo: meetingData.memo === undefined ? undefined : meetingData.memo,
+    expenses: [], // Default to empty array
+    participantIds: [], // Default to empty array
+    nonReserveFundParticipants: [], // Default to empty array
+    useReserveFund: false, // Default
+
+    ...meetingPayloadFromAction, // Spread the payload from action; this will overwrite defaults if provided in payload
+
+    // Ensure crucial fields are correctly formatted or set
+    dateTime: meetingPayloadFromAction.dateTime instanceof Date
+                ? Timestamp.fromDate(meetingPayloadFromAction.dateTime)
+                : meetingPayloadFromAction.dateTime, // Assume it could already be a Timestamp if passed through
+
+    // Handle endTime: convert to Timestamp if Date, or set to null if undefined/null in payload
+    endTime: meetingPayloadFromAction.endTime
+             ? (meetingPayloadFromAction.endTime instanceof Date
+                ? Timestamp.fromDate(meetingPayloadFromAction.endTime)
+                : meetingPayloadFromAction.endTime)
+             : null,
+    createdAt: Timestamp.now(), // Always set server-side at creation
   };
-  if (meetingData.partialReserveFundAmount !== undefined) {
-    dataToStore.partialReserveFundAmount = Number(meetingData.partialReserveFundAmount);
+
+  // Ensure specific numeric fields are numbers if they exist
+  if (dataToStore.partialReserveFundAmount !== undefined) {
+    dataToStore.partialReserveFundAmount = Number(dataToStore.partialReserveFundAmount);
   }
-  // memo도 undefined면 아예 필드에서 제외
-  if (meetingData.memo === undefined) {
-    delete dataToStore.memo;
+  if (dataToStore.totalFee !== undefined) {
+    dataToStore.totalFee = Number(dataToStore.totalFee);
+  }
+  if (dataToStore.feePerPerson !== undefined) {
+    dataToStore.feePerPerson = Number(dataToStore.feePerPerson);
   }
 
+  // Clean up based on isTemporary (some of this is already handled by createMeetingAction, but good for robustness)
+  if (dataToStore.isTemporary) {
+    dataToStore.participantIds = meetingPayloadFromAction.temporaryParticipants || []; // Use temporaryParticipants as participantIds for temporary meetings
+    dataToStore.useReserveFund = false;
+    // Fields to remove for temporary meetings if they somehow got here
+    const fieldsToRemoveForTemp = ['partialReserveFundAmount', 'nonReserveFundParticipants'];
+    fieldsToRemoveForTemp.forEach(f => delete dataToStore[f]);
+    // totalFee and feePerPerson are kept if defined
+  } else {
+    // For regular meetings, remove temporary-specific fields
+    const fieldsToRemoveForRegular = ['temporaryParticipants', 'totalFee', 'feePerPerson'];
+    fieldsToRemoveForRegular.forEach(f => delete dataToStore[f]);
+    if (dataToStore.useReserveFund && dataToStore.partialReserveFundAmount === undefined) {
+      dataToStore.partialReserveFundAmount = 0; // Default if using fund but amount not set
+    }
+  }
+
+  // Generic: Remove any top-level properties that are undefined before sending to Firestore
+  Object.keys(dataToStore).forEach(key => {
+    if (dataToStore[key] === undefined) {
+      delete dataToStore[key];
+    }
+  });
+
   const meetingsCollectionRef = collection(db, MEETINGS_COLLECTION);
-  const docRef = await addDoc(meetingsCollectionRef, dataToStore);
+  const docRef = await addDoc(meetingsCollectionRef, dataToStore as DocumentData);
   const newMeetingDocSnap = await getDoc(docRef);
   return dataFromSnapshot<Meeting>(newMeetingDocSnap)!;
 };
