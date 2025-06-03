@@ -128,9 +128,6 @@ const meetingSchema = meetingSchemaBase
     // The refine was for "one of them must be present". That's what needs to go.
     // The negative check part of that refine is redundant with min(0).
     // So, just removing that specific refine block that checks `data.totalFee === undefined && data.feePerPerson === undefined` is the primary goal.
-    // The provided "변경 후 예시" still had a refine. Let's stick to the goal: remove the MANDATORY part.
-    // The min(0) in the base schema is sufficient for "if present, must be >= 0".
-    // So, the refine that checks `if (data.isTemporary && data.totalFee === undefined && data.feePerPerson === undefined)` will be removed.
     // The other part of that refine `if (data.isTemporary && data.totalFee !== undefined && data.totalFee < 0) return false;` is covered by `totalFee: z.number().min(0)...`
     // Thus, the entire refine block for temporary fee validation can be removed.
     // This means the last .refine in the provided code will be deleted.
@@ -263,7 +260,7 @@ function LocationSearchInput({ form, isPending, isMapsLoaded, mapsLoadError, onL
 }
 
 
-export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, initialData, groupId }: MeetingFormProps) {
+export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, initialData, groupId, onTemporaryChange }: MeetingFormProps) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const { toast } = useToast();
@@ -329,8 +326,8 @@ export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, 
   const watchedIsTemporary = form.watch('isTemporary'); // Watch the form field
 
   useEffect(() => {
-    props.onTemporaryChange?.(watchedIsTemporary || false);
-  }, [watchedIsTemporary, props.onTemporaryChange]);
+    onTemporaryChange?.(watchedIsTemporary || false);
+  }, [watchedIsTemporary, onTemporaryChange]);
 
   useEffect(() => {
     const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
@@ -734,7 +731,7 @@ export function CreateMeetingForm({ friends, currentUserId, isEditMode = false, 
                 defaultValue={dateTimeValue ? format(dateTimeValue, "HH:mm") : "12:00"}
                 onChange={(e) => {
                   const newTime = e.target.value;
-                  const currentDateTime = form.watch('dateTime') || new Date(); // Fallback to new Date() if dateTime is undefined
+                  const currentDateTime = dateTimeValue || new Date(); // Fallback to new Date() if dateTime is undefined
                   const [hours, minutes] = newTime.split(':').map(Number);
                   const newDate = new Date(currentDateTime); // Create a new Date object to avoid mutating the original
                   newDate.setHours(hours, minutes, 0, 0);
