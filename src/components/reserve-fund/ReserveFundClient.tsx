@@ -192,9 +192,8 @@ export function ReserveFundClient() {
     );
   }
 
-  const cardTitle = selectedGroup
-    ? `${selectedGroup.isOwned ? "내가 만든" : "공유된"} 그룹 '${selectedGroup.name}' 회비`
-    : "그룹 회비 관리";
+  // Simplified main title for cards when a group is selected
+  const simpleGroupTitle = selectedGroup ? `${selectedGroup.name} 회비` : "그룹 회비";
 
   return (
     <div className="space-y-6">
@@ -227,12 +226,14 @@ export function ReserveFundClient() {
           <Card className="shadow-md">
             <CardHeader className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
               <div className="flex-1">
-                <CardTitle className="flex items-center gap-2 mb-1"> {/* Added mb-1 */}
-                    <Edit className="h-5 w-5 text-primary"/> {cardTitle} - 잔액 설정
+                <CardTitle className="flex items-center gap-2 mb-1">
+                    <PiggyBank className="h-5 w-5 text-primary"/> {/* Changed Icon to PiggyBank for balance display */}
+                    {simpleGroupTitle}
                 </CardTitle>
-                <CardDescription className="mt-1"> {/* Added mt-1 for spacing if CardTitle had mb-0 */}
-                    현재 설정된 회비 잔액은 <strong className="text-primary">{isLoadingFundDetails ? <Loader2 className="h-4 w-4 animate-spin inline-block"/> : (currentBalance !== null ? currentBalance.toLocaleString() + '원' : '정보 없음')}</strong> 입니다.
-                    모임에서 회비를 사용하면 이 잔액에서 자동으로 차감됩니다.
+                <CardDescription className="mt-2"> {/* Increased spacing slightly */}
+                    현재 잔액: <strong className="text-3xl font-bold text-primary">{isLoadingFundDetails ? <Loader2 className="h-4 w-4 animate-spin inline-block"/> : (currentBalance !== null ? currentBalance.toLocaleString() + '원' : '정보 없음')}</strong>
+                    <br/>
+                    <span className="text-xs">모임에서 회비를 사용하면 이 잔액에서 자동으로 차감됩니다.</span>
                 </CardDescription>
               </div>
               {isAdmin && (
@@ -244,10 +245,8 @@ export function ReserveFundClient() {
                   </AlertDialogTrigger>
                   <AlertDialogContent className="sm:max-w-md">
                     <AlertDialogHeader>
-                      <AlertDialogTitle>현재 회비 잔액 설정</AlertDialogTitle>
-                      <AlertDialogDescription>
-                        '{selectedGroup.name}' 그룹의 현재 총 회비 잔액을 입력해주세요.
-                      </AlertDialogDescription>
+                      <AlertDialogTitle>'{selectedGroup.name}' 회비 잔액 직접 수정</AlertDialogTitle>
+                      {/* Removed redundant description from here as per feedback, title is clear */}
                     </AlertDialogHeader>
                     <form onSubmit={form.handleSubmit(handleBalanceUpdate)} className="space-y-4 py-4">
                       <div>
@@ -291,12 +290,12 @@ export function ReserveFundClient() {
 
           <Card className="shadow-md">
             <CardHeader>
-              <CardTitle className="flex items-center gap-2 mb-2"> {/* Added mb-2 */}
-                <History className="h-5 w-5 text-primary"/>{cardTitle} - 변경 내역
+              <CardTitle className="flex items-center gap-2 mb-2">
+                <History className="h-5 w-5 text-primary"/>{simpleGroupTitle} - 변경 내역
               </CardTitle>
               <CardDescription>모임에서의 회비 사용 또는 수동 잔액 설정 내역입니다.</CardDescription>
             </CardHeader>
-            <CardContent className="pt-2"> {/* Added pt-2 if CardHeader has padding-bottom already */}
+            <CardContent className="pt-2">
               {isLoadingFundDetails ? (
                 <div className="flex justify-center items-center h-40"><Loader2 className="h-8 w-8 animate-spin text-primary" /> <p className="ml-2">회비 내역 로딩 중...</p></div>
               ) : transactions.length > 0 ? (

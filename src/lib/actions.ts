@@ -28,7 +28,7 @@ import {
   getMeetings as dbGetMeetings, // Import for the new meeting action
 } from './data-store';
 import type { Friend, Meeting, Expense, ReserveFundTransaction, User, FriendGroup } from './types';
-import { Timestamp } from 'firebase/firestore';
+import { Timestamp, arrayRemove as firestoreArrayRemove } from 'firebase/firestore'; // Added firestoreArrayRemove
 import { nanoid } from 'nanoid';
 import { addDays } from 'date-fns';
 import { db } from './firebase';
@@ -140,16 +140,53 @@ export async function updateFriendAction(id: string, updates: Partial<Omit<Frien
   }
 }
 
-export async function deleteFriendAction(id: string) {
+export async function deleteFriendAction(payload: { friendId: string; groupId: string; currentUserId: string }) {
+  const { friendId, groupId, currentUserId } = payload;
+
+  if (!friendId) {
+    return { success: false, error: "삭제할 친구 ID가 필요합니다." };
+  }
+  if (!groupId) {
+    return { success: false, error: "친구가 속한 그룹 ID가 필요합니다." };
+  }
+  if (!currentUserId) {
+    return { success: false, error: "사용자 ID가 필요합니다. 로그인이 필요합니다." };
+  }
+
   try {
-    // Assuming admin-only action
-    await dbDeleteFriend(id);
-    revalidatePath('/friends');
-    revalidatePath('/meetings');
+    const callingUser = await dbGetUserById(currentUserId);
+    if (!callingUser) {
+      return { success: false, error: "사용자 정보를 찾을 수 없습니다." };
+    }
+
+    const groupDocRef = doc(db, 'friendGroups', groupId);
+    const groupSnap = await getDoc(groupDocRef);
+
+    if (!groupSnap.exists()) {
+      return { success: false, error: "친구 그룹을 찾을 수 없습니다." };
+    }
+    const group = groupSnap.data() as FriendGroup;
+
+    if (group.ownerUserId !== currentUserId && callingUser.role !== 'admin') {
+      return { success: false, error: "친구를 삭제할 권한이 없습니다. 그룹 소유자 또는 관리자만 가능합니다." };
+    }
+
+    // 1. Delete friend document (this also handles removing friend from meetings via dbDeleteFriend)
+    await dbDeleteFriend(friendId);
+
+    // 2. Remove friendId from the group's memberIds array
+    await updateDoc(groupDocRef, {
+      memberIds: firestoreArrayRemove(friendId)
+    });
+
+    revalidatePath('/friends'); // Revalidate general friends page/dashboard
+    // Consider revalidating the specific group view if such a page exists, e.g., revalidatePath(`/friends/group/${groupId}`);
+    // For now, FriendGroupListClient re-fetches friends on group selection or after deletion.
     return { success: true };
+
   } catch (error) {
     console.error("deleteFriendAction Error:", error);
-    const errorMessage = error instanceof Error ? error.message : '친구 삭제에 실패했습니다.';
+    const errorMessage = error instanceof Error ? error.message : '친구 삭제 중 오류가 발생했습니다.';
     return { success: false, error: errorMessage };
   }
 }

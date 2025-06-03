@@ -2,13 +2,13 @@
 import { useEffect, useState, useCallback } from 'react';
 import {
   createFriendGroupAction,
-  // updateFriendGroupAction, // Add if/when edit functionality is implemented
   deleteFriendGroupAction,
   getFriendGroupsForUserAction,
-  getFriendsByGroupAction // Added for fetching friends
+  getFriendsByGroupAction,
+  deleteFriendAction // Added this action
 } from '@/lib/actions';
-import type { FriendGroup, User, Friend } from '@/lib/types'; // Added Friend
-import { useToast } from '@/hooks/use-toast'; // Assuming this path is correct
+import type { FriendGroup, User, Friend } from '@/lib/types';
+import { useToast } from '@/hooks/use-toast';
 import { Loader2, Edit, Trash2, PlusCircle, ChevronDown, ChevronRight } from 'lucide-react'; // Added icons
 import { Button } from '@/components/ui/button'; // Assuming shadcn Button
 import { Input } from '@/components/ui/input'; // Assuming shadcn Input
@@ -26,12 +26,18 @@ export default function FriendGroupListClient() {
   const [newGroupName, setNewGroupName] = useState('');
   const [isLoading, setIsLoading] = useState(true); // For initial group list load
   const [isSubmitting, setIsSubmitting] = useState(false); // For form submissions
+  const [isDeletingFriend, setIsDeletingFriend] = useState<string | null>(null); // To show loader on specific friend delete button
   const { toast } = useToast();
 
   // State for selected group and its friends
   const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
   const [friendsInSelectedGroup, setFriendsInSelectedGroup] = useState<Friend[]>([]);
   const [isLoadingFriends, setIsLoadingFriends] = useState(false);
+
+  const currentSelectedGroupObject = useMemo(() => {
+    if (!selectedGroupId) return null;
+    return groups.find(g => g.id === selectedGroupId) || null;
+  }, [groups, selectedGroupId]);
 
 
   const fetchGroups = useCallback(async () => {
@@ -147,6 +153,37 @@ export default function FriendGroupListClient() {
     fetchFriendsForGroup();
   }, [selectedGroupId, toast]);
 
+  const handleDeleteFriend = async (friendId: string, friendName: string) => {
+    if (!selectedGroupId || !appUser?.id) {
+      toast({ title: "오류", description: "필수 정보가 누락되었습니다.", variant: "destructive" });
+      return;
+    }
+
+    const confirmed = window.confirm(`'${friendName}' 친구를 이 그룹에서 정말 삭제하시겠습니까? 친구 정보는 다른 그룹에 남아있을 수 있습니다.`);
+    if (!confirmed) return;
+
+    setIsDeletingFriend(friendId);
+    try {
+      const result = await deleteFriendAction({
+        friendId,
+        groupId: selectedGroupId,
+        currentUserId: appUser.id,
+      });
+
+      if (result.success) {
+        toast({ title: "성공", description: `'${friendName}' 친구를 그룹에서 삭제했습니다.` });
+        // Refresh friends list for the current group
+        setFriendsInSelectedGroup(prev => prev.filter(f => f.id !== friendId));
+      } else {
+        toast({ title: "오류", description: result.error || "친구 삭제에 실패했습니다.", variant: "destructive" });
+      }
+    } catch (error) {
+      toast({ title: "오류", description: "친구 삭제 중 예외가 발생했습니다.", variant: "destructive" });
+    } finally {
+      setIsDeletingFriend(null);
+    }
+  };
+
 
   if (isLoading) { // Initial loading for groups
     return <div className="flex justify-center items-center h-32"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>;
@@ -210,7 +247,20 @@ export default function FriendGroupListClient() {
                     {!isLoadingFriends && friendsInSelectedGroup.length > 0 && (
                       <ul className="space-y-1 pt-2">
                         {friendsInSelectedGroup.map(friend => (
-                          <li key={friend.id} className="text-sm p-1 hover:bg-muted rounded">{friend.name}</li>
+                          <li key={friend.id} className="flex justify-between items-center text-sm p-1 hover:bg-muted rounded group">
+                            <span>{friend.name} {friend.description && `(${friend.description})`}</span>
+                            {currentSelectedGroupObject?.isOwned || appUser?.role === 'admin' ? (
+                              <Button
+                                variant="ghost"
+                                size="icon_sm"
+                                className="opacity-0 group-hover:opacity-100 transition-opacity"
+                                onClick={() => handleDeleteFriend(friend.id, friend.name)}
+                                disabled={isDeletingFriend === friend.id}
+                              >
+                                {isDeletingFriend === friend.id ? <Loader2 className="h-3 w-3 animate-spin"/> : <Trash2 className="h-3 w-3 text-destructive" />}
+                              </Button>
+                            ) : null}
+                          </li>
                         ))}
                       </ul>
                     )}
@@ -245,7 +295,23 @@ export default function FriendGroupListClient() {
                     {!isLoadingFriends && friendsInSelectedGroup.length > 0 && (
                        <ul className="space-y-1 pt-2">
                         {friendsInSelectedGroup.map(friend => (
-                          <li key={friend.id} className="text-sm p-1 hover:bg-muted rounded">{friend.name}</li>
+                           <li key={friend.id} className="flex justify-between items-center text-sm p-1 hover:bg-muted rounded group">
+                            <span>{friend.name} {friend.description && `(${friend.description})`}</span>
+                            {/* Viewers cannot delete friends, even from shared groups they have access to via refFriendGroupIds, only owners/admins of the group can manage friends within it. */}
+                            {/* The isReferenced flag on DisplayFriendGroup could be used if viewers could manage friends in referenced groups, but that's not typical. */}
+                            {/* For now, only allow delete if the group is an ownedGroup (implicit from where this list is rendered) or user is admin */}
+                            {(currentSelectedGroupObject?.isOwned && appUser && (appUser.role === 'user' || appUser.role === 'admin')) || (appUser?.role === 'admin') ? (
+                              <Button
+                                variant="ghost"
+                                size="icon_sm"
+                                className="opacity-0 group-hover:opacity-100 transition-opacity"
+                                onClick={() => handleDeleteFriend(friend.id, friend.name)}
+                                disabled={isDeletingFriend === friend.id}
+                              >
+                                {isDeletingFriend === friend.id ? <Loader2 className="h-3 w-3 animate-spin"/> : <Trash2 className="h-3 w-3 text-destructive" />}
+                              </Button>
+                            ) : null}
+                          </li>
                         ))}
                       </ul>
                     )}

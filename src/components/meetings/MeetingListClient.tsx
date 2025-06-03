@@ -41,7 +41,8 @@ export function MeetingListClient({ allFriends }: MeetingListClientProps) {
   const selectedYearParam = searchParams.get('year');
   const currentPageParam = searchParams.get('page');
 
-  const activeYear = useMemo(() => selectedYearParam || "all", [selectedYearParam]);
+  // Default activeYear to current year string if no year param; "all" remains an option for explicit selection
+  const activeYear = useMemo(() => selectedYearParam || new Date().getFullYear().toString(), [selectedYearParam]);
   const currentPage = useMemo(() => parseInt(currentPageParam || "1", 10), [currentPageParam]);
 
   const [filterType, setFilterType] = useState<'all' | 'regular' | 'temporary'>('all');
@@ -60,9 +61,14 @@ export function MeetingListClient({ allFriends }: MeetingListClientProps) {
     }
     setIsLoading(true);
     try {
-      const yearToFetch = activeYear === "all" ? undefined : parseInt(activeYear, 10);
+      // If activeYear is "all" (selected from dropdown), yearToFetch is undefined.
+      // Otherwise, it's the selected year number.
+      const yearToFetch = activeYear === "all"
+        ? undefined
+        : parseInt(activeYear, 10); // activeYear can now be "2024" or "all"
+
       const result = await getMeetingsForUserAction({
-        requestingUserId: currentUser.uid, // Use currentUser.uid
+        requestingUserId: currentUser.uid,
         year: yearToFetch,
         page: currentPage,
         limitParam: MEETINGS_PER_PAGE,

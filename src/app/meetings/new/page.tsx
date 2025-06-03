@@ -1,7 +1,10 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { getFriends, getFriendGroupsByUser } from '@/lib/data-store';
+// getFriends might still be used for admin, getFriendGroupsByUser is used
+import { getFriends } from '@/lib/data-store';
+// Assuming getFriendsByGroupAction exists for fetching friends of a specific group
+import { getFriendGroupsForUserAction, getFriendsByGroupAction } from '@/lib/actions';
 import { CreateMeetingForm } from '@/components/meetings/CreateMeetingForm';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
 import { useAuth } from '@/contexts/AuthContext';
@@ -37,35 +40,71 @@ export default function NewMeetingPage() {
       return;
     }
 
-    if (!currentUser || !isAdmin) { 
+    // Guard for page access, already handled below, but this useEffect is for data fetching.
+    // User must be logged in and be either admin or user.
+    if (!currentUser || !(isAdmin || userRole === 'user')) {
       setDataLoading(false);
       setFriends([]);
+      setGroups([]); // Also clear groups if user has no permission
       return;
     }
 
-    const fetchFriends = async () => {
+    const fetchDataForUser = async () => {
       setDataLoading(true);
       try {
-        const fetchedFriends = await getFriends();
+        let fetchedFriends: Friend[] = [];
+        let userOwnedGroups: FriendGroup[] = []; // For user role, to populate group dropdown and fetch their friends
+
+        if (isAdmin) {
+          fetchedFriends = await getFriends(); // Admins get all friends
+          // For admins, the groups prop for CreateMeetingForm should ideally list all groups for assignment.
+          // Using getFriendGroupsForUserAction which gets all groups for admin.
+          const adminGroupsResponse = await getFriendGroupsForUserAction(currentUser.uid);
+          if (adminGroupsResponse.success && adminGroupsResponse.groups) {
+            setGroups(adminGroupsResponse.groups);
+          } else {
+            setGroups([]);
+          }
+        } else if (userRole === 'user') {
+          // Users get friends from their owned groups
+          const groupResponse = await getFriendGroupsForUserAction(currentUser.uid);
+          if (groupResponse.success && groupResponse.groups) {
+            userOwnedGroups = groupResponse.groups.filter(g => g.ownerUserId === currentUser.uid);
+            setGroups(userOwnedGroups); // For 'user', the group dropdown in form shows only their owned groups
+
+            if (userOwnedGroups.length > 0) {
+              const friendPromises = userOwnedGroups.map(g => getFriendsByGroupAction(g.id));
+              const friendResults = await Promise.all(friendPromises);
+
+              const tempFriendsMap = new Map<string, Friend>();
+              friendResults.forEach(res => {
+                if (res.success && res.friends) {
+                  res.friends.forEach(f => tempFriendsMap.set(f.id, f));
+                }
+              });
+              fetchedFriends = Array.from(tempFriendsMap.values()).sort((a, b) => a.name.localeCompare(b.name));
+            } else {
+              fetchedFriends = []; // No owned groups, so no friends from groups
+            }
+          }
+        }
         setFriends(fetchedFriends);
+
       } catch (error) {
-        console.error("Failed to fetch friends for new meeting:", error);
+        console.error("Failed to fetch data for new meeting:", error);
         setFriends([]);
+        setGroups([]);
       } finally {
         setDataLoading(false);
       }
     };
     
-    fetchFriends();
+    fetchDataForUser();
 
-  }, [authLoading, currentUser, isAdmin]);
+  }, [authLoading, currentUser, isAdmin, userRole]);
+  // Removed the separate useEffect for groups as it's now handled within fetchDataForUser
 
-  useEffect(() => {
-    if (!currentUser) return;
-    getFriendGroupsByUser(currentUser.uid).then(setGroups);
-  }, [currentUser]);
-
-  if (authLoading || (isAdmin && dataLoading)) {
+  if (authLoading || ((isAdmin || userRole === 'user') && dataLoading)) { // dataLoading applies if user is permitted
     return (
       <div className="flex justify-center items-center min-h-[calc(100vh-150px)]">
         <p className="text-xl text-muted-foreground">페이지 로딩 중...</p>
