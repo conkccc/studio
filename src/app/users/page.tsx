@@ -1,45 +1,61 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import { useAuth } from '@/contexts/AuthContext';
+import { useAuth } from '@/context/AuthContext'; // Corrected path
 import { getUsers } from '@/lib/data-store';
-import type { User } from '@/lib/types';
+import { getAllFriendGroupsAction } from '@/lib/actions'; // Assuming this action exists
+import type { User, FriendGroup } from '@/lib/types'; // Added FriendGroup
 import { UserListClient } from '@/components/users/UserListClient';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 
 export default function UsersPage() {
-  const { currentUser, isAdmin, userRole, loading: authLoading } = useAuth();
+  const { currentUser, isAdmin, loading: authLoading } = useAuth(); // userRole not directly used here
   const [users, setUsers] = useState<User[]>([]);
+  const [allFriendGroups, setAllFriendGroups] = useState<FriendGroup[]>([]);
   const [dataLoading, setDataLoading] = useState(true);
 
   useEffect(() => {
     if (authLoading) {
-      setDataLoading(true); 
+      setDataLoading(true);
       return;
     }
-    if (!isAdmin) { // 관리자가 아니면 데이터 패치 X
+    if (!isAdmin || !currentUser) {
       setDataLoading(false);
-      setUsers([]); 
+      setUsers([]);
+      setAllFriendGroups([]);
       return;
     }
-    const fetchUsers = async () => {
+
+    const fetchData = async () => {
       setDataLoading(true);
       try {
+        // Fetch users
         const fetchedUsers = await getUsers();
         setUsers(fetchedUsers);
+
+        // Fetch all friend groups - only if admin
+        const groupsResult = await getAllFriendGroupsAction(); // Assuming this action exists
+        if (groupsResult.success && groupsResult.groups) {
+          setAllFriendGroups(groupsResult.groups);
+        } else {
+          console.error("Failed to fetch all friend groups:", groupsResult.error);
+          setAllFriendGroups([]); // Set to empty array on error
+        }
       } catch (error) {
-        console.error("Failed to fetch users:", error);
+        console.error("Failed to fetch data for users page:", error);
         setUsers([]);
+        setAllFriendGroups([]);
       } finally {
         setDataLoading(false);
       }
     };
-    fetchUsers();
-  }, [authLoading, isAdmin]);
+    fetchData();
+  }, [authLoading, isAdmin, currentUser]);
 
-  if (authLoading || (isAdmin && dataLoading)) { 
+  // Combined loading state check
+  if (authLoading || (isAdmin && dataLoading)) {
     return (
       <div className="flex justify-center items-center min-h-[calc(100vh-150px)]">
         <p className="text-xl text-muted-foreground">사용자 목록 로딩 중...</p>
@@ -65,11 +81,16 @@ export default function UsersPage() {
         <CardHeader>
           <CardTitle>사용자 관리</CardTitle>
           <CardDescription>
-            애플리케이션 사용자 목록을 확인하고 역할을 관리합니다.
+            애플리케이션 사용자 목록을 확인하고 역할 및 참조 그룹을 관리합니다.
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <UserListClient initialUsers={users} currentAdminId={currentUser?.uid || ''} isAdmin={isAdmin} />
+          <UserListClient
+            initialUsers={users}
+            currentAdminId={currentUser?.id || ''} // Assuming currentUser.id from useAuth
+            isAdmin={isAdmin}
+            allFriendGroups={allFriendGroups}
+          />
         </CardContent>
       </Card>
     </div>

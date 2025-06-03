@@ -1,59 +1,30 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { getReserveFundBalance, getLoggedReserveFundTransactions } from '@/lib/data-store';
-import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
+import { useEffect, useState } from 'react'; // Kept for potential top-level loading/auth checks
+// Removed: getReserveFundBalance, getLoggedReserveFundTransactions, Card components (if not used for page structure)
+// Removed: Tabs, useRouter, usePathname
 import { ReserveFundClient } from '@/components/reserve-fund/ReserveFundClient';
-import { useAuth } from '@/contexts/AuthContext';
+import { useAuth } from '@/context/AuthContext';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
-import type { ReserveFundTransaction } from '@/lib/types';
-import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { useRouter, usePathname } from 'next/navigation';
+// Removed: ReserveFundTransaction type (client handles its own types)
 
 export default function ReserveFundPage() {
-  const { currentUser, isAdmin, userRole, loading: authLoading } = useAuth();
-  const [balance, setBalance] = useState<number>(0);
-  const [transactions, setTransactions] = useState<ReserveFundTransaction[]>([]);
-  const [dataLoading, setDataLoading] = useState(true);
-  const router = useRouter();
-  const pathname = usePathname();
+  const { currentUser, loading: authLoading } = useAuth();
+  // dataLoading state might still be useful for the overall page shell if there were other elements.
+  // For now, ReserveFundClient handles its own internal loading states.
+  const [pageReady, setPageReady] = useState(false);
 
   useEffect(() => {
-    if (authLoading) {
-      setDataLoading(true);
-      return;
+    if (!authLoading) {
+      setPageReady(true);
     }
-    if (!currentUser) {
-      setDataLoading(false);
-      setBalance(0);
-      setTransactions([]);
-      return;
-    }
-    const fetchData = async () => {
-      setDataLoading(true);
-      try {
-        const [fetchedBalance, fetchedTransactions] = await Promise.all([
-          getReserveFundBalance(),
-          getLoggedReserveFundTransactions(5)
-        ]);
-        setBalance(fetchedBalance ?? 0);
-        setTransactions(fetchedTransactions);
-      } catch (error) {
-        console.error("Failed to fetch reserve fund data:", error);
-        setBalance(0);
-        setTransactions([]);
-      } finally {
-        setDataLoading(false);
-      }
-    };
-    fetchData();
-  }, [authLoading, currentUser]);
+  }, [authLoading]);
 
-  if (authLoading || (currentUser && dataLoading)) {
+  if (!pageReady) { // Handles authLoading implicitly
     return (
       <div className="flex justify-center items-center min-h-[calc(100vh-150px)]">
-        <p className="text-xl text-muted-foreground">회비 정보 로딩 중...</p>
+        <p className="text-xl text-muted-foreground">회비 페이지 로딩 중...</p>
       </div>
     );
   }
@@ -62,7 +33,7 @@ export default function ReserveFundPage() {
      return (
       <div className="container mx-auto py-8 text-center">
         <h1 className="text-2xl font-bold mb-4">로그인이 필요합니다</h1>
-        <p className="text-muted-foreground">이 페이지는 로그인한 사용자만 접근할 수 있습니다.</p>
+        <p className="text-muted-foreground">회비 정보를 보려면 로그인이 필요합니다.</p>
          <Button asChild className="mt-4">
           <Link href="/login">로그인 페이지로 이동</Link>
         </Button>
@@ -70,49 +41,29 @@ export default function ReserveFundPage() {
     );
   }
 
-  // 로그인한 모든 사용자(관리자/일반)에게 회비 관리 노출
-  // 탭 상태: 전체/그룹별
-  const tabValue = pathname === '/reserve-fund/group' ? 'group' : 'all';
+  // Viewer role check - if viewers should not see this page at all.
+  // However, ReserveFundClient itself will filter groups for viewers.
+  // So, it's probably fine for viewers to land here and see what they have access to (potentially nothing).
+  // if (currentUser.role === 'viewer' && SOME_CONDITION_THAT_VIEWERS_SEE_NOTHING) {
+  //   return (
+  //     <div className="container mx-auto py-8 text-center">
+  //       <h1 className="text-2xl font-bold mb-4">권한 없음</h1>
+  //       <p className="text-muted-foreground">이 페이지에 표시할 내용이 없습니다.</p>
+  //     </div>
+  //   );
+  // }
 
-  const handleTabChange = (value: string) => {
-    if (value === 'all') router.push('/reserve-fund');
-    else if (value === 'group') router.push('/reserve-fund/group');
-  };
 
   return (
-    <div className="space-y-6">
-      <Tabs value={tabValue} onValueChange={handleTabChange} className="mb-6">
-        <TabsList>
-          <TabsTrigger value="all">전체 회비 관리</TabsTrigger>
-          <TabsTrigger value="group">그룹별 회비 관리</TabsTrigger>
-        </TabsList>
-      </Tabs>
-      {/* 전체 회비 관리 UI */}
-      {tabValue === 'all' && (
-        <>
-          <div>
-            <h1 className="text-2xl font-semibold">회비 관리</h1>
-            <p className="text-muted-foreground">
-              모임의 공동 회비 잔액을 설정하고, 사용 내역을 확인하세요.
-            </p>
-          </div>
-          <Card>
-            <CardHeader>
-              <CardTitle>현재 잔액</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <p className="text-4xl font-bold text-primary">{balance.toLocaleString()}원</p>
-            </CardContent>
-          </Card>
-          <ReserveFundClient 
-            initialTransactions={transactions} 
-            initialBalance={balance}
-            groupId={''}
-            isReadOnly={userRole === 'user' && !isAdmin}
-          />
-        </>
-      )}
-      {/* 그룹별 회비 관리는 /reserve-fund/group에서 렌더링 */}
+    <div className="space-y-6 p-4 md:p-6"> {/* Added padding */}
+      <div>
+        <h1 className="text-2xl font-semibold">그룹 회비 관리</h1>
+        <p className="text-muted-foreground">
+          그룹을 선택하여 회비 잔액을 설정하고 사용 내역을 확인하세요.
+        </p>
+      </div>
+      {/* ReserveFundClient now fetches all its required data internally */}
+      <ReserveFundClient />
     </div>
   );
 }

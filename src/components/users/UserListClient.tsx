@@ -7,28 +7,39 @@ import { useToast } from '@/hooks/use-toast';
 import { updateUserRoleAction } from '@/lib/actions';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Loader2 } from 'lucide-react';
+import { Loader2, Settings2 } from 'lucide-react'; // Added Settings2 for assign button
 import { format, isValid } from 'date-fns';
 import { ko } from 'date-fns/locale';
 import { Timestamp } from 'firebase/firestore';
-
+import { AssignRefGroupsDialog } from './AssignRefGroupsDialog'; // Uncommented and verified path
+import type { FriendGroup } from '@/lib/types'; // For allFriendGroups prop
 
 interface UserListClientProps {
   initialUsers: User[];
   currentAdminId: string;
   isAdmin: boolean;
+  allFriendGroups: FriendGroup[]; // Added prop for the dialog
 }
 
-export function UserListClient({ initialUsers, currentAdminId, isAdmin }: UserListClientProps) {
+export function UserListClient({ initialUsers, currentAdminId, isAdmin, allFriendGroups }: UserListClientProps) {
   const [users, setUsers] = useState<User[]>(initialUsers);
   const [isPending, startTransition] = useTransition();
   const { toast } = useToast();
-  const [editingUserId, setEditingUserId] = useState<string | null>(null);
-  const [editLoading, setEditLoading] = useState(false);
+  // const [editingUserId, setEditingUserId] = useState<string | null>(null); // Kept if used for other edits
+  // const [editLoading, setEditLoading] = useState(false); // Kept if used for other edits
+
+  const [isAssignDialogOpen, setIsAssignDialogOpen] = useState(false);
+  const [selectedUserForGroups, setSelectedUserForGroups] = useState<User | null>(null);
 
   useEffect(() => {
     setUsers(initialUsers);
   }, [initialUsers]);
+
+  // Callback to refresh users if dialog updates a user
+  const handleUserUpdated = (updatedUser: User) => {
+    setUsers(prevUsers => prevUsers.map(u => u.id === updatedUser.id ? updatedUser : u));
+     // Re-fetch all users if more comprehensive update is needed, or rely on revalidatePath from action
+  };
 
   const handleRoleChange = (userIdToUpdate: string, newRole: User['role']) => {
     if (userIdToUpdate === currentAdminId) {
@@ -94,12 +105,13 @@ export function UserListClient({ initialUsers, currentAdminId, isAdmin }: UserLi
               <TableHead>이메일</TableHead>
               <TableHead>역할</TableHead>
               <TableHead>가입일</TableHead>
+              {isAdmin && <TableHead className="text-right">작업</TableHead>}
             </TableRow>
           </TableHeader>
           <TableBody>
-            {users.length === 0 && !isPending && ( // Show only if not pending and users is empty
+            {users.length === 0 && !isPending && (
               <TableRow>
-                <TableCell colSpan={4} className="text-center text-muted-foreground h-24">
+                <TableCell colSpan={isAdmin ? 5 : 4} className="text-center text-muted-foreground h-24">
                   사용자가 없습니다.
                 </TableCell>
               </TableRow>
@@ -109,28 +121,63 @@ export function UserListClient({ initialUsers, currentAdminId, isAdmin }: UserLi
                 <TableCell>{user.name || '-'}</TableCell>
                 <TableCell>{user.email || '-'}</TableCell>
                 <TableCell>
-                  <Select
-                    value={user.role} // Controlled component
-                    onValueChange={(newRole) => handleRoleChange(user.id, newRole as User['role'])}
-                    disabled={isPending || user.id === currentAdminId}
-                  >
-                    <SelectTrigger className="w-[100px] h-8 text-xs" disabled={isPending || user.id === currentAdminId}>
-                      <SelectValue placeholder="역할 선택" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="admin">Admin</SelectItem>
-                      <SelectItem value="user">User</SelectItem>
-                      <SelectItem value="none">None</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  {user.id === currentAdminId && <p className="text-xs text-muted-foreground mt-1">(본인)</p>}
+                  {user.id === currentAdminId ? (
+                    <>
+                      <span>{user.role}</span>
+                      <p className="text-xs text-muted-foreground mt-1">(본인)</p>
+                    </>
+                  ) : (
+                    <Select
+                      value={user.role}
+                      onValueChange={(newRole) => handleRoleChange(user.id, newRole as User['role'])}
+                      disabled={isPending}
+                    >
+                      <SelectTrigger className="w-[100px] h-8 text-xs">
+                        <SelectValue placeholder="역할 선택" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="admin">Admin</SelectItem>
+                        <SelectItem value="user">User</SelectItem>
+                        <SelectItem value="viewer">Viewer</SelectItem> {/* Added viewer role */}
+                        <SelectItem value="none">None</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  )}
                 </TableCell>
                 <TableCell className="text-xs">{formatDate(user.createdAt)}</TableCell>
+                {isAdmin && (
+                  <TableCell className="text-right">
+                    {user.id !== currentAdminId && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          setSelectedUserForGroups(user);
+                          setIsAssignDialogOpen(true);
+                        }}
+                        disabled={isPending}
+                      >
+                        <Settings2 className="h-3 w-3 mr-1" /> 참조 그룹 할당
+                      </Button>
+                    )}
+                  </TableCell>
+                )}
               </TableRow>
             ))}
           </TableBody>
         </Table>
       </div>
+
+      {selectedUserForGroups && isAdmin && (
+        <AssignRefGroupsDialog
+          isOpen={isAssignDialogOpen}
+          setIsOpen={setIsAssignDialogOpen}
+          targetUser={selectedUserForGroups}
+          allFriendGroups={allFriendGroups}
+          currentAdminId={currentAdminId}
+          onUserUpdated={handleUserUpdated} // To refresh the list or update user data
+        />
+      )}
     </div>
   );
 }

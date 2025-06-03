@@ -23,6 +23,9 @@ import {
   addFriendGroup as dbAddFriendGroup,
   updateFriendGroup as dbUpdateFriendGroup,
   deleteFriendGroup as dbDeleteFriendGroup,
+  getFriendGroupsByUser as dbGetFriendGroupsByUser,
+  dbGetAllFriendGroups,
+  getMeetings as dbGetMeetings, // Import for the new meeting action
 } from './data-store';
 import type { Friend, Meeting, Expense, ReserveFundTransaction, User, FriendGroup } from './types';
 import { Timestamp } from 'firebase/firestore';
@@ -66,6 +69,54 @@ export async function createFriendAction(name: string, groupId: string, descript
   }
 }
 
+export async function getAllFriendGroupsAction() {
+  try {
+    const groups = await dbGetAllFriendGroups();
+    return { success: true, groups };
+  } catch (error) {
+    console.error('getAllFriendGroupsAction Error:', error);
+    const errorMessage = error instanceof Error ? error.message : '모든 친구 그룹 목록을 가져오는데 실패했습니다.';
+    return { success: false, error: errorMessage };
+  }
+}
+
+// Admin Action: Assign reference friend groups to a user
+export async function assignRefFriendGroupsToUserAction(
+  adminUserId: string,
+  targetUserId: string,
+  refFriendGroupIds: string[]
+) {
+  try {
+    if (!adminUserId) {
+      return { success: false, error: "관리자 인증 정보가 없습니다. 로그인이 필요합니다." };
+    }
+    const adminUser = await dbGetUserById(adminUserId);
+    if (!adminUser || adminUser.role !== 'admin') {
+      return { success: false, error: "권한이 없습니다. 관리자만 사용자에게 친구 그룹을 할당할 수 있습니다." };
+    }
+
+    if (!targetUserId) {
+      return { success: false, error: "대상 사용자 ID가 지정되지 않았습니다." };
+    }
+    // Ensure refFriendGroupIds is an array, even if empty, to avoid Firestore errors.
+    const validRefFriendGroupIds = Array.isArray(refFriendGroupIds) ? refFriendGroupIds : [];
+
+    const updatedUser = await dbUpdateUser(targetUserId, { refFriendGroupIds: validRefFriendGroupIds });
+    if (!updatedUser) {
+      return { success: false, error: "대상 사용자 정보 업데이트에 실패했습니다. 사용자를 찾을 수 없거나 업데이트 중 오류가 발생했습니다." };
+    }
+
+    revalidatePath('/users'); // Assuming '/users' is the path where user list or details are displayed
+    revalidatePath(`/users/${targetUserId}`); // Revalidate specific user page if exists
+    return { success: true, user: updatedUser };
+
+  } catch (error) {
+    console.error('assignRefFriendGroupsToUserAction Error:', error);
+    const errorMessage = error instanceof Error ? error.message : '참조 친구 그룹 할당 중 오류가 발생했습니다.';
+    return { success: false, error: errorMessage };
+  }
+}
+
 export async function updateFriendAction(id: string, updates: Partial<Omit<Friend, 'id' | 'createdAt'>>) {
   try {
     // Assuming admin-only action based on UI and Firestore rules
@@ -105,6 +156,15 @@ export async function createMeetingAction(
   }
 
   try {
+    const currentUser = await dbGetUserById(currentUserId);
+    if (!currentUser) {
+      return { success: false, error: "사용자 정보를 찾을 수 없습니다." };
+    }
+
+    if (currentUser.role !== 'admin' && currentUser.role !== 'user') {
+      return { success: false, error: "모임을 생성할 권한이 없습니다. 'admin' 또는 'user' 역할만 가능합니다." };
+    }
+
     // Prepare base data, ensuring undefined coordinates become null
     const meetingDataToSave: Omit<Meeting, 'id' | 'createdAt' | 'isSettled'> = {
       name: payload.name,
@@ -709,42 +769,189 @@ export async function toggleMeetingShareAction(meetingId: string, currentUserId:
 // --- FriendGroup Actions ---
 export async function createFriendGroupAction(
   name: string,
-  ownerUserId: string,
+  currentUserId: string, // Changed from ownerUserId for clarity and to match pattern
   memberIds: string[] = []
 ) {
   try {
-    const newGroup = await dbAddFriendGroup({ name, ownerUserId, memberIds });
-    revalidatePath('/friends');
-    revalidatePath('/meetings/new');
+    if (!currentUserId) {
+      return { success: false, error: "인증되지 않은 사용자입니다. 로그인이 필요합니다." };
+    }
+    const currentUser = await dbGetUserById(currentUserId);
+    if (!currentUser) {
+      return { success: false, error: "사용자 정보를 찾을 수 없습니다." };
+    }
+
+    if (currentUser.role !== 'admin' && currentUser.role !== 'user') {
+      return { success: false, error: "친구 그룹을 생성할 권한이 없습니다. 'admin' 또는 'user' 역할만 가능합니다." };
+    }
+
+    const newGroup = await dbAddFriendGroup({ name, ownerUserId: currentUserId, memberIds });
+    revalidatePath('/friends'); // Main friends page (shows groups)
+    revalidatePath('/meetings/new'); // Meeting form might use friend groups
+    revalidatePath('/groups'); // Assuming a new path for listing groups might exist
     return { success: true, group: newGroup };
   } catch (error) {
     console.error('createFriendGroupAction Error:', error);
-    return { success: false, error: '친구 그룹 생성에 실패했습니다.' };
+    const errorMessage = error instanceof Error ? error.message : '친구 그룹 생성 중 오류가 발생했습니다.';
+    return { success: false, error: errorMessage };
   }
 }
 
 export async function updateFriendGroupAction(
   id: string,
-  updates: Partial<Omit<FriendGroup, 'id' | 'createdAt'>>
+  updates: Partial<Omit<FriendGroup, 'id' | 'createdAt'>>,
+  currentUserId: string
 ) {
   try {
+    if (!currentUserId) {
+      return { success: false, error: "인증되지 않은 사용자입니다. 로그인이 필요합니다." };
+    }
+    const currentUser = await dbGetUserById(currentUserId);
+    if (!currentUser) {
+      return { success: false, error: "사용자 정보를 찾을 수 없습니다." };
+    }
+
+    const groupDocRef = doc(db, 'friendGroups', id);
+    const groupSnap = await getDoc(groupDocRef);
+
+    if (!groupSnap.exists()) {
+      return { success: false, error: "수정할 친구 그룹을 찾을 수 없습니다." };
+    }
+    const groupData = groupSnap.data() as FriendGroup; // Cast to FriendGroup
+
+    if (currentUser.role !== 'admin' && groupData.ownerUserId !== currentUserId) {
+      return { success: false, error: "친구 그룹을 수정할 권한이 없습니다." };
+    }
+
     const updatedGroup = await dbUpdateFriendGroup(id, updates);
+    if (!updatedGroup) {
+        // This case might not be reachable if dbUpdateFriendGroup throws on error or returns null for not found,
+        // and we already checked for existence. But as a safeguard:
+        return { success: false, error: "친구 그룹 업데이트에 실패했습니다."};
+    }
+    revalidatePath('/friends');
+    revalidatePath('/groups'); // Assuming a path for listing groups
+    revalidatePath(`/friends/${id}`); // If there's a page for a specific group
     return { success: true, group: updatedGroup };
   } catch (error) {
     console.error('updateFriendGroupAction Error:', error);
-    return { success: false, error: '친구 그룹 수정에 실패했습니다.' };
+    const errorMessage = error instanceof Error ? error.message : '친구 그룹 수정 중 오류가 발생했습니다.';
+    return { success: false, error: errorMessage };
   }
 }
 
-export async function deleteFriendGroupAction(id: string) {
+export async function deleteFriendGroupAction(id: string, currentUserId: string) {
   try {
+    if (!currentUserId) {
+      return { success: false, error: "인증되지 않은 사용자입니다. 로그인이 필요합니다." };
+    }
+    const currentUser = await dbGetUserById(currentUserId);
+    if (!currentUser) {
+      return { success: false, error: "사용자 정보를 찾을 수 없습니다." };
+    }
+
+    const groupDocRef = doc(db, 'friendGroups', id);
+    const groupSnap = await getDoc(groupDocRef);
+
+    if (!groupSnap.exists()) {
+      return { success: false, error: "삭제할 친구 그룹을 찾을 수 없습니다." };
+    }
+    const groupData = groupSnap.data() as FriendGroup;
+
+    if (currentUser.role !== 'admin' && groupData.ownerUserId !== currentUserId) {
+      return { success: false, error: "친구 그룹을 삭제할 권한이 없습니다." };
+    }
+
     await dbDeleteFriendGroup(id);
+    revalidatePath('/friends');
+    revalidatePath('/groups');
+    // Also consider revalidating paths for any meetings that might have used this group, if applicable.
     return { success: true };
   } catch (error) {
     console.error('deleteFriendGroupAction Error:', error);
-    return { success: false, error: '친구 그룹 삭제에 실패했습니다.' };
+    const errorMessage = error instanceof Error ? error.message : '친구 그룹 삭제 중 오류가 발생했습니다.';
+    return { success: false, error: errorMessage };
   }
 }
+
+export async function getMeetingsForUserAction(params: {
+  year?: number;
+  page?: number;
+  limitParam?: number;
+  requestingUserId: string;
+}) {
+  const { year, page, limitParam, requestingUserId } = params;
+
+  if (!requestingUserId) {
+    return { success: false, error: "User ID is required.", meetings: [], totalCount: 0, availableYears: [] };
+  }
+
+  const user = await dbGetUserById(requestingUserId);
+
+  if (!user) {
+    return { success: false, error: "User not found.", meetings: [], totalCount: 0, availableYears: [] };
+  }
+
+  let actualUserIdForFilter: string | undefined = undefined;
+  let actualUserRefGroupIdsForFilter: string[] | undefined = undefined;
+
+  if (user.role !== 'admin') {
+    actualUserIdForFilter = user.id;
+    actualUserRefGroupIdsForFilter = user.refFriendGroupIds && user.refFriendGroupIds.length > 0 ? user.refFriendGroupIds : undefined;
+    // Pass undefined if empty to ensure getMeetings logic for OR condition works as intended (no group filter if undefined)
+  }
+  // For admin, actualUserIdForFilter and actualUserRefGroupIdsForFilter remain undefined,
+  // so dbGetMeetings should fetch all meetings based on its internal logic.
+
+  try {
+    // Ensure dbGetMeetings can handle undefined for userId and userRefFriendGroupIds to mean "no filter" for those specific criteria
+    const result = await dbGetMeetings({
+      year,
+      page,
+      limitParam,
+      userId: actualUserIdForFilter,
+      userRefFriendGroupIds: actualUserRefGroupIdsForFilter,
+    });
+    return { success: true, ...result };
+  } catch (error) {
+    console.error("getMeetingsForUserAction Error:", error);
+    const errorMessage = error instanceof Error ? error.message : 'Failed to fetch meetings.';
+    return { success: false, error: errorMessage, meetings: [], totalCount: 0, availableYears: [] };
+  }
+}
+
+
+// 사용자가 접근 가능한 친구 그룹 목록 조회 (소유 또는 참조)
+export async function getFriendGroupsForUserAction(currentUserId: string) {
+  try {
+    if (!currentUserId) {
+      return { success: false, error: "인증되지 않은 사용자입니다. 로그인이 필요합니다." };
+    }
+    const currentUser = await dbGetUserById(currentUserId);
+    if (!currentUser) {
+      return { success: false, error: "사용자 정보를 찾을 수 없습니다." };
+    }
+
+    // dbGetFriendGroupsByUser already fetches groups owned by user OR referenced in user.refFriendGroupIds
+    const allAccessibleGroups = await dbGetFriendGroupsByUser(currentUserId);
+
+    if (currentUser.role === 'viewer') {
+      // Viewers should only see groups explicitly referenced in their refFriendGroupIds
+      const referencedIds = currentUser.refFriendGroupIds || [];
+      const filteredGroups = allAccessibleGroups.filter(group => referencedIds.includes(group.id));
+      return { success: true, groups: filteredGroups };
+    } else {
+      // Admin and User roles can see all groups they own or are referenced in.
+      return { success: true, groups: allAccessibleGroups };
+    }
+
+  } catch (error) {
+    console.error('getFriendGroupsForUserAction Error:', error);
+    const errorMessage = error instanceof Error ? error.message : '친구 그룹 목록 조회 중 오류가 발생했습니다.';
+    return { success: false, error: errorMessage };
+  }
+}
+
 
 // 그룹별 친구 목록 조회
 export async function getFriendsByGroupAction(groupId: string) {

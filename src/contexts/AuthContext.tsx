@@ -43,16 +43,20 @@ export function AuthProvider({ children }: AuthProviderProps) {
           const userDocSnap = await getDoc(userDocRef);
 
           if (userDocSnap.exists()) {
-            const fetchedDBUser = userDocSnap.data() as Omit<User, 'id'>;
+            // Cast directly to User to ensure all fields, including optional ones like refFriendGroupIds, are considered.
+            const fetchedDBUser = userDocSnap.data() as User;
             const processedAppUser: User = {
               id: user.uid,
-              email: fetchedDBUser.email || user.email,
-              name: fetchedDBUser.name || user.displayName,
-              role: fetchedDBUser.role,
-              createdAt: fetchedDBUser.createdAt instanceof Timestamp ? fetchedDBUser.createdAt.toDate() : new Date(fetchedDBUser.createdAt || Date.now()),
+              email: fetchedDBUser.email || user.email, // Fallback to FirebaseUser basic profile
+              name: fetchedDBUser.name || user.displayName, // Fallback
+              role: fetchedDBUser.role, // From Firestore
+              createdAt: fetchedDBUser.createdAt instanceof Timestamp
+                          ? fetchedDBUser.createdAt.toDate()
+                          : new Date(fetchedDBUser.createdAt || Date.now()),
+              refFriendGroupIds: fetchedDBUser.refFriendGroupIds || undefined, // Ensure refFriendGroupIds is included
             };
             setAppUser(processedAppUser);
-            setUserRole(processedAppUser.role); // 'admin' | 'user' | 'none' 모두 허용
+            setUserRole(processedAppUser.role);
             setIsAdmin(processedAppUser.role === 'admin');
           } else {
             const newAppUser = await addUserOnLogin({

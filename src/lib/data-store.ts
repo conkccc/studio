@@ -22,6 +22,7 @@ import {
   deleteField,
   DocumentData,
   DocumentSnapshot,
+  FieldPath, // Added for documentId() queries
 } from 'firebase/firestore';
 import { db } from './firebase';
 // 서버 환경에서만 adminDb import
@@ -113,8 +114,12 @@ export const addUserOnLogin = async (userData: { id: string; email?: string | nu
   return existingUser;
 };
 
-export const updateUser = async (userId: string, updates: Partial<Omit<User, 'id' | 'createdAt'>>): Promise<User | null> => {
+export const updateUser = async (userId: string, updates: Partial<Omit<User, 'id' | 'createdAt'> & { refFriendGroupIds?: string[] }>): Promise<User | null> => {
   const userDocRef = doc(db, USERS_COLLECTION, userId);
+  // Ensure that if refFriendGroupIds is explicitly passed as undefined, it's handled correctly by Firestore.
+  // updateDoc by default ignores undefined fields. If deletion is needed, use deleteField().
+  // For now, we'll pass it as is, which means undefined will not change the field,
+  // and an empty array will set it to an empty array.
   await updateDoc(userDocRef, updates);
   const updatedSnapshot = await getDoc(userDocRef);
   return dataFromSnapshot<User>(updatedSnapshot) || null;
@@ -193,6 +198,8 @@ interface GetMeetingsParams {
   year?: number;
   limitParam?: number;
   page?: number;
+  userId?: string; // Added for filtering by user
+  userRefFriendGroupIds?: string[]; // Added for filtering by user's group memberships
 }
 
 interface GetMeetingsResult {
@@ -205,20 +212,23 @@ export const getMeetings = async ({
   year,
   limitParam,
   page = 1,
+  userId,
+  userRefFriendGroupIds,
 }: GetMeetingsParams = {}): Promise<GetMeetingsResult> => {
   const meetingsCollectionRef = collection(db, MEETINGS_COLLECTION);
-  let baseQueryConstraints = [];
+
+  // Determine available years (can be based on a broader query without user/group filters for simplicity)
+  let yearFilterForAvailableYears: any[] = [];
   if (year) {
     const startOfYear = Timestamp.fromDate(new Date(year, 0, 1));
     const endOfYear = Timestamp.fromDate(new Date(year + 1, 0, 1));
-    baseQueryConstraints.push(where('dateTime', '>=', startOfYear));
-    baseQueryConstraints.push(where('dateTime', '<', endOfYear));
+    yearFilterForAvailableYears.push(where('dateTime', '>=', startOfYear));
+    yearFilterForAvailableYears.push(where('dateTime', '<', endOfYear));
   }
-
-  const allMeetingsQuery = query(meetingsCollectionRef, ...baseQueryConstraints);
-  const allMeetingsSnap = await getDocs(allMeetingsQuery);
+  const availableYearsQuery = query(meetingsCollectionRef, ...yearFilterForAvailableYears);
+  const availableYearsSnap = await getDocs(availableYearsQuery);
   const yearsSet = new Set<number>();
-  allMeetingsSnap.docs.forEach(docSnap => {
+  availableYearsSnap.docs.forEach(docSnap => {
     const m = dataFromSnapshot<Meeting>(docSnap);
     if (m && m.dateTime && m.dateTime instanceof Date && !isNaN(m.dateTime.getTime())) {
       yearsSet.add(m.dateTime.getFullYear());
@@ -226,33 +236,99 @@ export const getMeetings = async ({
   });
   const availableYears = Array.from(yearsSet).sort((a, b) => b - a);
 
-  const countQuery = query(meetingsCollectionRef, ...baseQueryConstraints);
-  const totalCountSnapshot = await getCountFromServer(countQuery);
-  const totalCount = totalCountSnapshot.data().count;
+  // Base query constraints for date range (year)
+  let dateConstraints: any[] = [];
+  if (year) {
+    const startOfYear = Timestamp.fromDate(new Date(year, 0, 1));
+    const endOfYear = Timestamp.fromDate(new Date(year + 1, 0, 1));
+    dateConstraints.push(where('dateTime', '>=', startOfYear));
+    dateConstraints.push(where('dateTime', '<', endOfYear));
+  }
 
-  let qConstraints = [orderBy('dateTime', 'desc'), ...baseQueryConstraints];
-  let finalQuery = query(meetingsCollectionRef, ...qConstraints as any);
+  let fetchedMeetings: Meeting[] = [];
+  const meetingIds = new Set<string>();
 
-  if (limitParam && page > 1) {
-    const docsToSkip = (page - 1) * limitParam;
-    let skipperQueryConstraints = [orderBy('dateTime', 'desc'), ...baseQueryConstraints, firestoreLimit(docsToSkip)];
-    let skipperQuery = query(meetingsCollectionRef, ...skipperQueryConstraints as any);
-    
-    const skipperSnapshot = await getDocs(skipperQuery);
-    if (skipperSnapshot.docs.length > 0 && skipperSnapshot.docs.length === docsToSkip) {
-      finalQuery = query(meetingsCollectionRef, ...qConstraints as any, firestoreStartAfter(skipperSnapshot.docs[skipperSnapshot.docs.length - 1]));
-    } else if (skipperSnapshot.docs.length < docsToSkip) {
-        return { meetings: [], totalCount, availableYears };
+  if (userId || (userRefFriendGroupIds && userRefFriendGroupIds.length > 0)) {
+    // Scenario 1: Filtering by userId and/or userRefFriendGroupIds
+    if (userId) {
+      const userMeetingsQuery = query(meetingsCollectionRef, where('creatorId', '==', userId), ...dateConstraints);
+      const userMeetingsSnap = await getDocs(userMeetingsQuery);
+      arrayFromSnapshot<Meeting>(userMeetingsSnap).forEach(m => {
+        if (!meetingIds.has(m.id)) {
+          fetchedMeetings.push(m);
+          meetingIds.add(m.id);
+        }
+      });
     }
+
+    if (userRefFriendGroupIds && userRefFriendGroupIds.length > 0) {
+      const validGroupIds = userRefFriendGroupIds.filter(id => typeof id === 'string' && id.length > 0);
+      if (validGroupIds.length > 0) {
+        const MAX_IN_QUERIES = 30;
+        const chunks = [];
+        for (let i = 0; i < validGroupIds.length; i += MAX_IN_QUERIES) {
+          chunks.push(validGroupIds.slice(i, i + MAX_IN_QUERIES));
+        }
+        for (const chunk of chunks) {
+          if (chunk.length > 0) {
+            const groupMeetingsQuery = query(meetingsCollectionRef, where('groupId', 'in', chunk), ...dateConstraints);
+            const groupMeetingsSnap = await getDocs(groupMeetingsQuery);
+            arrayFromSnapshot<Meeting>(groupMeetingsSnap).forEach(m => {
+              if (!meetingIds.has(m.id)) {
+                fetchedMeetings.push(m);
+                meetingIds.add(m.id);
+              }
+            });
+          }
+        }
+      }
+    }
+    // Sort merged results
+    fetchedMeetings.sort((a, b) => (b.dateTime?.getTime() || 0) - (a.dateTime?.getTime() || 0));
+    
+  } else {
+    // Scenario 2: No specific user/group filter, original behavior (fetch all with year filter and Firestore pagination)
+    let qConstraints = [orderBy('dateTime', 'desc'), ...dateConstraints];
+    let finalQuery = query(meetingsCollectionRef, ...qConstraints as any);
+
+    // Count for pagination needs to be based on this potentially filtered query
+    const countQueryForPagination = query(meetingsCollectionRef, ...dateConstraints);
+    const totalCountSnapshotForPagination = await getCountFromServer(countQueryForPagination);
+    const totalCountForPagination = totalCountSnapshotForPagination.data().count;
+
+    if (limitParam && page > 1) {
+      const docsToSkip = (page - 1) * limitParam;
+      let skipperQueryConstraints = [orderBy('dateTime', 'desc'), ...dateConstraints, firestoreLimit(docsToSkip)];
+      let skipperQuery = query(meetingsCollectionRef, ...skipperQueryConstraints as any);
+
+      const skipperSnapshot = await getDocs(skipperQuery);
+      if (skipperSnapshot.docs.length > 0 && skipperSnapshot.docs.length === docsToSkip) {
+        finalQuery = query(meetingsCollectionRef, ...qConstraints as any, firestoreStartAfter(skipperSnapshot.docs[skipperSnapshot.docs.length - 1]));
+      } else if (skipperSnapshot.docs.length < docsToSkip) {
+        // Not enough documents to skip to the desired page
+         return { meetings: [], totalCount: totalCountForPagination, availableYears };
+      }
+    }
+    if (limitParam) {
+      finalQuery = query(finalQuery, firestoreLimit(limitParam));
+    }
+    const snapshot = await getDocs(finalQuery);
+    fetchedMeetings = arrayFromSnapshot<Meeting>(snapshot);
+    // totalCount for this path is totalCountForPagination
+    return { meetings: fetchedMeetings, totalCount: totalCountForPagination, availableYears };
   }
 
+  // For Scenario 1 (userId or userRefFriendGroupIds filtered), totalCount is the number of fetched (and merged) meetings before pagination
+  const totalCount = fetchedMeetings.length;
+
+  // Apply in-memory pagination for Scenario 1
+  let paginatedMeetings = fetchedMeetings;
   if (limitParam) {
-    finalQuery = query(finalQuery, firestoreLimit(limitParam));
+    const startIndex = (page - 1) * limitParam;
+    paginatedMeetings = fetchedMeetings.slice(startIndex, startIndex + limitParam);
   }
 
-  const snapshot = await getDocs(finalQuery);
-  const meetings = arrayFromSnapshot<Meeting>(snapshot);
-  return { meetings, totalCount, availableYears };
+  return { meetings: paginatedMeetings, totalCount, availableYears };
 };
 
 export const getMeetingById = async (id: string): Promise<Meeting | undefined> => {
@@ -532,10 +608,58 @@ export const dbRevertMeetingDeduction = async (meetingId: string, batch?: any): 
 
 // --- FriendGroup functions ---
 export const getFriendGroupsByUser = async (userId: string): Promise<FriendGroup[]> => {
+  if (!userId) return [];
+
+  const user = await getUserById(userId);
+
   const groupsCollectionRef = collection(db, 'friendGroups');
-  const q = query(groupsCollectionRef, where('ownerUserId', '==', userId), orderBy('createdAt', 'asc'));
-  const snapshot = await getDocs(q);
-  return arrayFromSnapshot<FriendGroup>(snapshot);
+  let allGroups: FriendGroup[] = [];
+  const groupIds = new Set<string>();
+
+  // Query 1: Groups owned by the user
+  const ownedGroupsQuery = query(groupsCollectionRef, where('ownerUserId', '==', userId), orderBy('createdAt', 'asc'));
+  const ownedGroupsSnapshot = await getDocs(ownedGroupsQuery);
+  const ownedGroups = arrayFromSnapshot<FriendGroup>(ownedGroupsSnapshot);
+  ownedGroups.forEach(group => {
+    if (!groupIds.has(group.id)) {
+      allGroups.push(group);
+      groupIds.add(group.id);
+    }
+  });
+
+  // Query 2: Groups referenced in user.refFriendGroupIds
+  // Firestore 'in' queries are limited to 30 comparison values.
+  // If refFriendGroupIds can exceed this, chunking is needed.
+  const refFriendGroupIds = user?.refFriendGroupIds?.filter(id => typeof id === 'string' && id.length > 0);
+
+  if (refFriendGroupIds && refFriendGroupIds.length > 0) {
+    const MAX_IN_QUERIES = 30; // Firestore limit for 'in' queries as of last check
+    const chunks = [];
+    for (let i = 0; i < refFriendGroupIds.length; i += MAX_IN_QUERIES) {
+      chunks.push(refFriendGroupIds.slice(i, i + MAX_IN_QUERIES));
+    }
+
+    for (const chunk of chunks) {
+      if (chunk.length > 0) {
+        const referencedGroupsQuery = query(groupsCollectionRef, where(new FieldPath('__name__'), 'in', chunk));
+        // No orderBy here as it might conflict with 'in' on documentId or not be efficient.
+        // Order can be applied client-side if needed after merging.
+        const referencedGroupsSnapshot = await getDocs(referencedGroupsQuery);
+        const referencedGroups = arrayFromSnapshot<FriendGroup>(referencedGroupsSnapshot);
+        referencedGroups.forEach(group => {
+          if (!groupIds.has(group.id)) {
+            allGroups.push(group);
+            groupIds.add(group.id);
+          }
+        });
+      }
+    }
+  }
+
+  // Sort all groups by createdAt date, similar to the original single query
+  allGroups.sort((a, b) => (a.createdAt?.getTime() || 0) - (b.createdAt?.getTime() || 0));
+
+  return allGroups;
 };
 
 export const addFriendGroup = async (groupData: Omit<FriendGroup, 'id' | 'createdAt'>): Promise<FriendGroup> => {
@@ -595,3 +719,11 @@ export const getLoggedReserveFundTransactionsByGroup = async (groupId: string, l
     .slice(0, limitCount);
 };
 
+// --- Function to get ALL friend groups ---
+export const dbGetAllFriendGroups = async (): Promise<FriendGroup[]> => {
+  const groupsCollectionRef = collection(db, 'friendGroups');
+  // Optional: order them by name or createdAt, though client might sort anyway
+  const q = query(groupsCollectionRef, orderBy('name', 'asc'));
+  const snapshot = await getDocs(q);
+  return arrayFromSnapshot<FriendGroup>(snapshot);
+};

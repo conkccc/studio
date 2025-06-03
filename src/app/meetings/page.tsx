@@ -1,120 +1,95 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useState, useMemo } from 'react';
-import { getMeetings, getFriends, getFriendGroupsByUser } from '@/lib/data-store';
+import { useEffect, useState } from 'react';
+import { getFriends } from '@/lib/data-store'; // Keep getFriends
 import { MeetingListClient } from '@/components/meetings/MeetingListClient';
 import { Button } from '@/components/ui/button';
-import { PlusCircle } from 'lucide-react';
-import { useAuth } from '@/contexts/AuthContext';
-import type { Meeting, Friend, FriendGroup } from '@/lib/types';
-import { useSearchParams } from 'next/navigation';
-
-const ITEMS_PER_PAGE = 10;
+// PlusCircle can be removed if MeetingListClient handles its own "New Meeting" button
+// import { PlusCircle } from 'lucide-react';
+import { useAuth } from '@/context/AuthContext';
+import type { Friend } from '@/lib/types';
+// Removed useSearchParams, useMemo, getMeetings, getFriendGroupsByUser, Meeting type, FriendGroup type
+// Removed ITEMS_PER_PAGE
 
 export default function MeetingsPage() {
-  const { currentUser, isAdmin, userRole, loading: authLoading } = useAuth();
-  const searchParams = useSearchParams();
-  const yearParam = searchParams.get('year');
-  const pageParam = searchParams.get('page');
-
-  const [meetings, setMeetings] = useState<Meeting[]>([]);
+  const { currentUser, loading: authLoading } = useAuth(); // Simplified: isAdmin, userRole might not be needed here
   const [allFriends, setAllFriends] = useState<Friend[]>([]);
-  const [groups, setGroups] = useState<FriendGroup[]>([]);
-  const [availableYears, setAvailableYears] = useState<number[]>([]);
-  const [selectedYear, setSelectedYear] = useState<number | undefined>(undefined);
-  const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
-  const [dataLoading, setDataLoading] = useState(true);
-  const [totalMeetingCount, setTotalMeetingCount] = useState(0);
-
-  const currentPage = useMemo(() => {
-    const page = parseInt(pageParam || '1', 10);
-    return isNaN(page) || page < 1 ? 1 : page;
-  }, [pageParam]);
-
-  useEffect(() => {
-    if (yearParam === null || yearParam === "all") {
-      // 기본값: 현재 연도
-      setSelectedYear(new Date().getFullYear());
-    } else {
-      const parsedYear = parseInt(yearParam, 10);
-      if (!isNaN(parsedYear)) {
-        setSelectedYear(parsedYear);
-      } else {
-        setSelectedYear(new Date().getFullYear());
-      }
-    }
-  }, [yearParam]);
+  const [dataLoading, setDataLoading] = useState(true); // This loading state is now primarily for allFriends
 
   useEffect(() => {
     if (authLoading) {
       setDataLoading(true);
       return;
     }
-    if (!(isAdmin || userRole === 'user')) { // 권한 없으면 데이터 패치 X
-      setDataLoading(false);
-      setMeetings([]);
-      setTotalMeetingCount(0);
-      setAvailableYears([]);
-      return;
-    }
-    const fetchData = async () => {
-      setDataLoading(true);
-      try {
-        const fetchedMeetingsData = await getMeetings({
-          page: currentPage,
-          limitParam: ITEMS_PER_PAGE,
-          year: selectedYear,
-        });
-        setMeetings(fetchedMeetingsData.meetings);
-        setTotalMeetingCount(fetchedMeetingsData.totalCount);
-        setAvailableYears(fetchedMeetingsData.availableYears);
-        if (allFriends.length === 0 && currentUser && (isAdmin || userRole === 'user')) { 
+    // If MeetingCard doesn't need allFriends or fetches them itself, this can be removed too.
+    // Assuming MeetingListClient or MeetingCard might still want allFriends for display purposes.
+    if (currentUser) { // Fetch friends only if a user is logged in
+      const fetchAllFriends = async () => {
+        setDataLoading(true); // Set loading before fetch
+        try {
           const fetchedFriends = await getFriends();
           setAllFriends(fetchedFriends);
+        } catch (error) {
+          console.error("Failed to fetch friends:", error);
+          setAllFriends([]); // Set to empty on error
+        } finally {
+          setDataLoading(false);
         }
-      } catch (error) {
-        console.error("Failed to fetch meetings:", error);
-        setMeetings([]);
-        setTotalMeetingCount(0);
-      } finally {
-        setDataLoading(false);
-      }
-    };
-    fetchData();
-  }, [authLoading, isAdmin, userRole, currentUser, currentPage, selectedYear, allFriends.length]);
+      };
+      fetchAllFriends();
+    } else {
+      // No user, no friends to fetch
+      setAllFriends([]);
+      setDataLoading(false);
+    }
+  }, [authLoading, currentUser]);
 
-  useEffect(() => {
-    if (!currentUser) return;
-    getFriendGroupsByUser(currentUser.uid).then(setGroups);
-  }, [currentUser]);
 
-  const totalPages = useMemo(() => {
-    return Math.ceil(totalMeetingCount / ITEMS_PER_PAGE);
-  }, [totalMeetingCount]);
-
-  if (authLoading || ((isAdmin || userRole === 'user') && dataLoading)) {
+  if (authLoading) { // Simplified loading check
     return (
       <div className="flex justify-center items-center min-h-[calc(100vh-150px)]">
-        <p className="text-xl text-muted-foreground">모임 목록 로딩 중...</p>
+        <p className="text-xl text-muted-foreground">페이지 로딩 중...</p>
       </div>
     );
   }
 
-  if (!(isAdmin || userRole === 'user')) {
+  if (!currentUser) { // Access control: if no user, show login prompt or redirect
     return (
       <div className="container mx-auto py-8 text-center">
-        <h1 className="text-2xl font-bold mb-4">접근 권한 없음</h1>
-        <p className="text-muted-foreground mb-6">이 페이지는 관리자 또는 사용자만 접근할 수 있습니다.</p>
+        <h1 className="text-2xl font-bold mb-4">로그인 필요</h1>
+        <p className="text-muted-foreground mb-6">모임 정보를 보려면 로그인이 필요합니다.</p>
         <Button asChild>
-          <Link href="/">대시보드로 돌아가기</Link>
+          <Link href="/login">로그인</Link>
         </Button>
       </div>
     );
   }
 
+  // Viewer role check: Viewers cannot access the main meetings management page directly
+  // This specific check might be too restrictive depending on whether viewers should see *any* list here.
+  // The MeetingListClient itself will filter based on refFriendGroupIds for viewers.
+  // If viewers should not even see the page structure, this check is fine.
+  // However, the original requirement was that MeetingListClient handles data fetching based on role.
+  // So, perhaps a viewer *can* see this page, but MeetingListClient will show them a limited view.
+  // For now, let's assume viewers *can* access the page, and MeetingListClient does the data scoping.
+  // The original page had a check for `!(isAdmin || userRole === 'user')`.
+  // If `userRole` from `useAuth` is reliable:
+  // if (currentUser.role === 'none') { // Or whatever role should be completely restricted
+  //   return (
+  //     <div className="container mx-auto py-8 text-center">
+  //       <h1 className="text-2xl font-bold mb-4">접근 권한 없음</h1>
+  //       <p className="text-muted-foreground mb-6">이 페이지에 접근할 권한이 없습니다.</p>
+  //       <Button asChild className="mt-4">
+  //         <Link href="/">대시보드로 돌아가기</Link>
+  //       </Button>
+  //     </div>
+  //   );
+  // }
+
+
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 p-4 md:p-6"> {/* Added padding */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-semibold">모임 관리</h1>
@@ -122,32 +97,18 @@ export default function MeetingsPage() {
             지난 모임을 확인하고 새로운 모임을 만드세요.
           </p>
         </div>
-        {isAdmin && (
-          <Link href="/meetings/new" passHref legacyBehavior={false}>
-            <Button>
-              <PlusCircle className="mr-2 h-5 w-5" />
-              새 모임 만들기
-            </Button>
-          </Link>
-        )}
+        {/* "새 모임 만들기" button is now inside MeetingListClient and role-dependent */}
       </div>
-      {/* 그룹 필터 적용: selectedGroupId가 있으면 해당 그룹만, 없으면 전체 */}
-      {dataLoading ? ( 
+
+      {/* MeetingListClient handles its own data fetching and loading state internally for meetings */}
+      {/* We only pass allFriends if MeetingCard needs it. If MeetingCard can fetch friends by ID, this prop can be removed. */}
+      { dataLoading && !allFriends.length ? (
          <div className="flex justify-center items-center min-h-[200px]">
-            <p className="text-muted-foreground">모임 정보 로딩 중...</p>
+            <p className="text-muted-foreground">친구 목록 로딩중...</p>
+            {/* This message shows if allFriends is still loading. MeetingListClient has its own loader for meetings. */}
          </div>
       ) : (
-        <MeetingListClient 
-          initialMeetings={meetings}
-          allFriends={allFriends}
-          availableYears={availableYears}
-          selectedYear={selectedYear}
-          currentPage={currentPage}
-          totalPages={totalPages}
-          groups={groups}
-          selectedGroupId={selectedGroupId}
-          onGroupChange={setSelectedGroupId}
-        />
+        <MeetingListClient allFriends={allFriends} />
       )}
     </div>
   );

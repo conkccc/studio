@@ -4,7 +4,8 @@ export type User = {
   id: string; // Firebase UID
   name?: string | null;
   email?: string | null;
-  role: 'admin' | 'user' | 'none';
+  role: 'admin' | 'user' | 'viewer' | 'none';
+  refFriendGroupIds?: string[];
   createdAt: Date; // Always store as JS Date in app, convert to/from Timestamp for Firestore
 };
 
