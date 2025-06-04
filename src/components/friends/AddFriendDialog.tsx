@@ -18,6 +18,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { createFriendAction } from '@/lib/actions';
 import { useToast } from '@/hooks/use-toast';
+import { useAuth } from '@/contexts/AuthContext'; // Added useAuth import
 import { Loader2 } from 'lucide-react';
 import { useRouter } from 'next/navigation'; // Added for router.refresh()
 import type { Friend } from '@/lib/types'; // Ensure Friend type is imported
@@ -40,6 +41,7 @@ export function AddFriendDialog({ triggerButton, onFriendAdded, groupId }: AddFr
   const [isPending, startTransition] = useTransition();
   const { toast } = useToast();
   const router = useRouter(); // Initialize router
+  const { appUser } = useAuth(); // Get appUser
 
   const form = useForm<FriendFormData>({
     resolver: zodResolver(friendSchema),
@@ -54,8 +56,17 @@ export function AddFriendDialog({ triggerButton, onFriendAdded, groupId }: AddFr
       toast({ title: '오류', description: '그룹이 선택되지 않았습니다.', variant: 'destructive' });
       return;
     }
+    if (!appUser?.id) { // Guard for appUser
+      toast({ title: '오류', description: '사용자 정보를 찾을 수 없습니다. 다시 로그인해주세요.', variant: 'destructive' });
+      return;
+    }
     startTransition(async () => {
-      const result = await createFriendAction(data.name, groupId, data.description);
+      const result = await createFriendAction({
+        name: data.name,
+        description: data.description,
+        groupId: groupId,
+        currentUserId: appUser.id
+      });
       if (result.success) {
         toast({ title: '성공', description: '새로운 친구가 추가되었습니다.' });
         form.reset();

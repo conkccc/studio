@@ -1,18 +1,20 @@
 "use client";
 import { use, useEffect, useState } from 'react';
 import { getMeetingByShareToken, getExpensesByMeetingId, getFriends } from '@/lib/data-store';
+import { getAllUsersAction } from '@/lib/actions'; // Import getAllUsersAction
 import { MeetingDetailsClient } from '@/components/meetings/MeetingDetailsClient';
 import { Button } from '@/components/ui/button';
 import { AlertTriangle, ArrowLeft } from 'lucide-react';
 import Link from 'next/link';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import type { Meeting, Expense, Friend } from '@/lib/types';
+import type { Meeting, Expense, Friend, User } from '@/lib/types';
 
 export default function SharedMeetingPage({ params }: { params: Promise<{ token: string }> }) {
   const { token } = use(params);
   const [meeting, setMeeting] = useState<Meeting | null>(null);
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [allFriends, setAllFriends] = useState<Friend[]>([]);
+  const [allUsers, setAllUsers] = useState<User[]>([]); // Add allUsers state
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -30,12 +32,14 @@ export default function SharedMeetingPage({ params }: { params: Promise<{ token:
         return;
       }
       setMeeting(m);
-      const [e, f] = await Promise.all([
+      const [e, f, usersResult] = await Promise.all([
         getExpensesByMeetingId(m.id),
-        getFriends()
+        getFriends(),
+        getAllUsersAction()
       ]);
       setExpenses(e);
       setAllFriends(f);
+      setAllUsers(usersResult.success ? usersResult.users : []);
       setLoading(false);
     };
     fetchData();
@@ -97,6 +101,7 @@ export default function SharedMeetingPage({ params }: { params: Promise<{ token:
         initialMeeting={meeting}
         initialExpenses={expenses}
         allFriends={allFriends}
+        allUsers={allUsers} // Pass allUsers prop
         isReadOnlyShare={true}
       />
     </div>

@@ -23,9 +23,13 @@ import {
   addFriendGroup as dbAddFriendGroup,
   updateFriendGroup as dbUpdateFriendGroup,
   deleteFriendGroup as dbDeleteFriendGroup,
+  getFriendGroupsByUser as dbGetFriendGroupsByUser,
+  dbGetAllFriendGroups,
+  getMeetings as dbGetMeetings, // Import for the new meeting action
+  getUsers as dbGetUsers, // Import getUsers for getAllUsersAction
 } from './data-store';
 import type { Friend, Meeting, Expense, ReserveFundTransaction, User, FriendGroup } from './types';
-import { Timestamp } from 'firebase/firestore';
+import { Timestamp, arrayRemove as firestoreArrayRemove, arrayUnion as firestoreArrayUnion, deleteField } from 'firebase/firestore'; // Added deleteField
 import { nanoid } from 'nanoid';
 import { addDays } from 'date-fns';
 import { db } from './firebase';
@@ -33,35 +37,155 @@ import { doc, getDoc, updateDoc } from 'firebase/firestore';
 
 
 // Friend Actions
-export async function createFriendAction(name: string, groupId: string, description?: string) {
+export async function createFriendAction(payload: { name: string; description?: string; groupId: string; currentUserId: string }) {
+  const { name, description, groupId, currentUserId } = payload;
+
+  if (!name || name.trim() === '') {
+    return { success: false, error: "친구 이름은 필수입니다." };
+  }
+  if (!groupId || groupId.trim() === '') {
+    return { success: false, error: "그룹 ID가 지정되지 않았습니다." };
+  }
+  if (!currentUserId) {
+    return { success: false, error: "사용자 ID가 필요합니다. 로그인이 필요합니다." };
+  }
+
   try {
-    // 1. 친구 추가
-    if (!groupId || groupId.trim() === '') {
-      throw new Error('그룹이 선택되지 않았습니다.');
+    const callingUser = await dbGetUserById(currentUserId);
+    if (!callingUser) {
+      return { success: false, error: "사용자 정보를 찾을 수 없습니다." };
     }
+
+    const groupDocRef = doc(db, 'friendGroups', groupId);
+    const groupSnap = await getDoc(groupDocRef);
+
+    if (!groupSnap.exists()) {
+      return { success: false, error: "친구를 추가할 그룹을 찾을 수 없습니다." };
+    }
+    const groupData = groupSnap.data() as FriendGroup;
+
+    if (groupData.ownerUserId !== currentUserId && callingUser.role !== 'admin') {
+      return { success: false, error: "이 그룹에 친구를 추가할 권한이 없습니다." };
+    }
+
+    // 1. Add friend document to 'friends' collection
     const newFriend = await dbAddFriend({ name, description, groupId });
-    // 2. 그룹의 memberIds에 친구 id 추가
-    if (groupId) {
-      // 기존 그룹 정보 가져오기
-      // 서버/클라이언트 환경에 따라 db 인스턴스 사용
-      const groupDocRef = doc(db, 'friendGroups', groupId);
-      const groupSnap = await getDoc(groupDocRef);
-      if (groupSnap.exists()) {
-        const groupData = groupSnap.data();
-        const memberIds: string[] = Array.isArray(groupData.memberIds) ? groupData.memberIds : [];
-        if (!memberIds.includes(newFriend.id)) {
-          memberIds.push(newFriend.id);
-          await updateDoc(groupDocRef, { memberIds });
-        }
-      }
-    }
+
+    // 2. Add friend's ID to the group's memberIds array
+    await updateDoc(groupDocRef, {
+      memberIds: firestoreArrayUnion(newFriend.id)
+    });
+
     revalidatePath('/friends');
-    revalidatePath(`/friends/${groupId}`); // 그룹별 친구 목록 경로도 갱신
-    revalidatePath('/meetings/new'); // Friend list might be used here
+    // Consider revalidating specific group page if exists, e.g. /friends/group/${groupId}
+    // Client-side update in FriendGroupListClient will also refresh the list for the selected group.
     return { success: true, friend: newFriend };
   } catch (error) {
     console.error("createFriendAction Error:", error);
-    const errorMessage = error instanceof Error ? error.message : '친구 추가에 실패했습니다.';
+    const errorMessage = error instanceof Error ? error.message : '친구 추가 중 오류가 발생했습니다.';
+    return { success: false, error: errorMessage };
+  }
+}
+
+export async function getExpensesByMeetingIdAction(meetingId: string) {
+  try {
+    const expenses = await dbGetExpensesByMeetingId(meetingId);
+    return { success: true, expenses };
+  } catch (error) {
+    console.error(`getExpensesByMeetingIdAction Error for meetingId ${meetingId}:`, error);
+    const errorMessage = error instanceof Error ? error.message : '모임의 지출 내역을 가져오는 중 오류가 발생했습니다.';
+    return { success: false, error: errorMessage, expenses: [] };
+  }
+}
+
+export async function getAllFriendsAction() { // Renamed from getFriendsAction for clarity
+  try {
+    const friends = await (await import('./data-store')).getFriends(); // Assuming getFriends exists in data-store
+    return { success: true, friends };
+  } catch (error) {
+    console.error('getAllFriendsAction Error:', error);
+    const errorMessage = error instanceof Error ? error.message : '모든 친구 목록을 가져오는데 실패했습니다.';
+    return { success: false, error: errorMessage, friends: [] };
+  }
+}
+
+export async function getAllUsersAction() {
+  try {
+    const users = await dbGetUsers(); // Use imported getUsers (aliased as dbGetUsers or directly)
+    return { success: true, users };
+  } catch (error) {
+    console.error('getAllUsersAction Error:', error);
+    const errorMessage = error instanceof Error ? error.message : '모든 사용자 목록을 가져오는데 실패했습니다.';
+    return { success: false, error: errorMessage, users: [] };
+  }
+}
+
+export async function getMeetingByIdAction(meetingId: string) {
+  try {
+    const meeting = await dbGetMeetingById(meetingId);
+    if (!meeting) {
+      return { success: false, error: '모임을 찾을 수 없습니다.', meeting: null };
+    }
+    return { success: true, meeting };
+  } catch (error) {
+    console.error(`getMeetingByIdAction Error for meetingId ${meetingId}:`, error);
+    const errorMessage = error instanceof Error ? error.message : '모임 정보를 가져오는 중 오류가 발생했습니다.';
+    return { success: false, error: errorMessage, meeting: null };
+  }
+}
+
+export async function getAllFriendGroupsAction() {
+  try {
+    const groups = await dbGetAllFriendGroups();
+    return { success: true, groups };
+  } catch (error) {
+    console.error('getAllFriendGroupsAction Error:', error);
+    const errorMessage = error instanceof Error ? error.message : '모든 친구 그룹 목록을 가져오는데 실패했습니다.';
+    return { success: false, error: errorMessage };
+  }
+}
+
+// Admin Action: Assign friend groups to a user
+export async function assignFriendGroupsToUserAction(payload: {
+  adminUserId?: string | null;
+  targetUserId?: string | null;
+  friendGroupIds?: string[] | null;
+}) {
+  const { adminUserId, targetUserId, friendGroupIds } = payload;
+
+  if (!adminUserId) {
+    return { success: false, error: "관리자 ID가 필요합니다." };
+  }
+  if (!targetUserId) {
+    return { success: false, error: "대상 사용자 ID가 필요합니다." };
+  }
+  // friendGroupIds can be an empty array [], so check for null or undefined specifically.
+  if (friendGroupIds === null || friendGroupIds === undefined) {
+    return { success: false, error: "할당할 그룹 목록 정보가 필요합니다 (빈 배열일 수 있음)." };
+  }
+
+  try {
+    const adminUser = await dbGetUserById(adminUserId);
+    if (!adminUser || adminUser.role !== 'admin') {
+      return { success: false, error: "권한이 없습니다. 관리자만 사용자에게 친구 그룹을 할당할 수 있습니다." };
+    }
+
+    // Ensure friendGroupIds is an array, even if empty. This check is technically redundant
+    // if the null/undefined check above is comprehensive, but kept for safety.
+    const validFriendGroupIds = Array.isArray(friendGroupIds) ? friendGroupIds : [];
+
+    const updatedUser = await dbUpdateUser(targetUserId, { friendGroupIds: validFriendGroupIds });
+    if (!updatedUser) {
+      return { success: false, error: "대상 사용자 정보 업데이트에 실패했습니다. 사용자를 찾을 수 없거나 업데이트 중 오류가 발생했습니다." };
+    }
+
+    revalidatePath('/users'); // Assuming '/users' is the path where user list or details are displayed
+    revalidatePath(`/users/${targetUserId}`); // Revalidate specific user page if exists
+    return { success: true, user: updatedUser };
+
+  } catch (error) {
+    console.error('assignFriendGroupsToUserAction Error:', error); // Renamed in log
+    const errorMessage = error instanceof Error ? error.message : '친구 그룹 할당 중 오류가 발생했습니다.'; // Renamed in message
     return { success: false, error: errorMessage };
   }
 }
@@ -81,16 +205,53 @@ export async function updateFriendAction(id: string, updates: Partial<Omit<Frien
   }
 }
 
-export async function deleteFriendAction(id: string) {
+export async function deleteFriendAction(payload: { friendId: string; groupId: string; currentUserId: string }) {
+  const { friendId, groupId, currentUserId } = payload;
+
+  if (!friendId) {
+    return { success: false, error: "삭제할 친구 ID가 필요합니다." };
+  }
+  if (!groupId) {
+    return { success: false, error: "친구가 속한 그룹 ID가 필요합니다." };
+  }
+  if (!currentUserId) {
+    return { success: false, error: "사용자 ID가 필요합니다. 로그인이 필요합니다." };
+  }
+
   try {
-    // Assuming admin-only action
-    await dbDeleteFriend(id);
-    revalidatePath('/friends');
-    revalidatePath('/meetings');
+    const callingUser = await dbGetUserById(currentUserId);
+    if (!callingUser) {
+      return { success: false, error: "사용자 정보를 찾을 수 없습니다." };
+    }
+
+    const groupDocRef = doc(db, 'friendGroups', groupId);
+    const groupSnap = await getDoc(groupDocRef);
+
+    if (!groupSnap.exists()) {
+      return { success: false, error: "친구 그룹을 찾을 수 없습니다." };
+    }
+    const group = groupSnap.data() as FriendGroup;
+
+    if (group.ownerUserId !== currentUserId && callingUser.role !== 'admin') {
+      return { success: false, error: "친구를 삭제할 권한이 없습니다. 그룹 소유자 또는 관리자만 가능합니다." };
+    }
+
+    // 1. Delete friend document (this also handles removing friend from meetings via dbDeleteFriend)
+    await dbDeleteFriend(friendId);
+
+    // 2. Remove friendId from the group's memberIds array
+    await updateDoc(groupDocRef, {
+      memberIds: firestoreArrayRemove(friendId)
+    });
+
+    revalidatePath('/friends'); // Revalidate general friends page/dashboard
+    // Consider revalidating the specific group view if such a page exists, e.g., revalidatePath(`/friends/group/${groupId}`);
+    // For now, FriendGroupListClient re-fetches friends on group selection or after deletion.
     return { success: true };
+
   } catch (error) {
     console.error("deleteFriendAction Error:", error);
-    const errorMessage = error instanceof Error ? error.message : '친구 삭제에 실패했습니다.';
+    const errorMessage = error instanceof Error ? error.message : '친구 삭제 중 오류가 발생했습니다.';
     return { success: false, error: errorMessage };
   }
 }
@@ -105,70 +266,92 @@ export async function createMeetingAction(
   }
 
   try {
-    // Prepare base data, ensuring undefined coordinates become null
-    const meetingDataToSave: Omit<Meeting, 'id' | 'createdAt' | 'isSettled'> = {
-      name: payload.name,
-      dateTime: payload.dateTime,
-      endTime: payload.endTime, // Firestore handles Date or null for Timestamps
-      locationName: payload.locationName || '', // Store empty string if undefined
-      locationCoordinates: payload.locationCoordinates || undefined, // Store null if undefined
-      creatorId: currentUserId,
-      groupId: payload.groupId || '',
-      memo: payload.memo || undefined,
-      isTemporary: payload.isTemporary || false,
-      // Default values for fields that might not be present if not set
-      participantIds: [],
-      useReserveFund: false,
-      partialReserveFundAmount: undefined,
-      nonReserveFundParticipants: [],
-      temporaryParticipants: undefined,
-      totalFee: undefined,
-      feePerPerson: undefined,
-      isShareEnabled: false, 
-      shareToken: null,
-      shareExpiryDate: null,
-      expenses: [],
-    };
-
-    if (payload.isTemporary) {
-      meetingDataToSave.temporaryParticipants = payload.temporaryParticipants || [];
-      if (payload.totalFee !== undefined && typeof payload.totalFee === 'number' && !isNaN(payload.totalFee)) {
-        meetingDataToSave.totalFee = payload.totalFee;
-        meetingDataToSave.feePerPerson = undefined;
-      } else if (payload.feePerPerson !== undefined && typeof payload.feePerPerson === 'number' && !isNaN(payload.feePerPerson)) {
-        meetingDataToSave.feePerPerson = payload.feePerPerson;
-        meetingDataToSave.totalFee = undefined;
-      } else {
-        meetingDataToSave.totalFee = undefined;
-        meetingDataToSave.feePerPerson = undefined;
-      }
-      // Ensure regular meeting fields are not set or are default
-      meetingDataToSave.participantIds = [];
-      meetingDataToSave.useReserveFund = false;
-      meetingDataToSave.partialReserveFundAmount = undefined;
-      meetingDataToSave.nonReserveFundParticipants = [];
-    } else {
-      // Regular meeting
-      meetingDataToSave.participantIds = payload.participantIds || [];
-      meetingDataToSave.useReserveFund = payload.useReserveFund || false;
-
-      if (meetingDataToSave.useReserveFund) {
-        if (typeof payload.partialReserveFundAmount === 'number' && !isNaN(payload.partialReserveFundAmount)) {
-          meetingDataToSave.partialReserveFundAmount = payload.partialReserveFundAmount;
-        } else {
-          meetingDataToSave.partialReserveFundAmount = 0;
-        }
-      } else {
-        meetingDataToSave.partialReserveFundAmount = undefined;
-      }
-
-      meetingDataToSave.nonReserveFundParticipants = payload.nonReserveFundParticipants || [];
-      meetingDataToSave.temporaryParticipants = undefined;
-      meetingDataToSave.totalFee = undefined;
-      meetingDataToSave.feePerPerson = undefined;
+    const currentUser = await dbGetUserById(currentUserId);
+    if (!currentUser) {
+      return { success: false, error: "사용자 정보를 찾을 수 없습니다." };
     }
 
-    const newMeeting = await dbAddMeeting(meetingDataToSave);
+    if (currentUser.role !== 'admin' && currentUser.role !== 'user') {
+      return { success: false, error: "모임을 생성할 권한이 없습니다. 'admin' 또는 'user' 역할만 가능합니다." };
+    }
+
+    const {
+      locationCoordinates,
+      locationName,
+      participantIds,
+      nonReserveFundParticipants,
+      temporaryParticipants,
+      partialReserveFundAmount,
+      memo,
+      totalFee,
+      feePerPerson,
+      endTime,
+      // Destructure all fields from payload to ensure they are handled
+      name,
+      dateTime,
+      groupId,
+      isTemporary,
+      useReserveFund,
+      // Explicitly list all fields from Omit<Meeting, 'id' | 'createdAt' | 'isSettled' | 'isShareEnabled' | 'shareToken' | 'shareExpiryDate' | 'expenses'>
+      // Any other fields in payload that are not part of Meeting type (excluding above) will be caught by ...otherPayloadData if it were used.
+      // However, since payload is already typed, we can be more direct.
+    } = payload;
+
+    const meetingDataToSaveBase = {
+      name,
+      dateTime,
+      creatorId: currentUserId,
+      groupId: groupId || '',
+      locationName: locationName || '',
+      isTemporary: isTemporary || false,
+      // Default values for optional fields that should always exist with a default
+      participantIds: participantIds || [],
+      useReserveFund: useReserveFund || false,
+      nonReserveFundParticipants: nonReserveFundParticipants || [],
+      // Fields that are truly optional and should be omitted if undefined
+      ...(endTime !== undefined && { endTime }),
+      ...(locationCoordinates !== undefined && { locationCoordinates }),
+      ...(memo !== undefined && { memo }),
+      ...(partialReserveFundAmount !== undefined && { partialReserveFundAmount }),
+      ...(temporaryParticipants !== undefined && { temporaryParticipants }),
+    };
+
+    let meetingDataToSave: any = meetingDataToSaveBase;
+
+    if (meetingDataToSave.isTemporary) {
+      meetingDataToSave.temporaryParticipants = temporaryParticipants || [];
+      if (totalFee !== undefined) meetingDataToSave.totalFee = totalFee;
+      if (feePerPerson !== undefined) meetingDataToSave.feePerPerson = feePerPerson;
+
+      // Ensure regular meeting fields are set to defaults or omitted
+      meetingDataToSave.participantIds = []; // Or ensure it's already [] from base
+      meetingDataToSave.useReserveFund = false; // Or ensure it's already false
+      // These will be omitted if undefined due to the spread syntax or explicit check later
+      delete meetingDataToSave.partialReserveFundAmount;
+      delete meetingDataToSave.nonReserveFundParticipants;
+    } else {
+      // Regular meeting
+      // participantIds, useReserveFund, nonReserveFundParticipants are already handled by base or conditional spread
+      if (meetingDataToSave.useReserveFund) {
+        meetingDataToSave.partialReserveFundAmount = (typeof partialReserveFundAmount === 'number' && !isNaN(partialReserveFundAmount))
+          ? partialReserveFundAmount
+          : 0; // Default to 0 if useReserveFund is true but amount is not valid or undefined
+      } else {
+         delete meetingDataToSave.partialReserveFundAmount;
+      }
+      // These will be omitted if undefined
+      delete meetingDataToSave.temporaryParticipants;
+      delete meetingDataToSave.totalFee;
+      delete meetingDataToSave.feePerPerson;
+    }
+
+    // The call to dbAddMeeting will handle its own defaults for isSettled, isShareEnabled etc.
+    // and convert dates to Timestamps.
+    // The object passed to dbAddMeeting should be Omit<Meeting, 'id' | 'createdAt' | 'isSettled' | 'isShareEnabled' | 'shareToken' | 'shareExpiryDate' | 'expenses'> & {creatorId: string}
+    // The current `meetingDataToSave` is being constructed to fit this.
+    // The dbAddMeeting function in data-store.ts will then add other defaults like createdAt, isSettled, etc.
+
+    const newMeeting = await dbAddMeeting(meetingDataToSave as Omit<Meeting, 'id' | 'createdAt' | 'isSettled' | 'isShareEnabled' | 'shareToken' | 'shareExpiryDate' | 'expenses'> & {creatorId: string});
     revalidatePath('/meetings');
     revalidatePath('/');
     revalidatePath(`/meetings/${newMeeting.id}`);
@@ -247,18 +430,45 @@ export async function updateMeetingAction(
 
 
     // Handle location fields for Firestore compatibility
-    if (meetingDataToUpdate.hasOwnProperty('locationName')) {
-      meetingDataToUpdate.locationName = meetingDataToUpdate.locationName || '';
-    }
     // If locationName is being set (even to empty) and locationCoordinates is not explicitly provided in payload,
-    // or if locationName is cleared, locationCoordinates should be nulled out.
-    if (meetingDataToUpdate.hasOwnProperty('locationCoordinates')) {
-      meetingDataToUpdate.locationCoordinates = meetingDataToUpdate.locationCoordinates || undefined;
-    } else if (meetingDataToUpdate.hasOwnProperty('locationName')) {
-      // If locationName was changed/set, and coordinates are not in payload, set them to null
-      // to ensure consistency, e.g. if a user clears a location search then types a name manually.
-      meetingDataToUpdate.locationCoordinates = undefined;
+    // or if locationName is cleared, locationCoordinates should be handled.
+    if (payload.hasOwnProperty('locationName')) { // locationName is in the payload
+      meetingDataToUpdate.locationName = payload.locationName || ''; // Set to empty string if null/undefined
+      if (!payload.hasOwnProperty('locationCoordinates')) {
+        // If locationName is being updated but locationCoordinates is not,
+        // and locationName becomes empty, then locationCoordinates should be removed.
+        if (!meetingDataToUpdate.locationName) {
+          (meetingDataToUpdate as any).locationCoordinates = deleteField();
+        }
+        // If locationName is not empty, and coordinates were not in payload, existing coordinates are kept (by initial spread).
+        // Or, if new name implies new coords, form should send new coords or undefined.
+      }
     }
+
+    // Explicitly handle locationCoordinates from payload
+    if (payload.hasOwnProperty('locationCoordinates')) {
+      if (payload.locationCoordinates === undefined) {
+        (meetingDataToUpdate as any).locationCoordinates = deleteField();
+      } else {
+        // This will set it to null if payload.locationCoordinates is null, or to the GeoPoint object
+        meetingDataToUpdate.locationCoordinates = payload.locationCoordinates;
+      }
+    }
+
+    // Handle other optional fields that might be explicitly set to undefined in payload
+    const optionalFieldsToDeleteIfUndefined: (keyof Partial<Omit<Meeting, 'id' | 'createdAt'>>)[] = [
+      'endTime', 'memo', 'partialReserveFundAmount', // Add other relevant fields
+    ];
+
+    optionalFieldsToDeleteIfUndefined.forEach(fieldKey => {
+      if (payload.hasOwnProperty(fieldKey) && payload[fieldKey] === undefined) {
+        if (fieldKey === 'endTime') { // endTime can be null
+          meetingDataToUpdate[fieldKey] = null;
+        } else {
+          (meetingDataToUpdate as any)[fieldKey] = deleteField();
+        }
+      }
+    });
 
 
     if (meetingToUpdate.isTemporary) { // If existing meeting is temporary
@@ -518,14 +728,36 @@ export async function deleteExpenseAction(expenseId: string, meetingId: string, 
 // Reserve Fund Actions
 export async function setReserveFundBalanceAction(groupId: string, newBalance: number, description?: string, currentUserId?: string | null) {
   if (!currentUserId) {
-    return { success: false, error: "인증되지 않은 사용자입니다. 로그인이 필요합니다." };
+    return { success: false, error: "인증되지 않은 사용자입니다. 사용자 ID가 필요합니다." };
   }
-  const callingUser = await dbGetUserById(currentUserId);
-  if (!callingUser || callingUser.role !== 'admin') {
-    return { success: false, error: "회비 잔액 설정 권한이 없습니다." };
+  if (!groupId) {
+    return { success: false, error: "그룹 ID가 필요합니다." };
   }
 
   try {
+    const callingUser = await dbGetUserById(currentUserId);
+    if (!callingUser) {
+      return { success: false, error: "사용자 정보를 찾을 수 없습니다." };
+    }
+
+    let hasPermission = false;
+    if (callingUser.role === 'admin') {
+      hasPermission = true;
+    } else if (callingUser.role === 'user') {
+      const groupDocRef = doc(db, 'friendGroups', groupId);
+      const groupSnap = await getDoc(groupDocRef);
+      if (groupSnap.exists()) {
+        const groupData = groupSnap.data() as FriendGroup;
+        if (groupData.ownerUserId === currentUserId) {
+          hasPermission = true;
+        }
+      }
+    }
+
+    if (!hasPermission) {
+      return { success: false, error: "회비 잔액을 설정할 권한이 없습니다. 그룹 소유자 또는 관리자만 가능합니다." };
+    }
+
     await dbSetReserveFundBalance(groupId, newBalance, description || "수동 잔액 조정");
     revalidatePath('/reserve-fund');
     revalidatePath('/'); // Dashboard shows reserve balance
@@ -666,8 +898,11 @@ export async function toggleMeetingShareAction(meetingId: string, currentUserId:
     }
 
     const user = await dbGetUserById(currentUserId); // Fetch user data from Firestore
+    if (!user) { // Added check for user existence
+      return { success: false, error: "사용자 정보를 찾을 수 없습니다." };
+    }
     const isCreator = meeting.creatorId === currentUserId;
-    const isAdmin = user?.role === 'admin';
+    const isAdmin = user.role === 'admin'; // user is guaranteed to exist here
 
     if (!isCreator && !isAdmin) {
       return { success: false, error: "공유 설정을 변경할 권한이 없습니다." };
@@ -709,42 +944,206 @@ export async function toggleMeetingShareAction(meetingId: string, currentUserId:
 // --- FriendGroup Actions ---
 export async function createFriendGroupAction(
   name: string,
-  ownerUserId: string,
+  currentUserId: string, // Changed from ownerUserId for clarity and to match pattern
   memberIds: string[] = []
 ) {
   try {
-    const newGroup = await dbAddFriendGroup({ name, ownerUserId, memberIds });
-    revalidatePath('/friends');
-    revalidatePath('/meetings/new');
+    if (!currentUserId) {
+      return { success: false, error: "인증되지 않은 사용자입니다. 로그인이 필요합니다." };
+    }
+    const currentUser = await dbGetUserById(currentUserId);
+    if (!currentUser) {
+      return { success: false, error: "사용자 정보를 찾을 수 없습니다." };
+    }
+
+    if (currentUser.role !== 'admin' && currentUser.role !== 'user') {
+      return { success: false, error: "친구 그룹을 생성할 권한이 없습니다. 'admin' 또는 'user' 역할만 가능합니다." };
+    }
+
+    const newGroup = await dbAddFriendGroup({ name, ownerUserId: currentUserId, memberIds });
+    revalidatePath('/friends'); // Main friends page (shows groups)
+    revalidatePath('/meetings/new'); // Meeting form might use friend groups
+    revalidatePath('/groups'); // Assuming a new path for listing groups might exist
     return { success: true, group: newGroup };
   } catch (error) {
     console.error('createFriendGroupAction Error:', error);
-    return { success: false, error: '친구 그룹 생성에 실패했습니다.' };
+    const errorMessage = error instanceof Error ? error.message : '친구 그룹 생성 중 오류가 발생했습니다.';
+    return { success: false, error: errorMessage };
   }
 }
 
 export async function updateFriendGroupAction(
   id: string,
-  updates: Partial<Omit<FriendGroup, 'id' | 'createdAt'>>
+  updates: Partial<Omit<FriendGroup, 'id' | 'createdAt'>>,
+  currentUserId: string
 ) {
   try {
+    if (!currentUserId) {
+      return { success: false, error: "인증되지 않은 사용자입니다. 로그인이 필요합니다." };
+    }
+    const currentUser = await dbGetUserById(currentUserId);
+    if (!currentUser) {
+      return { success: false, error: "사용자 정보를 찾을 수 없습니다." };
+    }
+
+    const groupDocRef = doc(db, 'friendGroups', id);
+    const groupSnap = await getDoc(groupDocRef);
+
+    if (!groupSnap.exists()) {
+      return { success: false, error: "수정할 친구 그룹을 찾을 수 없습니다." };
+    }
+    const groupData = groupSnap.data() as FriendGroup; // Cast to FriendGroup
+
+    if (currentUser.role !== 'admin' && groupData.ownerUserId !== currentUserId) {
+      return { success: false, error: "친구 그룹을 수정할 권한이 없습니다." };
+    }
+
     const updatedGroup = await dbUpdateFriendGroup(id, updates);
+    if (!updatedGroup) {
+        // This case might not be reachable if dbUpdateFriendGroup throws on error or returns null for not found,
+        // and we already checked for existence. But as a safeguard:
+        return { success: false, error: "친구 그룹 업데이트에 실패했습니다."};
+    }
+    revalidatePath('/friends');
+    revalidatePath('/groups'); // Assuming a path for listing groups
+    revalidatePath(`/friends/${id}`); // If there's a page for a specific group
     return { success: true, group: updatedGroup };
   } catch (error) {
     console.error('updateFriendGroupAction Error:', error);
-    return { success: false, error: '친구 그룹 수정에 실패했습니다.' };
+    const errorMessage = error instanceof Error ? error.message : '친구 그룹 수정 중 오류가 발생했습니다.';
+    return { success: false, error: errorMessage };
   }
 }
 
-export async function deleteFriendGroupAction(id: string) {
+export async function deleteFriendGroupAction(id: string, currentUserId: string) {
   try {
+    if (!currentUserId) {
+      return { success: false, error: "인증되지 않은 사용자입니다. 로그인이 필요합니다." };
+    }
+    const currentUser = await dbGetUserById(currentUserId);
+    if (!currentUser) {
+      return { success: false, error: "사용자 정보를 찾을 수 없습니다." };
+    }
+
+    const groupDocRef = doc(db, 'friendGroups', id);
+    const groupSnap = await getDoc(groupDocRef);
+
+    if (!groupSnap.exists()) {
+      return { success: false, error: "삭제할 친구 그룹을 찾을 수 없습니다." };
+    }
+    const groupData = groupSnap.data() as FriendGroup;
+
+    if (currentUser.role !== 'admin' && groupData.ownerUserId !== currentUserId) {
+      return { success: false, error: "친구 그룹을 삭제할 권한이 없습니다." };
+    }
+
     await dbDeleteFriendGroup(id);
+    revalidatePath('/friends');
+    revalidatePath('/groups');
+    // Also consider revalidating paths for any meetings that might have used this group, if applicable.
     return { success: true };
   } catch (error) {
     console.error('deleteFriendGroupAction Error:', error);
-    return { success: false, error: '친구 그룹 삭제에 실패했습니다.' };
+    const errorMessage = error instanceof Error ? error.message : '친구 그룹 삭제 중 오류가 발생했습니다.';
+    return { success: false, error: errorMessage };
   }
 }
+
+export async function getMeetingsForUserAction(params: {
+  year?: number;
+  page?: number;
+  limitParam?: number;
+  requestingUserId: string;
+}) {
+  const { year, page, limitParam, requestingUserId } = params;
+
+  if (!requestingUserId) {
+    return { success: false, error: "User ID is required.", meetings: [], totalCount: 0, availableYears: [] };
+  }
+
+  const user = await dbGetUserById(requestingUserId);
+
+  if (!user) {
+    return { success: false, error: "User not found.", meetings: [], totalCount: 0, availableYears: [] };
+  }
+
+  let actualUserIdForFilter: string | undefined = undefined;
+  let actualUserFriendGroupIdsForFilter: string[] | undefined = undefined; // Renamed
+
+  if (user.role !== 'admin') {
+    actualUserIdForFilter = user.id;
+    actualUserFriendGroupIdsForFilter = user.friendGroupIds && user.friendGroupIds.length > 0 ? user.friendGroupIds : undefined; // Renamed field
+    // Pass undefined if empty to ensure getMeetings logic for OR condition works as intended (no group filter if undefined)
+  }
+  // For admin, actualUserIdForFilter and actualUserFriendGroupIdsForFilter remain undefined,
+  // so dbGetMeetings should fetch all meetings based on its internal logic.
+
+  try {
+    // Ensure dbGetMeetings can handle undefined for userId and userFriendGroupIds to mean "no filter" for those specific criteria
+    const result = await dbGetMeetings({
+      year,
+      page,
+      limitParam,
+      userId: actualUserIdForFilter,
+      userFriendGroupIds: actualUserFriendGroupIdsForFilter, // Renamed
+    });
+    return { success: true, ...result };
+  } catch (error) {
+    console.error("getMeetingsForUserAction Error:", error);
+    const errorMessage = error instanceof Error ? error.message : 'Failed to fetch meetings.';
+    return { success: false, error: errorMessage, meetings: [], totalCount: 0, availableYears: [] };
+  }
+}
+
+
+// 사용자가 접근 가능한 친구 그룹 목록 조회 (소유 또는 참조)
+export async function getFriendGroupsForUserAction(currentUserId: string) {
+  try {
+    if (!currentUserId) {
+      return { success: false, error: "인증되지 않은 사용자입니다. 로그인이 필요합니다." };
+    }
+    const currentUser = await dbGetUserById(currentUserId);
+    if (!currentUser) {
+      return { success: false, error: "사용자 정보를 찾을 수 없습니다." };
+    }
+
+    let rawGroups: FriendGroup[] = [];
+    if (currentUser.role === 'admin') {
+      rawGroups = await dbGetAllFriendGroups();
+    } else {
+      // For 'user' and 'viewer', dbGetFriendGroupsByUser handles owned and referenced groups.
+      // It's assumed this function already correctly sets isOwned/isReferenced or the UI handles it.
+      // For viewers, an additional filter might be applied if dbGetFriendGroupsByUser doesn't strictly limit.
+      rawGroups = await dbGetFriendGroupsByUser(currentUserId);
+      if (currentUser.role === 'viewer') {
+        const referencedIds = currentUser.friendGroupIds || [];
+        rawGroups = rawGroups.filter(group => referencedIds.includes(group.id));
+      }
+    }
+
+    // Process groups to ensure isOwned and isReferenced flags are consistent, especially for admin
+    const processedGroups = rawGroups.map(group => ({
+      ...group,
+      isOwned: group.ownerUserId === currentUserId,
+      isReferenced: currentUser.friendGroupIds?.includes(group.id) || false,
+    }));
+
+    // Sort all groups by createdAt date
+    const sortedGroups = processedGroups.sort((a, b) => {
+      const dateA = a.createdAt instanceof Timestamp ? a.createdAt.toMillis() : (a.createdAt ? new Date(a.createdAt).getTime() : 0);
+      const dateB = b.createdAt instanceof Timestamp ? b.createdAt.toMillis() : (b.createdAt ? new Date(b.createdAt).getTime() : 0);
+      return dateB - dateA;
+    });
+
+    return { success: true, groups: sortedGroups };
+
+  } catch (error) {
+    console.error('getFriendGroupsForUserAction Error:', error);
+    const errorMessage = error instanceof Error ? error.message : '친구 그룹 목록 조회 중 오류가 발생했습니다.';
+    return { success: false, error: errorMessage, groups: [] }; // Ensure groups is an empty array on error
+  }
+}
+
 
 // 그룹별 친구 목록 조회
 export async function getFriendsByGroupAction(groupId: string) {

@@ -40,6 +40,7 @@ import Link from 'next/link';
 import { cn } from '@/lib/utils';
 import { Loader } from '@googlemaps/js-api-loader';
 import { Accordion, AccordionItem, AccordionTrigger, AccordionContent } from '@/components/ui/accordion';
+import type { User } from '@/lib/types'; // Import User type
 
 const googleMapsLibraries: ("places" | "maps" | "marker")[] = ["places", "maps", "marker"];
 
@@ -47,6 +48,7 @@ interface MeetingDetailsClientProps {
   initialMeeting: Meeting;
   initialExpenses: Expense[];
   allFriends: Friend[];
+  allUsers: User[]; // Added allUsers prop
   isReadOnlyShare?: boolean;
 }
 
@@ -54,6 +56,7 @@ export function MeetingDetailsClient({
   initialMeeting,
   initialExpenses,
   allFriends,
+  allUsers, // Destructure allUsers
   isReadOnlyShare = false,
 }: MeetingDetailsClientProps) {
   const [meeting, setMeeting] = useState<Meeting>(initialMeeting);
@@ -73,9 +76,9 @@ export function MeetingDetailsClient({
 
   const { toast } = useToast();
   const router = useRouter();
-  const { currentUser, isAdmin, userRole } = useAuth();
-  const isCreator = currentUser?.uid === meeting.creatorId;
-  // userRole: 'admin' | 'user' | 'none'
+  const { appUser, currentUser, isAdmin, userRole } = useAuth(); // Destructure appUser
+  const isCreator = appUser?.id === meeting.creatorId; // Use appUser.id for creator check
+  // userRole: 'admin' | 'user' | 'none' | 'viewer'
 
   // 권한 플래그: user도 모든 정보는 볼 수 있으나, 수정/삭제/추가 등은 불가
   const canManageMeetingActions = (isAdmin || isCreator) && !isReadOnlyShare;
@@ -212,14 +215,19 @@ export function MeetingDetailsClient({
   }, [meeting.isTemporary, meeting.temporaryParticipants, participants, meeting.groupId]);
 
   const creatorName = useMemo(() => {
-    if (currentUser && meeting.creatorId === currentUser.uid && isAdmin) {
-      return '관리자 (나)';
+    const creator = allUsers.find(user => user.id === meeting.creatorId);
+    let name = '알 수 없음';
+    if (creator) {
+      name = creator.name || creator.email || meeting.creatorId.substring(0, 6);
+      if (appUser && appUser.id === meeting.creatorId) {
+        name += " (나)";
+      }
+    } else if (appUser && appUser.id === meeting.creatorId) {
+      // Fallback if creator is not in allUsers but is the current user
+      name = (appUser.name || appUser.email || appUser.id.substring(0,6)) + " (나)";
     }
-    const creatorFriend = allFriends.find(f => f.id === meeting.creatorId);
-    if (creatorFriend) return creatorFriend.name + (creatorFriend.description ? ` (${creatorFriend.description})` : '');
-    if (currentUser && meeting.creatorId === currentUser.uid) return currentUser.displayName || currentUser.email || '알 수 없는 생성자';
-    return '관리자';
-  }, [meeting.creatorId, allFriends, currentUser, isAdmin]);
+    return name;
+  }, [meeting.creatorId, allUsers, appUser]);
 
   const handleExpenseAdded = (newExpense: Expense) => {
     const newExpenses = [newExpense, ...expenses].sort((a,b) => (b.createdAt instanceof Date ? b.createdAt.getTime() : (b.createdAt as any).toDate().getTime()) - (a.createdAt instanceof Date ? a.createdAt.getTime() : (a.createdAt as any).toDate().getTime()));
