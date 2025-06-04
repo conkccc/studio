@@ -17,7 +17,8 @@ import type { Meeting, Expense, Friend, User } from '@/lib/types'; // Keep types
 
 import { notFound } from 'next/navigation'; // For handling not found cases
 
-export default async function MeetingDetailPage({ params }: { params: { meetingId: string } }) {
+export default async function MeetingDetailPage(props: { params: Promise<{ meetingId: string }> }) {
+  const params = await props.params;
   const meetingId = params.meetingId;
 
   // Fetch data in parallel

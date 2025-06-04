@@ -1,8 +1,8 @@
 'use client';
 
-import React, { useState, useTransition, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useTransition, useEffect, useCallback, useRef, useMemo } from 'react';
 import { zodResolver } from '@hookform/resolvers/zod';
-import { useForm, Controller } from 'react-hook-form';
+import { useForm, Controller, useWatch } from 'react-hook-form';
 import * as z from 'zod';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
@@ -63,7 +63,7 @@ const meetingSchemaBase = z.object({
 // });
 
 const meetingSchema = meetingSchemaBase
-  .refine(data => { // 기존 회비 사용 시 금액 검증
+  .refine(data => { // 기존 회비 사용 시 금검증
     if (!data.isTemporary && data.useReserveFund && (data.partialReserveFundAmount === undefined || data.partialReserveFundAmount <= 0)) {
       return false;
     }
@@ -301,6 +301,8 @@ export function CreateMeetingForm({
 
   const [groupPopoverOpen, setGroupPopoverOpen] = useState(false);
 
+  // 1. 컴포넌트 최상단에 추가
+  const isTemporaryInitialized = useRef(false);
 
   const form = useForm<MeetingFormData>({
     resolver: zodResolver(meetingSchema),
@@ -337,20 +339,32 @@ export function CreateMeetingForm({
     },
   });
 
-  const watchUseReserveFund = form.watch('useReserveFund');
-  const watchParticipantIds = form.watch('participantIds');
-  const watchedLocationCoordinates = form.watch('locationCoordinates');
-  const watchLocationName = form.watch('locationName');
-  const watchedIsTemporary = form.watch('isTemporary');
+  // useWatch로 모든 필드 구독
+  const watchUseReserveFund = useWatch({ control: form.control, name: 'useReserveFund' });
+  const watchParticipantIds = useWatch({ control: form.control, name: 'participantIds' });
+  const watchedLocationCoordinates = useWatch({ control: form.control, name: 'locationCoordinates' });
+  const watchLocationName = useWatch({ control: form.control, name: 'locationName' });
+  const watchedIsTemporary = useWatch({ control: form.control, name: 'isTemporary' });
+  const dateTimeValue = useWatch({ control: form.control, name: 'dateTime' });
+  const endTimeValue = useWatch({ control: form.control, name: 'endTime' });
+  const watchPartialReserveFundAmount = useWatch({ control: form.control, name: 'partialReserveFundAmount' });
+  const watchNonReserveFundParticipants = useWatch({ control: form.control, name: 'nonReserveFundParticipants' });
+  const watchTemporaryParticipants = useWatch({ control: form.control, name: 'temporaryParticipants' });
 
-  useEffect(() => {
-    // This effect calls the onTemporaryChange prop when the form's isTemporary value changes.
-    // It's important that onTemporaryChange itself doesn't cause a re-render that changes watchedIsTemporary again.
-    // (Assuming onTemporaryChange is a stable function or handled correctly by parent)
-    if (onTemporaryChange) {
-      onTemporaryChange(watchedIsTemporary || false);
-    }
-  }, [watchedIsTemporary, onTemporaryChange]);
+  // selectedParticipants useMemo로 최적화
+  const selectedParticipants = useMemo(
+    () => friends.filter(friend => watchParticipantIds?.includes(friend.id)),
+    [friends, watchParticipantIds]
+  );
+
+  // useEffect(() => {
+  //   // This effect calls the onTemporaryChange prop when the form's isTemporary value changes.
+  //   // It's important that onTemporaryChange itself doesn't cause a re-render that changes watchedIsTemporary again.
+  //   // (Assuming onTemporaryChange is a stable function or handled correctly by parent)
+  //   if (onTemporaryChange) {
+  //     onTemporaryChange(watchedIsTemporary || false);
+  //   }
+  // }, [watchedIsTemporary, onTemporaryChange]);
 
   useEffect(() => {
     const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
@@ -446,169 +460,39 @@ export function CreateMeetingForm({
   }, [isMapsLoaded, mapsLoadError, watchedLocationCoordinates, watchLocationName, showMap]); // Removed mapInstanceRef, markerInstanceRef from deps
 
 
-  useEffect(() => {
-    if (watchLocationName === '' && form.getValues('locationCoordinates')) {
-      form.setValue('locationCoordinates', undefined, { shouldValidate: true });
-      if(showMap) setShowMap(false); // Hide map if location name is cleared
-    }
-  }, [watchLocationName, form, showMap]);
+  // useEffect(() => {
+  //   // locationName이 ''이고, locationCoordinates가 undefined가 아닐 때만 setValue
+  //   const coords = form.getValues('locationCoordinates');
+  //   if (watchLocationName === '' && coords !== undefined) {
+  //     form.setValue('locationCoordinates', undefined, { shouldValidate: true });
+  //     if (showMap) setShowMap(false);
+  //     return; // setValue 후 바로 return하여 effect가 다시 실행되는 것을 방지
+  //   }
+  //   // eslint-disable-next-line react-hooks/exhaustive-deps
+  // }, [watchLocationName]);
 
 
-  useEffect(() => {
-    if (!watchedIsTemporary && watchParticipantIds) { // Corrected: isTemporaryMeeting to watchedIsTemporary
-      const currentNonParticipants = form.getValues('nonReserveFundParticipants') || [];
-      const newNonParticipants = currentNonParticipants.filter(id => watchParticipantIds.includes(id));
-      if (JSON.stringify(newNonParticipants.sort()) !== JSON.stringify(currentNonParticipants.sort())) {
-         form.setValue('nonReserveFundParticipants', newNonParticipants, { shouldValidate: true });
-      }
-    }
-  }, [watchParticipantIds, form, watchedIsTemporary]); // Use watchedIsTemporary
-
-  useEffect(() => {
-    if (!watchedIsTemporary && !watchUseReserveFund) { // Use watchedIsTemporary
-      form.setValue('partialReserveFundAmount', undefined, { shouldValidate: true });
-      form.setValue('nonReserveFundParticipants', [], { shouldValidate: true });
-    }
-  }, [watchUseReserveFund, form, watchedIsTemporary]); // Use watchedIsTemporary and form.setValue (stable)
-
-  // This useEffect handles changes based on watchedIsTemporary
-  useEffect(() => {
-    const setValueOptions = { shouldValidate: false, shouldDirty: false, shouldTouch: false };
-
-    if (watchedIsTemporary) {
-      // 임시 모임일 경우 기존 참여자/회비 관련 필드 초기화 또는 비활성화
-      if (JSON.stringify(form.getValues('participantIds')) !== JSON.stringify([])) {
-        form.setValue('participantIds', [], setValueOptions);
-      }
-      if (form.getValues('useReserveFund') !== false) {
-        form.setValue('useReserveFund', false, setValueOptions);
-      }
-      if (form.getValues('partialReserveFundAmount') !== undefined) {
-        form.setValue('partialReserveFundAmount', undefined, setValueOptions);
-      }
-      if (JSON.stringify(form.getValues('nonReserveFundParticipants')) !== JSON.stringify([])) {
-        form.setValue('nonReserveFundParticipants', [], setValueOptions);
-      }
-
-      // 로컬 상태 업데이트 (이 부분은 form.setValue와 직접적인 연관은 없지만, 상태 동기화 로직임)
-      const initialTempParticipants = initialData?.isTemporary && initialData.temporaryParticipants ? initialData.temporaryParticipants : [];
-      if (JSON.stringify(temporaryParticipants) !== JSON.stringify(initialTempParticipants)) {
-        setTemporaryParticipants(initialTempParticipants);
-      }
-
-      let initialFeeType = 'total';
-      if (initialData?.isTemporary && initialData.feePerPerson !== undefined) initialFeeType = 'perPerson';
-      else if (initialData?.isTemporary && initialData.totalFee !== undefined) initialFeeType = 'total';
-      if (tempMeetingFeeType !== initialFeeType) {
-        setTempMeetingFeeType(initialFeeType as 'total' | 'perPerson');
-      }
-
-      const initialTotalFee = initialData?.isTemporary ? initialData.totalFee : undefined;
-      if (tempMeetingTotalFee !== initialTotalFee) {
-        setTempMeetingTotalFee(initialTotalFee);
-      }
-
-      const initialFeePerPerson = initialData?.isTemporary ? initialData.feePerPerson : undefined;
-      if (tempMeetingFeePerPerson !== initialFeePerPerson) {
-        setTempMeetingFeePerPerson(initialFeePerPerson);
-      }
-
-    } else {
-      // 기존 모임으로 전환 시 임시 관련 필드 초기화
-      if (form.getValues('temporaryParticipants') !== undefined) {
-        form.setValue('temporaryParticipants', undefined, setValueOptions);
-      }
-      if (form.getValues('totalFee') !== undefined) {
-        form.setValue('totalFee', undefined, setValueOptions);
-      }
-      if (form.getValues('feePerPerson') !== undefined) {
-        form.setValue('feePerPerson', undefined, setValueOptions);
-      }
-
-      // 기존 모임의 기본값으로 participantIds 재설정
-      const defaultParticipantIds = friends.map(f => f.id);
-      if (!isEditMode || !initialData?.participantIds) {
-        if (JSON.stringify(form.getValues('participantIds')) !== JSON.stringify(defaultParticipantIds)) {
-          form.setValue('participantIds', defaultParticipantIds, setValueOptions);
-        }
-      } else if (initialData?.participantIds) {
-        if (JSON.stringify(form.getValues('participantIds')) !== JSON.stringify(initialData.participantIds)) {
-          form.setValue('participantIds', initialData.participantIds, setValueOptions);
-        }
-      }
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [watchedIsTemporary, isEditMode, initialData, friends]); // form.setValue 제거, form은 useEffect 내에서 직접 접근
-
-  useEffect(() => {
-    const setValueOptions = { shouldValidate: true, shouldDirty: false, shouldTouch: false }; // Validate for these
-    if (watchedIsTemporary) {
-      if (JSON.stringify(form.getValues('temporaryParticipants')) !== JSON.stringify(temporaryParticipants)) {
-        form.setValue('temporaryParticipants', temporaryParticipants, setValueOptions);
-      }
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [temporaryParticipants, watchedIsTemporary]); // form.setValue 제거
-
-  useEffect(() => {
-    const setValueOptions = { shouldValidate: true, shouldDirty: false, shouldTouch: false }; // Validate for these
-    if (watchedIsTemporary) {
-      if (tempMeetingFeeType === 'total') {
-        if (form.getValues('totalFee') !== tempMeetingTotalFee) {
-          form.setValue('totalFee', tempMeetingTotalFee, setValueOptions);
-        }
-        if (form.getValues('feePerPerson') !== undefined) {
-          form.setValue('feePerPerson', undefined, setValueOptions);
-        }
-      } else { // perPerson
-        if (form.getValues('feePerPerson') !== tempMeetingFeePerPerson) {
-          form.setValue('feePerPerson', tempMeetingFeePerPerson, setValueOptions);
-        }
-        if (form.getValues('totalFee') !== undefined) {
-          form.setValue('totalFee', undefined, setValueOptions);
-        }
-      }
-    } else {
-      // Ensure these are cleared if not temporary (already done in the main effect, but for safety)
-      if (form.getValues('totalFee') !== undefined) {
-        form.setValue('totalFee', undefined, setValueOptions);
-      }
-      if (form.getValues('feePerPerson') !== undefined) {
-        form.setValue('feePerPerson', undefined, setValueOptions);
-      }
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tempMeetingFeeType, tempMeetingTotalFee, tempMeetingFeePerPerson, watchedIsTemporary]); // form.setValue 제거
-
-  // This effect is for initializing form when in edit mode or when initialData changes.
-  // It also sets the initial local state for isTemporaryMeeting.
+  // If you need to re-initialize local state for temporary meeting fields when initialData changes, do it here:
   useEffect(() => {
     if (isEditMode && initialData) {
-      // Set the form's isTemporary field first
-      form.setValue('isTemporary', initialData.isTemporary || false, {shouldDirty: true});
-      // The local state for temporaryParticipants, tempMeetingFeeType etc.
-      // will be set based on initialData when watchedIsTemporary changes (handled by other useEffect)
-      // This helps avoid direct setIsTemporaryMeeting here.
+      setTemporaryParticipants(initialData.isTemporary ? (initialData.temporaryParticipants || []) : []);
       if (initialData.isTemporary) {
-        setTemporaryParticipants(initialData.temporaryParticipants || []);
         if (initialData.totalFee !== undefined) {
           setTempMeetingFeeType('total');
-            setTempMeetingTotalFee(initialData.totalFee || undefined); // Ensure undefined if null/0 from data
+          setTempMeetingTotalFee(initialData.totalFee || undefined);
           setTempMeetingFeePerPerson(undefined);
         } else if (initialData.feePerPerson !== undefined) {
           setTempMeetingFeeType('perPerson');
-            setTempMeetingFeePerPerson(initialData.feePerPerson || undefined);
+          setTempMeetingFeePerPerson(initialData.feePerPerson || undefined);
           setTempMeetingTotalFee(undefined);
-          } else { // Default if isTemporary but no fee info
-            setTempMeetingFeeType('total');
-            setTempMeetingTotalFee(undefined);
-            setTempMeetingFeePerPerson(undefined);
+        } else {
+          setTempMeetingFeeType('total');
+          setTempMeetingTotalFee(undefined);
+          setTempMeetingFeePerPerson(undefined);
         }
       }
-        // Other fields are reset by the useEffect watching `watchedIsTemporary`
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [isEditMode, initialData, form.setValue]); // Only include form.setValue as it's stable
+  }, [isEditMode, initialData]);
 
   const formatNumberInput = (value: number | string | undefined) => {
     if (value === undefined || value === '' || value === null) return '';
@@ -624,15 +508,12 @@ export function CreateMeetingForm({
   );
 
   useEffect(() => {
-    // form의 값이 바뀌면 reserveFundInput도 동기화 (예: 참여자 변경 등)
-    const formValue = form.watch('partialReserveFundAmount');
-    if (formValue === undefined || formValue === null || isNaN(formValue)) {
+    if (watchPartialReserveFundAmount === undefined || watchPartialReserveFundAmount === null || isNaN(watchPartialReserveFundAmount)) {
       setReserveFundInput('');
     } else {
-      setReserveFundInput(Number(formValue).toLocaleString());
+      setReserveFundInput(Number(watchPartialReserveFundAmount).toLocaleString());
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [form.watch('partialReserveFundAmount')]);
+  }, [watchPartialReserveFundAmount]);
 
   const onSubmit = (data: MeetingFormData) => {
     startTransition(async () => {
@@ -720,8 +601,6 @@ export function CreateMeetingForm({
     });
   };
 
-  const selectedParticipants = friends.filter(friend => watchParticipantIds?.includes(friend.id));
-
   const handleLocationSelected = useCallback((coords: { lat: number; lng: number } | undefined, name: string) => {
     if (!coords && !name && showMap) { // If location is cleared
         setShowMap(false);
@@ -739,9 +618,8 @@ export function CreateMeetingForm({
     }
   };
 
-  const dateTimeValue = form.watch('dateTime');
-  const endTimeValue = form.watch('endTime');
-
+  // useMemo로 disabled 상태 미리 계산
+  const isFormDisabled = useMemo(() => isPending || (isEditMode && initialData?.isSettled), [isPending, isEditMode, initialData]);
 
   return (
     <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
@@ -754,17 +632,17 @@ export function CreateMeetingForm({
       {/* Temporary Meeting Switch moved here */}
       <div className="mb-4">
         <div className="flex items-center space-x-2 mt-2">
-          <Switch
-            id="temporaryMeetingSwitch"
-            checked={watchedIsTemporary || false} // Controlled by form state
-            onCheckedChange={(checked) => {
-              if (isEditMode && initialData?.isSettled) return;
-              // Only call setValue if the actual state is different to prevent loops if onCheckedChange is triggered by form.setValue itself
-              if (form.getValues('isTemporary') !== checked) {
-                form.setValue('isTemporary', checked, { shouldDirty: true, shouldTouch: true, shouldValidate: true });
-              }
-            }}
-            disabled={isPending || (isEditMode && initialData?.isSettled)}
+          <Controller
+            control={form.control}
+            name="isTemporary"
+            render={({ field }) => (
+              <Switch
+                id="temporaryMeetingSwitch"
+                checked={!!field.value}
+                onCheckedChange={field.onChange}
+                disabled={isFormDisabled}
+              />
+            )}
           />
           <Label htmlFor="temporaryMeetingSwitch" className={cn("cursor-pointer", (isPending || (isEditMode && initialData?.isSettled)) && "text-muted-foreground cursor-not-allowed")}>임시 모임 만들기</Label>
         </div>
@@ -775,7 +653,7 @@ export function CreateMeetingForm({
       {/* Ensure `groups` is not empty and `onGroupChange` (renamed from setSelectedGroupId in parent) is provided */}
       {!watchedIsTemporary && groups && groups.length > 0 && typeof onGroupChange === 'function' && (
         <div className="mt-2 mb-4">
-          <label className="block mb-1 font-medium">친구 그룹 선택 {!initialData?.groupId && <span className="text-destructive">*</span>}</label> {/* Make asterisk conditional if group can be optional for existing meetings */}
+          <label className="block mb-1 font-medium">친구 그룹 선택 {!initialData?.groupId && <span className="text-destructive">*</span>}</label>
           <Popover open={groupPopoverOpen} onOpenChange={setGroupPopoverOpen}>
             <PopoverTrigger asChild>
               <Button
@@ -785,7 +663,7 @@ export function CreateMeetingForm({
                 className="w-full justify-between"
                 onClick={() => setGroupPopoverOpen((prev) => !prev)}
               >
-                {currentMeetingGroupId /* Use aliased prop */
+                {currentMeetingGroupId
                   ? (groups.find(g => g.id === currentMeetingGroupId)?.name || '그룹 선택...')
                   : '그룹 선택...'}
                 <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
@@ -802,8 +680,12 @@ export function CreateMeetingForm({
                         key={group.id}
                         value={group.name}
                         onSelect={() => {
-                          if (onGroupChange) onGroupChange(group.id); // Use onGroupChange
+                          if (onGroupChange) onGroupChange(group.id);
                           setGroupPopoverOpen(false);
+                          // 그룹 선택 시 해당 그룹의 모든 친구를 참여자로 자동 선택
+                          // group.memberIds를 사용하여 그룹의 멤버 ID로 참여자 지정
+                          const groupFriends = Array.isArray(group.memberIds) ? group.memberIds : [];
+                          form.setValue('participantIds', groupFriends, { shouldValidate: true });
                         }}
                       >
                         <Check className={cn("mr-2 h-4 w-4", currentMeetingGroupId === group.id ? "opacity-100" : "opacity-0")} />
@@ -958,7 +840,7 @@ export function CreateMeetingForm({
                 <MapPinIcon className="absolute left-2 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                 <Input
                     id="locationNameFallbackInput" // Fallback ID
-                    value={form.watch('locationName')}
+                    value={watchLocationName}
                     onChange={(e) => form.setValue('locationName', e.target.value, {shouldValidate: true})}
                     disabled={isPending || (isEditMode && initialData?.isSettled)}
                     className={cn("pl-8", (isEditMode && initialData?.isSettled) && "bg-muted/50 cursor-not-allowed")}
@@ -981,38 +863,28 @@ export function CreateMeetingForm({
                 {showMap ? '지도 숨기기' : '지도 보기'}
             </Button>
             {/* 외부 지도 보기 버튼 추가 */}
-            {(form.getValues('locationName') || watchedLocationCoordinates) && ( // Show if either name or coords exist
+            {(watchLocationName || watchedLocationCoordinates) && (
                 <Button
                     type="button"
                     variant="outline"
                     size="sm"
                     onClick={() => {
-                    const placeName = form.getValues('locationName');
-                    // Using a more robust URL construction that includes coordinates if available,
-                    // falling back to name only. This can help disambiguate if name is common.
+                    const placeName = watchLocationName;
                     let url = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(placeName || '')}`;
                     if (watchedLocationCoordinates) {
                         url = `https://www.google.com/maps/place/${encodeURIComponent(placeName || '')}/@${watchedLocationCoordinates.lat},${watchedLocationCoordinates.lng},15z/data=!3m1!4b1!4m6!3m5!1s0x0:0x0!7e2!8m2!3d${watchedLocationCoordinates.lat}!4d${watchedLocationCoordinates.lng}`;
-                        // A simpler alternative if place_id was available and stored:
-                        // url = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(placeName || '')}&query_place_id=YOUR_PLACE_ID_HERE`;
-                        // Sticking to a robust option that works with name and coords:
-                        // If name is primary:
-                        // url = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(placeName || '')}`;
-                        // If coords should pinpoint:
-                        // url = `https://www.google.com/maps?q=${watchedLocationCoordinates.lat},${watchedLocationCoordinates.lng}`;
-                        // The example from MeetingDetailsClient was just name, let's try to be consistent but slightly more helpful if coords exist
                         if (placeName && watchedLocationCoordinates) {
                              url = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(placeName)}&ll=${watchedLocationCoordinates.lat},${watchedLocationCoordinates.lng}`;
                         } else if (placeName) {
                              url = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(placeName)}`;
-                        } else if (watchedLocationCoordinates) { // Only coordinates available
+                        } else if (watchedLocationCoordinates) {
                              url = `https://www.google.com/maps?q=${watchedLocationCoordinates.lat},${watchedLocationCoordinates.lng}`;
                         }
                     }
                     window.open(url, '_blank', 'noopener,noreferrer');
                     }}
                     className="sm:w-auto"
-                    disabled={isPending || (isEditMode && initialData?.isSettled) || (!form.getValues('locationName') && !watchedLocationCoordinates)}
+                    disabled={isPending || (isEditMode && initialData?.isSettled) || (!watchLocationName && !watchedLocationCoordinates)}
                 >
                     <ExternalLink className="mr-2 h-4 w-4" />
                     외부 지도에서 보기
@@ -1156,7 +1028,7 @@ export function CreateMeetingForm({
                         </div>
                       ))
                   ) : (
-                    <p className={cn("text-sm", (isEditMode && initialData?.isSettled) ? "text-muted-foreground/70" : "text-muted-foreground", watchedIsTemporary && "text-muted-foreground/70" )}>참여자를 먼저 선택해주세요.</p>
+                    <p className={cn("text-sm", (isEditMode && initialData?.isSettled) ? "text-muted-foreground/70" : "text-mutedForeground", watchedIsTemporary && "text-muted-foreground/70" )}>참여자를 먼저 선택해주세요.</p>
                   )}
                 </div>
                 {form.formState.errors.nonReserveFundParticipants && <p className="text-sm text-destructive mt-1">{form.formState.errors.nonReserveFundParticipants.message}</p>}
@@ -1306,47 +1178,50 @@ export function CreateMeetingForm({
                         {watchedIsTemporary ? "임시 모임에는 참여자를 직접 추가합니다." : (currentMeetingGroupId ? "선택된 그룹에 친구가 없습니다." : "먼저 그룹을 선택해주세요.")}
                       </CommandItem>
                     ) : (
-                      friends.map((friend) => (
-                        <CommandItem
-                          key={friend.id}
-                          value={friend.name + (friend.description ? ` ${friend.description}` : "")}
-                          onSelect={() => {
-                            if (isEditMode && initialData?.isSettled || watchedIsTemporary) return;
-                            const currentParticipantIds = form.getValues("participantIds") || [];
-                            let newParticipantIds = [...currentParticipantIds];
+                      friends.map((friend) => {
+                        const isChecked = watchParticipantIds?.includes(friend.id);
+                        return (
+                          <CommandItem
+                            key={friend.id}
+                            value={friend.name + (friend.description ? ` ${friend.description}` : "")}
+                            onSelect={() => {
+                              if (isEditMode && initialData?.isSettled || watchedIsTemporary) return;
+                              const currentParticipantIds = watchParticipantIds || [];
+                              let newParticipantIds = [...currentParticipantIds];
 
-                            if (newParticipantIds.includes(friend.id)) {
-                              newParticipantIds = newParticipantIds.filter(id => id !== friend.id);
-                            } else {
-                              newParticipantIds.push(friend.id);
-                            }
-                            form.setValue("participantIds", newParticipantIds, { shouldValidate: true });
+                              if (newParticipantIds.includes(friend.id)) {
+                                newParticipantIds = newParticipantIds.filter(id => id !== friend.id);
+                              } else {
+                                newParticipantIds.push(friend.id);
+                              }
+                              form.setValue("participantIds", newParticipantIds, { shouldValidate: true });
 
-                            const currentNonParticipants = form.getValues('nonReserveFundParticipants') || [];
-                            if (!newParticipantIds.includes(friend.id) && currentNonParticipants.includes(friend.id)) {
-                                form.setValue('nonReserveFundParticipants', currentNonParticipants.filter(id => id !== friend.id), { shouldValidate: true });
-                            }
-                          }}
-                          className={cn(
-                            (isEditMode && initialData?.isSettled) && "cursor-not-allowed opacity-50",
-                            watchedIsTemporary && "cursor-not-allowed opacity-30"
-                            )}
-                        >
-                          <Check
+                              const currentNonParticipants = watchNonReserveFundParticipants || [];
+                              if (!newParticipantIds.includes(friend.id) && currentNonParticipants.includes(friend.id)) {
+                                  form.setValue('nonReserveFundParticipants', currentNonParticipants.filter(id => id !== friend.id), { shouldValidate: true });
+                              }
+                            }}
                             className={cn(
-                              "mr-2 h-4 w-4",
-                              form.watch('participantIds')?.includes(friend.id) ? "opacity-100" : "opacity-0"
-                            )}
-                          />
-                          <span>
-                            {friend.name}
-                            {friend.description && (
-                              <span className="ml-1 text-xs text-muted-foreground">({friend.description})</span>
-                            )}
-                            {friend.id === currentUserId && " (나)"}
-                          </span>
-                        </CommandItem>
-                      ))
+                              (isEditMode && initialData?.isSettled) && "cursor-not-allowed opacity-50",
+                              watchedIsTemporary && "cursor-not-allowed opacity-30"
+                              )}
+                          >
+                            <Check
+                              className={cn(
+                                "mr-2 h-4 w-4",
+                                isChecked ? "opacity-100" : "opacity-0"
+                              )}
+                            />
+                            <span>
+                              {friend.name}
+                              {friend.description && (
+                                <span className="ml-1 text-xs text-muted-foreground">({friend.description})</span>
+                              )}
+                              {friend.id === currentUserId && " (나)"}
+                            </span>
+                          </CommandItem>
+                        );
+                      })
                     )}
                   </CommandGroup>
                 </CommandList>

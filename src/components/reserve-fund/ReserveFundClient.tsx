@@ -219,7 +219,7 @@ export function ReserveFundClient() {
             <Label htmlFor="group-select-dropdown" className="text-sm font-medium">선택된 그룹:</Label>
             <Select onValueChange={handleGroupSelect} value={selectedGroup?.id || ""}>
               <SelectTrigger id="group-select-dropdown" aria-label="그룹 선택" className="w-auto min-w-[250px] max-w-xs">
-                <SelectValue placeholder="회비 정보를 볼 그룹을 선택하세요..." />
+                <SelectValue placeholder="그룹을 선택하세요..." />
               </SelectTrigger>
               <SelectContent>
                 {accessibleGroups.map(group => {

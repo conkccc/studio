@@ -98,7 +98,7 @@ export default function FriendGroupListClient() {
       if (res.success) {
         setNewGroupName('');
         toast({ title: '성공', description: '새 그룹이 추가되었습니다.' });
-        await fetchGroups(); // Refresh the list
+        await fetchData(); // Refresh the list
       } else {
         toast({ title: '오류', description: res.error || '그룹 추가에 실패했습니다.', variant: 'destructive' });
       }
@@ -117,7 +117,7 @@ export default function FriendGroupListClient() {
       const res = await deleteFriendGroupAction(groupId, appUser.id); // Use appUser.id
       if (res.success) {
         toast({ title: '성공', description: '그룹이 삭제되었습니다.' });
-        await fetchGroups(); // Refresh the list
+        await fetchData(); // Refresh the list
       } else {
         toast({ title: '오류', description: res.error || '그룹 삭제에 실패했습니다.', variant: 'destructive' });
       }
@@ -195,7 +195,7 @@ export default function FriendGroupListClient() {
         toast({ title: "오류", description: result.error || "친구 삭제에 실패했습니다.", variant: "destructive" });
       }
     } catch (error) {
-      toast({ title: "오류", description: "친구 삭제 중 예외가 발생했습니다.", variant: "destructive" });
+      toast({ title: "오류", description: "친구 삭제 중 예기치 않은 오류가 발생했습니다.", variant: "destructive" });
     } finally {
       setIsDeletingFriend(null);
     }

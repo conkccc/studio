@@ -438,7 +438,7 @@ export async function updateMeetingAction(
         // If locationName is being updated but locationCoordinates is not,
         // and locationName becomes empty, then locationCoordinates should be removed.
         if (!meetingDataToUpdate.locationName) {
-          meetingDataToUpdate.locationCoordinates = deleteField();
+          (meetingDataToUpdate as any).locationCoordinates = deleteField();
         }
         // If locationName is not empty, and coordinates were not in payload, existing coordinates are kept (by initial spread).
         // Or, if new name implies new coords, form should send new coords or undefined.
@@ -448,7 +448,7 @@ export async function updateMeetingAction(
     // Explicitly handle locationCoordinates from payload
     if (payload.hasOwnProperty('locationCoordinates')) {
       if (payload.locationCoordinates === undefined) {
-        meetingDataToUpdate.locationCoordinates = deleteField();
+        (meetingDataToUpdate as any).locationCoordinates = deleteField();
       } else {
         // This will set it to null if payload.locationCoordinates is null, or to the GeoPoint object
         meetingDataToUpdate.locationCoordinates = payload.locationCoordinates;
@@ -465,7 +465,7 @@ export async function updateMeetingAction(
         if (fieldKey === 'endTime') { // endTime can be null
           meetingDataToUpdate[fieldKey] = null;
         } else {
-          meetingDataToUpdate[fieldKey] = deleteField();
+          (meetingDataToUpdate as any)[fieldKey] = deleteField();
         }
       }
     });
