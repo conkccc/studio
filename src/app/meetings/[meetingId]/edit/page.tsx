@@ -6,7 +6,6 @@ import {
   getMeetingByIdAction,
   getFriendsByGroupAction,
   getFriendGroupsForUserAction
-  // getAllUsersAction // CreateMeetingForm에서 allUsers를 직접 사용하지 않으므로 제거
 } from '@/lib/actions';
 import { CreateMeetingForm } from '@/components/meetings/CreateMeetingForm';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
@@ -22,7 +21,7 @@ export default function EditMeetingPage() {
   const params = useParams();
   const router = useRouter();
   const { toast } = useToast();
-  const { appUser, loading: authLoading } = useAuth(); // Use appUser
+  const { appUser, loading: authLoading } = useAuth();
   const meetingId = typeof params.meetingId === 'string' ? params.meetingId : undefined;
 
   const [meetingToEdit, setMeetingToEdit] = useState<Meeting | null>(null);
@@ -40,7 +39,6 @@ export default function EditMeetingPage() {
     }
     setIsLoadingPageData(true);
     try {
-      // Fetch meeting details and groups user has access to
       const [meetingResult, groupsResult] = await Promise.all([
         getMeetingByIdAction(meetingId),
         getFriendGroupsForUserAction(appUser.id),

@@ -19,10 +19,10 @@ import { getMeetingsForUserAction, getAllUsersAction } from '@/lib/actions';
 import { useToast } from '@/hooks/use-toast';
 import Link from 'next/link';
 
-const MEETINGS_PER_PAGE = 9; // 페이지당 모임 수 (예: 3열 레이아웃 기준)
+const MEETINGS_PER_PAGE = 9;
 
 interface MeetingListClientProps {
-  allFriends: Friend[]; // MeetingCard에서 참여자 표시를 위해 필요
+  allFriends: Friend[];
 }
 
 export function MeetingListClient({ allFriends }: MeetingListClientProps) {
@@ -107,7 +107,7 @@ export function MeetingListClient({ allFriends }: MeetingListClientProps) {
     } else {
       current.set("year", year);
     }
-    current.set("page", "1"); // 연도 변경 시 페이지를 1로 리셋
+    current.set("page", "1");
     router.push(`${pathname}?${current.toString()}`);
   };
 
@@ -128,8 +128,6 @@ export function MeetingListClient({ allFriends }: MeetingListClientProps) {
     return meetings;
   }, [meetings, filterType]);
 
-  // appUser는 Firestore 사용자 프로필이며, 역할(role) 확인에 사용됩니다.
-  // currentUser는 Firebase Auth의 사용자 객체로, 로딩 중이거나 로그아웃 상태일 수 있습니다.
   const canCreateMeeting = appUser && (appUser.role === 'user' || appUser.role === 'admin');
 
   return (
@@ -192,7 +190,6 @@ export function MeetingListClient({ allFriends }: MeetingListClientProps) {
                   <ChevronLeft className="h-4 w-4" />
                   이전
                 </Button>
-                {/* Basic pagination display - can be enhanced */}
                 <span className="text-sm text-muted-foreground">
                   {currentPage} / {totalPages}
                 </span>

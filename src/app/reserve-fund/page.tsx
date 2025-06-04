@@ -1,28 +1,13 @@
 'use client';
 
-import { useEffect, useState } from 'react'; // useEffect는 authLoading 감지에만 사용되므로, authLoading 직접 사용 시 useState만 필요할 수 있음.
+import { useState } from 'react';
 import { ReserveFundClient } from '@/components/reserve-fund/ReserveFundClient';
 import { useAuth } from '@/contexts/AuthContext';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
-// 미사용 import 주석 처리 또는 제거
-// import type { ReserveFundTransaction } from '@/lib/types';
-// import { getReserveFundBalance, getLoggedReserveFundTransactions } from '@/lib/data-store';
-// import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
-// import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-// import { useRouter, usePathname } from 'next/navigation';
-
 
 export default function ReserveFundPage() {
   const { currentUser, loading: authLoading } = useAuth();
-
-  // pageReady 상태 및 관련 useEffect 제거하고 authLoading 직접 사용
-  // const [pageReady, setPageReady] = useState(false);
-  // useEffect(() => {
-  //   if (!authLoading) {
-  //     setPageReady(true);
-  //   }
-  // }, [authLoading]);
 
   if (authLoading) {
     return (
@@ -43,9 +28,6 @@ export default function ReserveFundPage() {
       </div>
     );
   }
-
-  // 역할 기반 접근 제어는 ReserveFundClient 내부 또는 AppShell에서 처리.
-  // 이 페이지는 로그인된 사용자는 기본적으로 접근 가능.
 
   return (
     <div className="space-y-6 p-4 md:p-6">

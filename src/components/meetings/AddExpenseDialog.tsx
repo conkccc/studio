@@ -91,7 +91,7 @@ export function AddExpenseDialog({ meetingId, participants, onExpenseAdded, trig
   const watchTotalAmount = form.watch('totalAmount');
 
   React.useEffect(() => {
-    if (open) { // Reset/reinitialize form when dialog opens
+    if (open) {
         form.reset({
             description: '',
             totalAmount: 0,
@@ -119,7 +119,6 @@ export function AddExpenseDialog({ meetingId, participants, onExpenseAdded, trig
       if (result.success && result.expense) {
         toast({ title: '성공', description: '새로운 지출 항목이 추가되었습니다.' });
         onExpenseAdded(result.expense);
-        // Form reset is now handled by useEffect on 'open' state change
         setOpen(false);
       } else {
         toast({
@@ -141,7 +140,6 @@ export function AddExpenseDialog({ meetingId, participants, onExpenseAdded, trig
   return (
     <Dialog open={open} onOpenChange={(isOpen) => {
       setOpen(isOpen);
-      // No explicit form.reset() needed here, useEffect handles it on 'open'
     }}>
       <DialogTrigger asChild>
         {triggerButton ? triggerButton : <Button>새 지출 추가</Button>}

@@ -2,8 +2,6 @@
 
 "use client";
 
-// useEffect, useState는 현재 사용되지 않으므로 React에서 직접 import할 필요가 없습니다.
-// import React, { useState, useEffect } from 'react';
 import { ReserveFundClient } from '@/components/reserve-fund/ReserveFundClient';
 import { useAuth } from '@/contexts/AuthContext';
 import Link from 'next/link';

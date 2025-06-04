@@ -114,7 +114,7 @@ function LocationSearchInput({ form, isPending, isMapsLoaded, mapsLoadError, onL
     setValue: setPlacesValue,
     clearSuggestions: clearPlacesSuggestions,
   } = usePlacesAutocomplete({
-    requestOptions: { /* 필요시 설정 */ },
+    requestOptions: {},
     debounce: 300,
   });
 
@@ -321,7 +321,7 @@ export function CreateMeetingForm({
     if (showMap && isMapsLoaded && !mapsLoadError && mapContainerRef.current && window.google?.maps?.Map && window.google?.maps?.marker?.AdvancedMarkerElement) {
         const { AdvancedMarkerElement } = window.google.maps.marker;
         
-        const defaultCenter = { lat: 37.5665, lng: 126.9780 }; // Seoul
+        const defaultCenter = { lat: 37.5665, lng: 126.9780 };
         const currentCoords = watchedLocationCoordinates || defaultCenter;
         const zoomLevel = watchedLocationCoordinates ? 15 : 10;
 

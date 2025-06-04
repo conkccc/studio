@@ -15,11 +15,6 @@ interface PaymentSummaryProps {
   allFriends: Friend[];
 }
 
-// interface LedgerEntry { // 현재 직접 사용되지 않으므로 제거
-//   friendId: string;
-//   amount: number;
-// }
-
 interface FundPayoutToPayer {
   to: string;
   amount: number;
@@ -48,7 +43,6 @@ export function PaymentSummary({ meeting, expenses, participants, allFriends }: 
 
   const participantIdsInMeeting = useMemo(() => new Set(effectiveParticipants.map(p => p.id)), [effectiveParticipants]);
 
-  // --- 1인당 지출 내역 및 회비 적용 계산 ---
   const perPersonCostDetails = useMemo<{
     totalSpent: number;
     perPersonCost: number;
@@ -77,7 +71,6 @@ export function PaymentSummary({ meeting, expenses, participants, allFriends }: 
       };
     }
 
-    // 회비 적용 인원
     let fundApplicableIds: string[] = participantIds;
     let fundNonApplicableIds: string[] = [];
     if (meeting.useReserveFund && Array.isArray(meeting.nonReserveFundParticipants) && meeting.nonReserveFundParticipants.length > 0) {
@@ -95,7 +88,6 @@ export function PaymentSummary({ meeting, expenses, participants, allFriends }: 
     let fundDescription = '';
     let perFundApplicableCost = 0;
     if (meeting.useReserveFund && meeting.partialReserveFundAmount && meeting.partialReserveFundAmount > 0 && numFundApplicable > 0) {
-      // 회비 적용 인원 총지출
       const fundApplicableTotal = totalSpent - (numFundNonApplicable * perPersonCost);
       fundUsed = Math.min(meeting.partialReserveFundAmount, fundApplicableTotal);
       fundLeft = meeting.partialReserveFundAmount - fundUsed;
@@ -132,15 +124,12 @@ export function PaymentSummary({ meeting, expenses, participants, allFriends }: 
     if (meeting.isTemporary && Array.isArray(meeting.temporaryParticipants) && meeting.temporaryParticipants.length > 0) {
       return expenses.map(e => {
         let newExpense = { ...e };
-        // 결제자 보정
         if (!effectiveParticipants.some(f => f.id === e.paidById)) {
           const found = effectiveParticipants.find(f => f.name === e.paidById);
           if (found) newExpense.paidById = found.id;
         }
-        // 분배자(splitAmongIds) 보정
         if (Array.isArray(e.splitAmongIds)) {
           newExpense.splitAmongIds = e.splitAmongIds.map((idOrName: string) => {
-            // id로 매칭 안되면 name으로 매칭
             const found = effectiveParticipants.find(f => f.id === idOrName || f.name === idOrName);
             return found ? found.id : idOrName;
           });
@@ -152,16 +141,13 @@ export function PaymentSummary({ meeting, expenses, participants, allFriends }: 
   }, [expenses, meeting, effectiveParticipants]);
 
   const settlementSuggestions = useMemo(() => {
-    // 1. 개인별 최종 정산액(finalAmount) 계산
     const people = effectiveParticipants.map(p => {
       const totalPaid = mappedExpenses.filter(e => e.paidById === p.id).reduce((sum, e) => sum + e.totalAmount, 0);
       const shouldPay = perPersonCostDetails.perPersonCostWithFund[p.id] || 0;
       const finalAmount = parseFloat((totalPaid - shouldPay).toFixed(2));
       return { friendId: p.id, finalAmount };
     });
-    // 2. 내림차순 정렬 (많이 받을 사람부터)
     const sorted = [...people].sort((a, b) => b.finalAmount - a.finalAmount);
-    // 3. 회비 지원 송금 제안 (받을 돈이 있는 사람부터 회비에서 지급)
     let fundLeft = perPersonCostDetails.fundUsed;
     const fundPayouts: { to: string; amount: number }[] = [];
     const afterFund: { friendId: string; amount: number }[] = [];
@@ -175,7 +161,6 @@ export function PaymentSummary({ meeting, expenses, participants, allFriends }: 
         afterFund.push({ friendId: person.friendId, amount: person.finalAmount });
       }
     }
-    // 4. 남은 금액 기준으로 일반 송금 제안 (그리디 매칭)
     const receivers = afterFund.filter(p => p.amount > 0.01).sort((a, b) => b.amount - a.amount);
     const senders = afterFund.filter(p => p.amount < -0.01).sort((a, b) => a.amount - b.amount);
     const suggestions: { from: string; to: string; amount: number }[] = [];
@@ -400,8 +385,7 @@ export function PaymentSummary({ meeting, expenses, participants, allFriends }: 
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {/* 회비에서 결제자에게 송금된 내역 먼저 표시 */}
-                        {meeting.useReserveFund && perPersonCostDetails.fundUsed > 0.01 && 
+                        {meeting.useReserveFund && perPersonCostDetails.fundUsed > 0.01 &&
                         settlementSuggestions.fundPayouts.map((debt, index) => (
                           <TableRow key={`fundPayout-${index}`}>
                             <TableCell className="text-muted-foreground">N빵친구 회비</TableCell>

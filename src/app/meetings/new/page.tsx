@@ -22,15 +22,6 @@ export default function NewMeetingPage() {
 
   const [isTemporaryMeeting, setIsTemporaryMeeting] = useState(false);
 
-  // onTemporaryChange prop이 CreateMeetingFormProps에서 제거되었으므로, 이 함수도 제거합니다.
-  // const handleTemporaryChange = (isTemporary: boolean) => {
-  //   setIsTemporaryMeeting(isTemporary);
-  //   if (isTemporary) {
-  //     setSelectedMeetingGroupId(null);
-  //     setFriendsForParticipantSelect([]);
-  //   }
-  // };
-
   useEffect(() => {
     if (authLoading || !appUser?.id) {
       setIsLoadingInitialData(false);
@@ -68,17 +59,6 @@ export default function NewMeetingPage() {
         setFriendsForParticipantSelect([]);
         return;
       }
-      // isTemporaryMeeting 상태는 CreateMeetingForm 내부에서 관리되거나,
-      // 또는 이 페이지 레벨에서 isTemporaryMeeting 상태를 CreateMeetingForm에 전달해야 합니다.
-      // 현재 CreateMeetingForm은 onTemporaryChange를 받지 않으므로,
-      // 친구 목록 로딩은 selectedMeetingGroupId에만 의존하도록 하거나,
-      // CreateMeetingForm으로부터 isTemporary 상태를 받아와야 합니다.
-      // 여기서는 isTemporaryMeeting 상태를 사용하지 않고, 선택된 그룹이 있을 때만 친구를 로드합니다.
-      // (임시 모임일 경우 CreateMeetingForm 내부에서 친구 목록을 비우거나 다르게 처리할 것으로 예상)
-      // if (isTemporaryMeeting) {
-      //   setFriendsForParticipantSelect([]);
-      //   return;
-      // }
 
       setIsLoadingParticipants(true);
       try {
@@ -98,12 +78,12 @@ export default function NewMeetingPage() {
       }
     };
 
-    if (selectedMeetingGroupId) { // 임시 모임 여부와 관계없이 그룹 ID가 있으면 친구 로드 시도
+    if (selectedMeetingGroupId) {
         fetchFriendsForGroup();
     } else {
         setFriendsForParticipantSelect([]);
     }
-  }, [selectedMeetingGroupId, toast]); // isTemporaryMeeting 의존성 제거
+  }, [selectedMeetingGroupId, toast]);
 
 
   if (authLoading || isLoadingInitialData) {
@@ -153,9 +133,8 @@ export default function NewMeetingPage() {
             groups={allOwnedGroups}
             selectedGroupId={selectedMeetingGroupId}
             onGroupChange={setSelectedMeetingGroupId}
-            friends={friendsForParticipantSelect} // isTemporaryMeeting에 따라 friendsForParticipantSelect가 빈 배열일 수 있음
+            friends={friendsForParticipantSelect}
             isLoadingFriends={isLoadingParticipants}
-            // onTemporaryChange={handleTemporaryChange} // Prop 제거
             isEditMode={false}
           />
         </CardContent>

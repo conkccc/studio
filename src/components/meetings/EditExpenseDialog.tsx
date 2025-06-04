@@ -64,10 +64,10 @@ type ExpenseFormData = z.infer<typeof expenseSchema>;
 interface EditExpenseDialogProps {
   expenseToEdit: Expense;
   meetingId: string;
-  participants: Friend[]; // 현재 모임의 참여자 목록
+  participants: Friend[];
   onExpenseUpdated: (updatedExpense: Expense) => void;
   triggerButton?: React.ReactNode;
-  canManage: boolean; // 편집 가능 여부 (ExpenseItem에서 전달)
+  canManage: boolean;
   isMeetingSettled: boolean;
 }
 
@@ -88,25 +88,24 @@ export function EditExpenseDialog({
 
   const form = useForm<ExpenseFormData>({
     resolver: zodResolver(expenseSchema),
-    // 기본값은 다이얼로그가 열릴 때 useEffect에서 expenseToEdit 데이터 기반으로 설정됨
   });
   
   useEffect(() => {
-    if (open) { // 다이얼로그가 열릴 때 현재 expenseToEdit 데이터로 폼 리셋
+    if (open) {
       form.reset({
         description: expenseToEdit.description,
         totalAmount: expenseToEdit.totalAmount,
         paidById: expenseToEdit.paidById,
         splitType: expenseToEdit.splitType,
-        splitAmongIds: expenseToEdit.splitType === 'equally' 
-          ? expenseToEdit.splitAmongIds || participants.map(p => p.id) 
-          : participants.map(p => p.id), // Default to all for custom if not set
-        customSplits: expenseToEdit.splitType === 'custom' 
+        splitAmongIds: expenseToEdit.splitType === 'equally'
+          ? expenseToEdit.splitAmongIds || participants.map(p => p.id)
+          : participants.map(p => p.id),
+        customSplits: expenseToEdit.splitType === 'custom'
           ? participants.map(p => {
               const existingSplit = expenseToEdit.customSplits?.find(cs => cs.friendId === p.id);
               return { friendId: p.id, amount: existingSplit ? existingSplit.amount : 0 };
             })
-          : participants.map(p => ({ friendId: p.id, amount: 0 })), // Default structure for custom
+          : participants.map(p => ({ friendId: p.id, amount: 0 })),
       });
     }
   }, [open, expenseToEdit, participants, form]);
@@ -122,7 +121,7 @@ export function EditExpenseDialog({
         totalAmount: data.totalAmount,
         paidById: data.paidById,
         splitType: data.splitType,
-        splitAmongIds: data.splitType === 'equally' ? data.splitAmongIds : undefined, // Use undefined if not applicable
+        splitAmongIds: data.splitType === 'equally' ? data.splitAmongIds : undefined,
         customSplits: data.splitType === 'custom' ? data.customSplits : undefined,
       };
       const result = await updateExpenseAction(expenseToEdit.id, meetingId, payload, currentUser?.uid || null);
@@ -150,7 +149,6 @@ export function EditExpenseDialog({
   return (
     <Dialog open={open} onOpenChange={(isOpen) => {
         setOpen(isOpen);
-        // useEffect가 'open' 상태에 따라 폼 리셋을 처리하므로 여기서 form.reset() 불필요
     }}>
       <DialogTrigger asChild>
         {triggerButton ? (

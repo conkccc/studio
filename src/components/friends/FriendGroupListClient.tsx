@@ -1,43 +1,40 @@
 'use client';
-import { useEffect, useState, useCallback, useMemo } from 'react'; // Added useMemo
+import { useEffect, useState, useCallback, useMemo } from 'react';
 import {
   createFriendGroupAction,
   deleteFriendGroupAction,
   getFriendGroupsForUserAction,
   getFriendsByGroupAction,
-  deleteFriendAction, // Added this action
-  getAllUsersAction // Import getAllUsersAction
+  deleteFriendAction,
+  getAllUsersAction
 } from '@/lib/actions';
 import type { FriendGroup, User, Friend } from '@/lib/types';
 import { useToast } from '@/hooks/use-toast';
-import { Loader2, Edit, Trash2, PlusCircle, ChevronDown, ChevronRight, UserPlus } from 'lucide-react'; // Added UserPlus
+import { Loader2, Edit, Trash2, PlusCircle, ChevronDown, ChevronRight, UserPlus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useAuth } from '@/contexts/AuthContext';
-import { AddFriendToGroupDialog } from './AddFriendToGroupDialog'; // Import the new dialog
+import { AddFriendToGroupDialog } from './AddFriendToGroupDialog';
 
-// Define a type for groups with added UI-specific flags
 type DisplayFriendGroup = FriendGroup & {
   isOwned: boolean;
   isReferenced: boolean;
 };
 
 export default function FriendGroupListClient() {
-  const { currentUser, appUser, loading: authLoading } = useAuth(); // Added appUser and authLoading
+  const { currentUser, appUser, loading: authLoading } = useAuth();
   const [groups, setGroups] = useState<DisplayFriendGroup[]>([]);
-  const [allUsers, setAllUsers] = useState<User[]>([]); // State for all users
+  const [allUsers, setAllUsers] = useState<User[]>([]);
   const [newGroupName, setNewGroupName] = useState('');
-  const [isLoading, setIsLoading] = useState(true); // For initial group list load
-  const [isSubmitting, setIsSubmitting] = useState(false); // For form submissions
-  const [isDeletingFriend, setIsDeletingFriend] = useState<string | null>(null); // To show loader on specific friend delete button
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isDeletingFriend, setIsDeletingFriend] = useState<string | null>(null);
   const { toast } = useToast();
 
-  // State for selected group and its friends
   const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
   const [friendsInSelectedGroup, setFriendsInSelectedGroup] = useState<Friend[]>([]);
   const [isLoadingFriends, setIsLoadingFriends] = useState(false);
 
-  // State for AddFriendToGroupDialog
   const [isAddFriendDialogOpen, setIsAddFriendDialogOpen] = useState(false);
   const [groupIdForAddingFriend, setGroupIdForAddingFriend] = useState<string | null>(null);
   const [groupNameForAddingFriend, setGroupNameForAddingFriend] = useState<string | undefined>(undefined);
@@ -48,22 +45,21 @@ export default function FriendGroupListClient() {
   }, [groups, selectedGroupId]);
 
 
-  const fetchData = useCallback(async () => { // Renamed to fetchData
+  const fetchData = useCallback(async () => {
     if (authLoading || !currentUser?.uid || !appUser?.id) {
       setIsLoading(false);
       setGroups([]);
-      setAllUsers([]); // Clear allUsers
+      setAllUsers([]);
       return;
     }
     setIsLoading(true);
     try {
       const [groupsRes, usersRes] = await Promise.all([
         getFriendGroupsForUserAction(appUser.id),
-        getAllUsersAction() // Fetch all users
+        getAllUsersAction()
       ]);
 
       if (groupsRes.success && groupsRes.groups) {
-        // getFriendGroupsForUserAction now sets isOwned and isReferenced
         setGroups(groupsRes.groups as DisplayFriendGroup[]);
       } else {
         toast({ title: '오류', description: groupsRes.error || '그룹 목록을 불러오는데 실패했습니다.', variant: 'destructive' });
@@ -84,21 +80,21 @@ export default function FriendGroupListClient() {
     } finally {
       setIsLoading(false);
     }
-  }, [currentUser?.uid, appUser, authLoading, toast]); // appUser.id is part of appUser dependency
+  }, [currentUser?.uid, appUser, authLoading, toast]);
 
   useEffect(() => {
     fetchData();
   }, [fetchData]);
 
   const handleCreateGroup = async () => {
-    if (!newGroupName.trim() || !appUser?.id) return; // Use appUser.id
+    if (!newGroupName.trim() || !appUser?.id) return;
     setIsSubmitting(true);
     try {
-      const res = await createFriendGroupAction(newGroupName, appUser.id); // Use appUser.id
+      const res = await createFriendGroupAction(newGroupName, appUser.id);
       if (res.success) {
         setNewGroupName('');
         toast({ title: '성공', description: '새 그룹이 추가되었습니다.' });
-        await fetchData(); // Refresh the list
+        await fetchData();
       } else {
         toast({ title: '오류', description: res.error || '그룹 추가에 실패했습니다.', variant: 'destructive' });
       }
@@ -110,14 +106,13 @@ export default function FriendGroupListClient() {
   };
 
   const handleDeleteGroup = async (groupId: string) => {
-    if (!appUser?.id) return; // Use appUser.id
+    if (!appUser?.id) return;
     setIsSubmitting(true);
     try {
-      // The deleteFriendGroupAction now includes permission check with currentUserId
-      const res = await deleteFriendGroupAction(groupId, appUser.id); // Use appUser.id
+      const res = await deleteFriendGroupAction(groupId, appUser.id);
       if (res.success) {
         toast({ title: '성공', description: '그룹이 삭제되었습니다.' });
-        await fetchData(); // Refresh the list
+        await fetchData();
       } else {
         toast({ title: '오류', description: res.error || '그룹 삭제에 실패했습니다.', variant: 'destructive' });
       }
@@ -128,15 +123,13 @@ export default function FriendGroupListClient() {
     }
   };
 
-  // Placeholder for edit function
   // const handleEditGroup = (group: DisplayFriendGroup) => {
-  //   // Implement edit functionality, perhaps open a dialog
-  //   console.log("Edit group:", group);
+  // console.log("Edit group:", group);
   // };
 
   const handleSelectGroup = (groupId: string) => {
     if (selectedGroupId === groupId) {
-      setSelectedGroupId(null); // Toggle off if same group is clicked
+      setSelectedGroupId(null);
       setFriendsInSelectedGroup([]);
     } else {
       setSelectedGroupId(groupId);
@@ -189,7 +182,6 @@ export default function FriendGroupListClient() {
 
       if (result.success) {
         toast({ title: "성공", description: `'${friendName}' 친구를 그룹에서 삭제했습니다.` });
-        // Refresh friends list for the current group
         setFriendsInSelectedGroup(prev => prev.filter(f => f.id !== friendId));
       } else {
         toast({ title: "오류", description: result.error || "친구 삭제에 실패했습니다.", variant: "destructive" });
@@ -202,7 +194,7 @@ export default function FriendGroupListClient() {
   };
 
 
-  if (isLoading) { // Initial loading for groups
+  if (isLoading) {
     return <div className="flex justify-center items-center h-32"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>;
   }
 
@@ -210,11 +202,9 @@ export default function FriendGroupListClient() {
     return <p className="text-center text-muted-foreground">로그인이 필요합니다.</p>;
   }
 
-  // Use appUser for role check
   const canCreateGroup = appUser && (appUser.role === 'admin' || appUser.role === 'user');
 
   const ownedGroups = groups.filter(g => g.isOwned);
-  // For admin, all other groups that are not owned by them. For non-admin, groups they are referenced in but don't own.
   const otherGroups = appUser?.role === 'admin'
     ? groups.filter(g => !g.isOwned)
     : groups.filter(g => !g.isOwned && g.isReferenced);
@@ -226,19 +216,16 @@ export default function FriendGroupListClient() {
   };
 
   const handleFriendAdded = (newFriend: Friend) => {
-    // If the new friend was added to the currently selected group, update the list
     if (selectedGroupId === newFriend.groupId) {
       setFriendsInSelectedGroup(prevFriends =>
         [...prevFriends, newFriend].sort((a, b) => a.name.localeCompare(b.name))
       );
     }
-    // Optionally, show a toast or further UI updates
     toast({ title: "성공", description: `그룹 '${groupNameForAddingFriend || selectedGroupId}'에 '${newFriend.name}' 친구를 추가했습니다.` });
   };
 
   return (
     <div className="space-y-6 p-1">
-      {/* Add Friend Dialog */}
       {groupIdForAddingFriend && (
         <AddFriendToGroupDialog
           isOpen={isAddFriendDialogOpen}
@@ -283,13 +270,12 @@ export default function FriendGroupListClient() {
                     {group.name}
                   </button>
                   <div className="flex items-center space-x-1">
-                    {/* Admin: Show owner if not self-owned */}
                     {appUser?.role === 'admin' && !group.isOwned && (
                       <span className="text-xs text-muted-foreground mr-2">
                         (소유자: {allUsers.find(u => u.id === group.ownerUserId)?.name || group.ownerUserId.substring(0,6) + '...'})
                       </span>
                     )}
-                    {(group.isOwned || appUser?.role === 'admin') && ( // Admin can add friends to any group
+                    {(group.isOwned || appUser?.role === 'admin') && (
                        <Button
                         variant="ghost"
                         size="icon"
@@ -301,7 +287,6 @@ export default function FriendGroupListClient() {
                         <UserPlus className="h-4 w-4 text-muted-foreground hover:text-primary" />
                       </Button>
                     )}
-                    {/* Delete button: only for owned groups or if user is admin */}
                     {(group.isOwned || appUser?.role === 'admin') && (
                       <Button variant="ghost" size="icon" className="h-7 w-7" onClick={(e) => { e.stopPropagation(); handleDeleteGroup(group.id);}} disabled={isSubmitting}>
                         {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4 text-destructive" />}
@@ -318,7 +303,6 @@ export default function FriendGroupListClient() {
                         {friendsInSelectedGroup.map(friend => (
                           <li key={friend.id} className="flex justify-between items-center text-sm p-1 hover:bg-muted rounded group">
                             <span>{friend.name} {friend.description && `(${friend.description})`}</span>
-                            {/* Delete Friend Button: Only if group is owned by current user OR current user is admin */}
                             {(currentSelectedGroupObject?.isOwned && appUser && (appUser.role === 'user' || appUser.role === 'admin')) || (appUser?.role === 'admin') ? (
                               <Button
                                 variant="ghost"
@@ -358,13 +342,11 @@ export default function FriendGroupListClient() {
                     {group.name}
                   </button>
                   <div className="flex items-center space-x-1">
-                    {/* Admin: Show owner if not self-owned (already handled for this section by definition of otherGroups for admin) */}
                     {appUser?.role === 'admin' && (
                       <span className="text-xs text-muted-foreground mr-2">
                         (소유자: {allUsers.find(u => u.id === group.ownerUserId)?.name || group.ownerUserId.substring(0,6) + '...'})
                       </span>
                     )}
-                    {/* Admin can add friends to any group */}
                     {appUser?.role === 'admin' && (
                        <Button
                         variant="ghost"
@@ -377,13 +359,11 @@ export default function FriendGroupListClient() {
                         <UserPlus className="h-4 w-4 text-muted-foreground hover:text-primary" />
                       </Button>
                     )}
-                    {/* Admin can delete any group */}
                     {appUser?.role === 'admin' && (
                       <Button variant="ghost" size="icon" className="h-7 w-7" onClick={(e) => { e.stopPropagation(); handleDeleteGroup(group.id);}} disabled={isSubmitting}>
                         {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4 text-destructive" />}
                       </Button>
                     )}
-                    {/* Non-admin, referenced group: read-only indication */}
                     {appUser?.role !== 'admin' && group.isReferenced && !group.isOwned && (
                         <span className="text-xs text-muted-foreground pr-2">(읽기 전용)</span>
                     )}
@@ -398,8 +378,6 @@ export default function FriendGroupListClient() {
                         {friendsInSelectedGroup.map(friend => (
                            <li key={friend.id} className="flex justify-between items-center text-sm p-1 hover:bg-muted rounded group">
                             <span>{friend.name} {friend.description && `(${friend.description})`}</span>
-                            {/* Delete friend button: Only if admin, or if it's an owned group (handled in "내가 만든 그룹" section) */}
-                            {/* For "기타 그룹" section, only admin can delete friends from non-owned groups */}
                             {appUser?.role === 'admin' && (
                               <Button
                                 variant="ghost"

@@ -10,7 +10,7 @@ import {
   getAllUsersAction
 } from '@/lib/actions';
 import {
-  getReserveFundBalanceByGroup,
+  getReserveFundBalance, // 수정된 함수 import
   getLoggedReserveFundTransactionsByGroup
 } from '@/lib/data-store';
 import type { ReserveFundTransaction, FriendGroup, User } from '@/lib/types';
@@ -38,7 +38,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { useAuth } from '@/contexts/AuthContext';
 
-type DisplayFriendGroup = FriendGroup & { isOwned: boolean }; // isReferenced는 현재 사용되지 않으므로 제거 가능성 있음
+type DisplayFriendGroup = FriendGroup & { isOwned: boolean };
 
 const balanceUpdateSchema = z.object({
   newBalance: z.preprocess(
@@ -51,7 +51,7 @@ const balanceUpdateSchema = z.object({
 type BalanceUpdateFormData = z.infer<typeof balanceUpdateSchema>;
 
 export function ReserveFundClient() {
-  const { currentUser, appUser, loading: authLoading } = useAuth(); // Added appUser, authLoading
+  const { currentUser, appUser, loading: authLoading } = useAuth();
   const [accessibleGroups, setAccessibleGroups] = useState<DisplayFriendGroup[]>([]);
   const [allUsers, setAllUsers] = useState<User[]>([]);
   const [selectedGroup, setSelectedGroup] = useState<DisplayFriendGroup | null>(null);
@@ -69,7 +69,6 @@ export function ReserveFundClient() {
     defaultValues: { newBalance: 0, description: '수동 잔액 조정' },
   });
 
-  // Fetch accessible groups and all users
   useEffect(() => {
     if (authLoading || !currentUser?.uid || !appUser?.id) {
       setIsLoadingData(false);
@@ -103,17 +102,17 @@ export function ReserveFundClient() {
   }, [currentUser?.uid, appUser, authLoading, toast]);
 
   useEffect(() => {
-    if (!selectedGroup) {
+    if (!selectedGroup || !selectedGroup.id) {
       setCurrentBalance(null);
       setTransactions([]);
       return;
     }
     setIsLoadingFundDetails(true);
     Promise.all([
-      getReserveFundBalanceByGroup(selectedGroup.id),
+      getReserveFundBalance(selectedGroup.id), // 수정된 함수 호출
       getLoggedReserveFundTransactionsByGroup(selectedGroup.id, 20)
     ]).then(([balanceResult, transactionsResult]) => {
-      setCurrentBalance(balanceResult === null ? 0 : balanceResult); // null 잔액은 UI 및 폼에서 0으로 취급
+      setCurrentBalance(balanceResult === null ? 0 : balanceResult);
       form.reset({ newBalance: balanceResult === null ? 0 : balanceResult, description: '수동 잔액 조정'});
       setTransactions(transactionsResult || []);
     }).catch(() => {
@@ -191,7 +190,6 @@ export function ReserveFundClient() {
     );
   }
 
-  // Simplified main title for cards when a group is selected
   const simpleGroupTitle = selectedGroup ? `${selectedGroup.name} 회비` : "그룹 회비";
 
   return (
@@ -245,7 +243,7 @@ export function ReserveFundClient() {
                     <span className="text-xs">모임에서 회비를 사용하면 이 잔액에서 자동으로 차감됩니다.</span>
                 </CardDescription>
               </div>
-              {canSetBalance && ( // Updated condition here
+              {canSetBalance && (
                 <AlertDialog open={isUpdateDialogOpen} onOpenChange={setIsUpdateDialogOpen}>
                   <AlertDialogTrigger asChild>
                     <Button variant="outline" disabled={isLoadingFundDetails || isSubmitting}>
@@ -293,7 +291,6 @@ export function ReserveFundClient() {
                 </AlertDialog>
               )}
             </CardHeader>
-            {/* Balance display moved to CardDescription */}
           </Card>
 
           <Card className="shadow-md">

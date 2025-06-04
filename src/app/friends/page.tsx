@@ -1,43 +1,11 @@
 'use client';
 import { useEffect, useState } from 'react';
-// import { getFriends } from '@/lib/data-store'; // FriendGroupListClient가 친구 데이터를 로드하므로 제거
 import FriendGroupListClient from '@/components/friends/FriendGroupListClient';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
 import { useAuth } from '@/contexts/AuthContext';
-// import type { Friend } from '@/lib/types'; // FriendGroupListClient가 친구 데이터를 로드하므로 제거
-// 이전 그룹 로직 관련 import들은 이미 제거됨
 
 export default function FriendsPage() {
   const { appUser, loading: authLoading } = useAuth();
-  // const [friends, setFriends] = useState<Friend[]>([]); // FriendGroupListClient로 로직 이동
-  // const [dataLoading, setDataLoading] = useState(true); // FriendGroupListClient로 로직 이동
-
-  // useEffect(() => {
-  //   if (authLoading) {
-  //     // setDataLoading(true); // FriendGroupListClient로 로직 이동
-  //     return;
-  //   }
-  //   if (!appUser) {
-  //     // setDataLoading(false); // FriendGroupListClient로 로직 이동
-  //     // setFriends([]); // FriendGroupListClient로 로직 이동
-  //     return;
-  //   }
-  //   // 전체 친구 목록을 가져오는 로직은 FriendGroupListClient 또는 해당 컴포넌트 내부에서 그룹별로 처리
-  //   // const fetchAllFriends = async () => {
-  //   //   setDataLoading(true);
-  //   //   try {
-  //   //     const fetchedFriends = await getFriends();
-  //   //     setFriends(fetchedFriends);
-  //   //   } catch (error) {
-  //   //     console.error("Failed to fetch friends:", error);
-  //   //     setFriends([]);
-  //   //   } finally {
-  //   //     setDataLoading(false);
-  //   //   }
-  //   // };
-  //   // fetchAllFriends();
-  // }, [authLoading, appUser]);
-
 
   if (authLoading) {
     return (

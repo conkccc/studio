@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState } from 'react'; // 'use' 훅 제거
+import { useEffect, useState } from 'react';
 import { getMeetingByShareToken, getExpensesByMeetingId, getFriends } from '@/lib/data-store';
 import { getAllUsersAction } from '@/lib/actions';
 import { MeetingDetailsClient } from '@/components/meetings/MeetingDetailsClient';
@@ -8,16 +8,13 @@ import { AlertTriangle, ArrowLeft } from 'lucide-react';
 import Link from 'next/link';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import type { Meeting, Expense, Friend, User } from '@/lib/types';
-import { use } from 'react'; // 'use' 훅 다시 추가
+import { use } from 'react';
 
 interface SharedMeetingPageProps {
-  params: Promise<{ token: string }>; // Promise로 변경
+  params: Promise<{ token: string }>;
 }
 
 export default function SharedMeetingPage(props: SharedMeetingPageProps) {
-  // 'use client' 컴포넌트에서 Promise props를 직접 await 할 수 없으므로 use(props.params) 사용
-  // 또는 useEffect 내에서 처리. 여기서는 use(props.params)를 사용해봅니다.
-  // 만약 use(props.params)가 여전히 문제를 일으키면 useEffect 방식으로 돌아갑니다.
   const params = use(props.params);
   const token = params.token;
 

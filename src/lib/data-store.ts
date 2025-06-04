@@ -48,7 +48,7 @@ export const RESERVE_FUND_TRANSACTIONS_COLLECTION = 'reserveFundTransactions';
 
 // Firestore Timestamps를 JS Date 객체로 변환하는 헬퍼 함수
 const convertTimestampsToDates = (data: DocumentData): DocumentData => {
-  const processedData: Record<string, any> = { ...data }; // 'any' 대신 Record<string, any> 사용
+  const processedData: Record<string, any> = { ...data };
   const dateFields: string[] = ['createdAt', 'dateTime', 'endTime', 'date', 'shareExpiryDate'];
 
   for (const field of dateFields) {
@@ -84,7 +84,7 @@ const arrayFromSnapshot = <T extends { id: string }>(snapshot: QuerySnapshot): T
 };
 
 
-// --- User functions ---
+// --- 사용자 관련 함수 ---
 export const getUserById = async (userId: string): Promise<User | undefined> => {
   if (!userId) return undefined;
   const userDocRef = doc(db, USERS_COLLECTION, userId);
@@ -179,7 +179,9 @@ export const deleteFriend = async (id: string): Promise<void> => {
 // 그룹별 친구 목록을 가져오는 함수
 export const getFriendsByGroup = async (groupId: string): Promise<Friend[]> => {
   try {
-    if (!groupId || typeof groupId !== 'string') throw new Error('유효하지 않은 그룹 ID입니다.');
+    if (!groupId || typeof groupId !== 'string') {
+      throw new Error('유효하지 않은 그룹 ID입니다.');
+    }
     const friendsCollectionRef = collection(db, FRIENDS_COLLECTION);
     const q = query(friendsCollectionRef, where('groupId', '==', groupId));
     const snapshot = await getDocs(q);
@@ -187,11 +189,11 @@ export const getFriendsByGroup = async (groupId: string): Promise<Friend[]> => {
     return friends.sort((a, b) => a.name.localeCompare(b.name));
   } catch (err) {
     console.error('getFriendsByGroup 오류:', err);
-    throw err;
+    throw err; // 오류를 다시 throw하여 호출 측에서 처리할 수 있도록 함
   }
 };
 
-// --- Meeting functions ---
+// --- 모임 관련 함수 ---
 interface GetMeetingsParams {
   year?: number;
   limitParam?: number;
@@ -326,15 +328,14 @@ export const getMeetingById = async (id: string): Promise<Meeting | undefined> =
   return dataFromSnapshot<Meeting>(snapshot);
 };
 
-// actions.ts에서 createMeetingAction의 meetingDataToSave 타입과 호환되도록,
-// 또는 db에 저장될 최종 형태와 가깝도록 타입을 정의합니다.
-// 여기서는 DocumentData를 사용하고, 함수 내부에서 필드를 구체적으로 다룹니다.
+// Firestore에 저장될 모임 데이터의 최종 형태에 가깝게 타입을 정의합니다.
+// actions.ts의 createMeetingAction에서 전달되는 payload와 호환됩니다.
 export const addMeeting = async (
   meetingPayloadFromAction: Partial<Omit<Meeting, 'id' | 'createdAt' | 'isSettled' | 'isShareEnabled' | 'shareToken' | 'shareExpiryDate' | 'expenses'>> &
                             { creatorId: string; dateTime: Date | Timestamp }
 ): Promise<Meeting> => {
 
-  const dataToStore: DocumentData = { // 'any' 대신 DocumentData 사용
+  const dataToStore: DocumentData = {
     isSettled: false,
     isShareEnabled: false,
     shareToken: null,
@@ -388,14 +389,14 @@ export const addMeeting = async (
   });
 
   const meetingsCollectionRef = collection(db, MEETINGS_COLLECTION);
-  const docRef = await addDoc(meetingsCollectionRef, dataToStore); // DocumentData로 단언 제거
+  const docRef = await addDoc(meetingsCollectionRef, dataToStore);
   const newMeetingDocSnap = await getDoc(docRef);
   return dataFromSnapshot<Meeting>(newMeetingDocSnap)!;
 };
 
 export const updateMeeting = async (id: string, updates: Partial<Omit<Meeting, 'id' | 'createdAt'>>): Promise<Meeting | null> => {
   const meetingDocRef = doc(db, MEETINGS_COLLECTION, id);
-  const updateData: DocumentData = { ...updates }; // 'any' 대신 DocumentData 사용
+  const updateData: DocumentData = { ...updates };
 
   if (updates.dateTime) {
     updateData.dateTime = Timestamp.fromDate(new Date(updates.dateTime));
@@ -509,26 +510,34 @@ export const deleteExpense = async (meetingId: string, expenseId: string ): Prom
 
 // --- 회비 관련 함수 ---
 export const getReserveFundBalance = async (groupId: string): Promise<number|null> => {
-  if (!groupId) {
-    console.error("getReserveFundBalance: groupId가 제공되지 않았습니다.");
-    return null;
+  if (!groupId || groupId.trim() === '') {
+    console.error("getReserveFundBalance: 유효하지 않은 groupId가 제공되었습니다.");
+    return null; // Promise.resolve(null) 대신 직접 null 반환
   }
   const balanceDocRef = doc(db, RESERVE_FUND_CONFIG_COLLECTION, `balance_${groupId}`);
-  const balanceSnap = await getDoc(balanceDocRef);
-  if (balanceSnap.exists()) {
-    const data = balanceSnap.data();
-    if (typeof data?.balance === 'number') {
-      return data.balance;
-    } else {
-      return null;
-    }
-  }
   try {
-    await setDoc(balanceDocRef, { balance: 0 }, { merge: true });
-    return 0;
+    const balanceSnap = await getDoc(balanceDocRef);
+    if (balanceSnap.exists()) {
+      const data = balanceSnap.data();
+      if (typeof data?.balance === 'number') {
+        return data.balance;
+      } else {
+        console.warn(`getReserveFundBalance: groupId [${groupId}]의 balance 필드가 유효하지 않거나 없습니다. 기본값 0을 반환합니다.`);
+        return 0;
+      }
+    } else {
+      // 잔액 문서가 존재하지 않으면 0을 기본값으로 생성
+      try {
+        await setDoc(balanceDocRef, { balance: 0 }, { merge: true });
+        return 0;
+      } catch (setDocError) {
+        console.error(`getReserveFundBalance: groupId [${groupId}]에 대한 잔액 문서 생성 실패:`, setDocError);
+        return null; // 생성 실패 시 null 반환
+      }
+    }
   } catch (error) {
-      console.error(`그룹 [${groupId}] 회비 잔액 문서 초기화 오류:`, error);
-      return null;
+    console.error(`getReserveFundBalance: groupId [${groupId}]의 잔액 조회 중 오류 발생:`, error);
+    return null; // 오류 발생 시 null 반환
   }
 };
 
@@ -566,16 +575,17 @@ export const dbSetReserveFundBalance = async (groupId: string, newBalance: numbe
 };
 
 export const dbRecordMeetingDeduction = async (groupId: string, meetingId: string, meetingName: string, amountDeducted: number, date: Date, batch?: any): Promise<void> => {
-  if (amountDeducted <= 0.001) return;
+  if (amountDeducted <= 0.001) return; // 매우 작은 금액은 무시 (부동소수점 오차 방지)
 
   const useExistingBatch = !!batch;
   const currentBatch = useExistingBatch ? batch : writeBatch(db);
   const balanceDocRef = doc(db, RESERVE_FUND_CONFIG_COLLECTION, `balance_${groupId}`);
 
+  // 배치 외부에서 실행될 경우, 잔액 문서 존재 여부 확인 및 초기화
   if (!useExistingBatch) {
     const balanceSnap = await getDoc(balanceDocRef);
     if (!balanceSnap.exists()) {
-       currentBatch.set(balanceDocRef, { balance: 0 });
+       currentBatch.set(balanceDocRef, { balance: 0 }); // 존재하지 않으면 0으로 초기화
     }
   }
   currentBatch.update(balanceDocRef, { balance: increment(-amountDeducted) });
@@ -608,34 +618,37 @@ export const dbRevertMeetingDeduction = async (meetingId: string, batch?: any): 
   let groupIdForBalanceUpdate: string | undefined;
 
   if (!snapshot.empty) {
-    const firstTxData = snapshot.docs[0].data() as Partial<ReserveFundTransaction>;
+    const firstTxData = snapshot.docs[0].data() as Partial<ReserveFundTransaction>; // 타입 단언 유지
     groupIdForBalanceUpdate = firstTxData.groupId;
 
     if (!groupIdForBalanceUpdate) {
-      console.error(`dbRevertMeetingDeduction: meetingId ${meetingId}에 대한 트랜잭션 로그에서 groupId를 찾을 수 없습니다.`);
-      return;
+      console.error(`dbRevertMeetingDeduction: meetingId ${meetingId}에 대한 트랜잭션 로그에서 groupId를 찾을 수 없습니다. 회비 복구가 불가능합니다.`);
+      return; // groupId가 없으면 회비 복구 로직 진행 불가
     }
 
     snapshot.forEach(txDoc => {
-      const txData = txDoc.data() as Partial<ReserveFundTransaction>;
+      const txData = txDoc.data() as Partial<ReserveFundTransaction>; // 타입 단언 유지
       if (txData.amount && typeof txData.amount === 'number') {
-        totalRevertedAmount += Math.abs(txData.amount);
+        totalRevertedAmount += Math.abs(txData.amount); // 차감된 금액은 음수이므로 절대값 사용
       }
-      currentBatch.delete(txDoc.ref);
+      currentBatch.delete(txDoc.ref); // 해당 트랜잭션 로그 삭제
     });
 
+    // 복구할 금액이 유의미한 경우에만 잔액 업데이트
     if (totalRevertedAmount > 0.001) {
       const balanceDocRef = doc(db, RESERVE_FUND_CONFIG_COLLECTION, `balance_${groupIdForBalanceUpdate}`);
+      // 배치 외부에서 실행될 경우, 잔액 문서 존재 여부 확인 및 초기화
       if (!useExistingBatch) {
         const balanceSnap = await getDoc(balanceDocRef);
         if (!balanceSnap.exists()) {
-           currentBatch.set(balanceDocRef, { balance: 0 });
+           currentBatch.set(balanceDocRef, { balance: 0 }); // 존재하지 않으면 0으로 초기화
         }
       }
       currentBatch.update(balanceDocRef, { balance: increment(totalRevertedAmount) });
     }
   }
 
+  // 배치 외부에서 실행되었고, 실제로 복구된 금액이 있을 경우에만 커밋
   if (!useExistingBatch && totalRevertedAmount > 0.001) {
     await currentBatch.commit();
   }
@@ -649,41 +662,42 @@ export const getFriendGroupsByUser = async (userId: string): Promise<FriendGroup
 
   const groupsCollectionRef = collection(db, 'friendGroups');
   let allGroups: FriendGroup[] = [];
-  const groupIds = new Set<string>();
+  const groupIdsProcessed = new Set<string>(); // 중복 처리를 위한 Set
 
+  // 사용자가 소유한 그룹 조회
   const ownedGroupsQuery = query(groupsCollectionRef, where('ownerUserId', '==', userId), orderBy('createdAt', 'asc'));
   const ownedGroupsSnapshot = await getDocs(ownedGroupsQuery);
-  const ownedGroups = arrayFromSnapshot<FriendGroup>(ownedGroupsSnapshot);
-  ownedGroups.forEach(group => {
-    if (!groupIds.has(group.id)) {
+  arrayFromSnapshot<FriendGroup>(ownedGroupsSnapshot).forEach(group => {
+    if (!groupIdsProcessed.has(group.id)) {
       allGroups.push(group);
-      groupIds.add(group.id);
+      groupIdsProcessed.add(group.id);
     }
   });
 
-  const friendGroupIds = user?.friendGroupIds?.filter(id => typeof id === 'string' && id.length > 0);
+  // 사용자의 friendGroupIds 필드에 있는 그룹 ID 조회 (참조된 그룹)
+  const friendGroupIdsFromUser = user?.friendGroupIds?.filter(id => typeof id === 'string' && id.length > 0);
 
-  if (friendGroupIds && friendGroupIds.length > 0) {
-    const MAX_IN_QUERIES = 30;
-    const chunks = [];
-    for (let i = 0; i < friendGroupIds.length; i += MAX_IN_QUERIES) {
-      chunks.push(friendGroupIds.slice(i, i + MAX_IN_QUERIES));
+  if (friendGroupIdsFromUser && friendGroupIdsFromUser.length > 0) {
+    const MAX_IN_QUERIES = 30; // Firestore 'in' 쿼리의 최대 항목 수 (최근 30개로 변경됨)
+    const idChunks = [];
+    for (let i = 0; i < friendGroupIdsFromUser.length; i += MAX_IN_QUERIES) {
+      idChunks.push(friendGroupIdsFromUser.slice(i, i + MAX_IN_QUERIES));
     }
 
-    for (const chunk of chunks) {
+    for (const chunk of idChunks) {
       if (chunk.length > 0) {
         const referencedGroupsQuery = query(groupsCollectionRef, where(new FieldPath('__name__'), 'in', chunk));
         const referencedGroupsSnapshot = await getDocs(referencedGroupsQuery);
-        const referencedGroups = arrayFromSnapshot<FriendGroup>(referencedGroupsSnapshot);
-        referencedGroups.forEach(group => {
-          if (!groupIds.has(group.id)) {
+        arrayFromSnapshot<FriendGroup>(referencedGroupsSnapshot).forEach(group => {
+          if (!groupIdsProcessed.has(group.id)) { // 아직 추가되지 않은 그룹만 추가
             allGroups.push(group);
-            groupIds.add(group.id);
+            groupIdsProcessed.add(group.id);
           }
         });
       }
     }
   }
+  // 최종적으로 생성 시간 오름차순으로 정렬
   allGroups.sort((a, b) => (a.createdAt?.getTime() || 0) - (b.createdAt?.getTime() || 0));
   return allGroups;
 };
@@ -691,14 +705,14 @@ export const getFriendGroupsByUser = async (userId: string): Promise<FriendGroup
 export const addFriendGroup = async (groupData: Omit<FriendGroup, 'id' | 'createdAt'>): Promise<FriendGroup> => {
   const newGroupData = {
     ...groupData,
-    createdAt: new Date(),
+    createdAt: new Date(), // 생성 시간 기록
   };
   const groupsCollectionRef = collection(db, 'friendGroups');
   const docRef = await addDoc(groupsCollectionRef, {
     ...newGroupData,
-    createdAt: Timestamp.fromDate(newGroupData.createdAt)
+    createdAt: Timestamp.fromDate(newGroupData.createdAt) // Firestore Timestamp로 변환
   });
-  return { ...newGroupData, id: docRef.id };
+  return { ...newGroupData, id: docRef.id }; // 생성된 ID와 함께 데이터 반환
 };
 
 export const updateFriendGroup = async (id: string, updates: Partial<Omit<FriendGroup, 'id' | 'createdAt'>>): Promise<FriendGroup | null> => {
@@ -711,28 +725,12 @@ export const updateFriendGroup = async (id: string, updates: Partial<Omit<Friend
 export const deleteFriendGroup = async (id: string): Promise<void> => {
   const groupDocRef = doc(db, 'friendGroups', id);
   await deleteDoc(groupDocRef);
+  // TODO: 이 그룹을 참조하는 사용자의 friendGroupIds 필드도 정리해야 할 수 있음 (선택적)
+  // TODO: 이 그룹에 속한 친구들의 groupId 필드도 정리해야 할 수 있음 (선택적)
 };
 
-// --- 그룹별 회비 관리 함수 ---
-export const getReserveFundBalanceByGroup = async (groupId: string): Promise<number|null> => {
-  const balanceDocRef = doc(db, 'reserveFundConfig', `balance_${groupId}`);
-  const balanceSnap = await getDoc(balanceDocRef);
-  if (balanceSnap.exists()) {
-    const data = balanceSnap.data();
-    if (typeof data?.balance === 'number') {
-      return data.balance;
-    } else {
-      return null;
-    }
-  }
-  try {
-    await setDoc(balanceDocRef, { balance: 0 }, { merge: true });
-    return 0;
-  } catch (error) {
-    console.error(`그룹 [${groupId}] 회비 잔액 문서 초기화 오류:`, error);
-    return null;
-  }
-};
+// --- 그룹별 회비 로그 조회 함수 ---
+// getReserveFundBalanceByGroup 함수는 getReserveFundBalance로 통합되었으므로 해당 주석은 제거했습니다.
 
 export const getLoggedReserveFundTransactionsByGroup = async (groupId: string, limitCount: number = 5): Promise<ReserveFundTransaction[]> => {
   const transactionsCollectionRef = collection(db, 'reserveFundTransactions');
@@ -741,10 +739,10 @@ export const getLoggedReserveFundTransactionsByGroup = async (groupId: string, l
   return arrayFromSnapshot<ReserveFundTransaction>(snapshot);
 };
 
-// --- 모든 친구 그룹 조회 함수 ---
+// --- 모든 친구 그룹 조회 (관리자용) ---
 export const dbGetAllFriendGroups = async (): Promise<FriendGroup[]> => {
   const groupsCollectionRef = collection(db, 'friendGroups');
-  const q = query(groupsCollectionRef, orderBy('name', 'asc'));
+  const q = query(groupsCollectionRef, orderBy('name', 'asc')); // 이름순으로 정렬
   const snapshot = await getDocs(q);
   return arrayFromSnapshot<FriendGroup>(snapshot);
 };

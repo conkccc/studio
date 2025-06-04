@@ -28,6 +28,7 @@ import {
   getMeetings as dbGetMeetings, // 새로운 모임 액션을 위한 import
   getUsers as dbGetUsers, // getAllUsersAction을 위한 getUsers import
   getFriendsByGroup as dbGetFriendsByGroup, // 그룹별 친구 목록 조회를 위한 import
+  getFriends as dbGetFriends, // getAllFriendsAction을 위한 import
 } from './data-store';
 import type { Friend, Meeting, Expense, ReserveFundTransaction, User, FriendGroup } from './types';
 import { Timestamp, arrayRemove as firestoreArrayRemove, arrayUnion as firestoreArrayUnion, deleteField } from 'firebase/firestore';
@@ -36,8 +37,8 @@ import { addDays } from 'date-fns';
 import { db } from './firebase';
 import { doc, getDoc, updateDoc } from 'firebase/firestore';
 
-// 타입 정의가 UserRole로 되어있다고 가정합니다. 실제 프로젝트에 맞게 수정 필요.
-type UserRole = 'admin' | 'user' | 'viewer' | 'none'; // 예시 타입
+// 사용자 역할 타입 정의 (실제 프로젝트 환경에 맞게 조정될 수 있음)
+type UserRole = 'admin' | 'user' | 'viewer' | 'none';
 
 interface PermissionCheckOptions {
   requiredRole?: UserRole | UserRole[];
@@ -79,7 +80,7 @@ async function _ensureUserPermission(
 
   if (ownerId && currentUser.id !== ownerId) {
     if (adminCanOverride && currentUser.role === 'admin') {
-      // 관리자는 소유자 검사를 통과
+      // 관리자는 소유자 제한을 우회할 수 있음
     } else {
       return {
         success: false,
@@ -92,7 +93,7 @@ async function _ensureUserPermission(
 }
 
 
-// Friend Actions
+// 친구 관련 액션
 export async function createFriendAction(payload: { name: string; description?: string; groupId: string; currentUserId: string }) {
   const { name, description, groupId, currentUserId } = payload;
 
@@ -104,14 +105,14 @@ export async function createFriendAction(payload: { name: string; description?: 
   }
 
   const permissionCheck = await _ensureUserPermission(currentUserId, {
-    requiredRole: ['user', 'admin'], // 친구를 생성할 수 있는 역할
+    requiredRole: ['user', 'admin'], // 친구 생성에 필요한 역할
     entityName: '친구 추가'
   });
 
   if (!permissionCheck.success) {
     return { success: false, error: permissionCheck.error };
   }
-  const callingUser = permissionCheck.user!; // user가 존재함을 보장 (success 시)
+  const callingUser = permissionCheck.user!; // 권한 검사 성공 시 user 객체가 존재함
 
   try {
     const groupDocRef = doc(db, 'friendGroups', groupId);
@@ -126,10 +127,10 @@ export async function createFriendAction(payload: { name: string; description?: 
       return { success: false, error: "이 그룹에 친구를 추가할 권한이 없습니다." };
     }
 
-    // 1. Add friend document to 'friends' collection
+    // 1. 'friends' 컬렉션에 친구 문서 추가
     const newFriend = await dbAddFriend({ name, description, groupId });
 
-    // 2. Add friend's ID to the group's memberIds array
+    // 2. 그룹의 memberIds 배열에 친구 ID 추가
     await updateDoc(groupDocRef, {
       memberIds: firestoreArrayUnion(newFriend.id)
     });
@@ -157,7 +158,7 @@ export async function getExpensesByMeetingIdAction(meetingId: string) {
 // 모든 친구 목록 가져오기
 export async function getAllFriendsAction() {
   try {
-    const friends = await (await import('./data-store')).getFriends();
+    const friends = await dbGetFriends();
     return { success: true, friends };
   } catch (error) {
     console.error('getAllFriendsAction Error:', error);
@@ -274,7 +275,7 @@ export async function deleteFriendAction(payload: { friendId: string; groupId: s
   }
 
   const permissionCheck = await _ensureUserPermission(currentUserId, {
-    requiredRole: ['user', 'admin'], // 친구를 삭제할 수 있는 역할
+    requiredRole: ['user', 'admin'], // 친구 삭제에 필요한 역할
     entityName: '친구 삭제'
   });
 
@@ -296,15 +297,15 @@ export async function deleteFriendAction(payload: { friendId: string; groupId: s
       return { success: false, error: "친구를 삭제할 권한이 없습니다. 그룹 소유자 또는 관리자만 가능합니다." };
     }
 
-    // 1. Delete friend document (this also handles removing friend from meetings via dbDeleteFriend)
+    // 1. 친구 문서 삭제 (이 함수는 연결된 모임에서도 친구 정보를 제거합니다)
     await dbDeleteFriend(friendId);
 
-    // 2. Remove friendId from the group's memberIds array
+    // 2. 그룹의 memberIds 배열에서 친구 ID 제거
     await updateDoc(groupDocRef, {
       memberIds: firestoreArrayRemove(friendId)
     });
 
-    revalidatePath('/friends'); // Revalidate general friends page/dashboard
+    revalidatePath('/friends'); // 친구 관련 페이지 재검증
     return { success: true };
 
   } catch (error) {
@@ -314,7 +315,7 @@ export async function deleteFriendAction(payload: { friendId: string; groupId: s
   }
 }
 
-// Meeting Actions
+// 모임 관련 액션
 export async function createMeetingAction(
   payload: Omit<Meeting, 'id' | 'createdAt' | 'isSettled' | 'isShareEnabled' | 'shareToken' | 'shareExpiryDate'>,
   currentUserId?: string | null
@@ -365,12 +366,11 @@ export async function createMeetingAction(
       ...(temporaryParticipants !== undefined && { temporaryParticipants }),
     };
 
-    // dbAddMeeting 함수의 첫 번째 파라미터 타입을 사용 (Parameters 유틸리티 타입 활용)
     type AddMeetingPayload = Parameters<typeof dbAddMeeting>[0];
 
     let meetingDataToSave: AddMeetingPayload = {
-      ...meetingDataToSaveBase, // 기본값 및 필수값 포함 (creatorId 등)
-      // isTemporary 값에 따라 추가 필드 조정
+      ...meetingDataToSaveBase, // 기본 및 필수 값 포함 (creatorId 등)
+      // isTemporary 값에 따라 필드 조정이 아래에서 이루어집니다.
     };
 
     if (meetingDataToSave.isTemporary) {
@@ -427,10 +427,10 @@ export async function updateMeetingAction(
   if (!permissionCheck.success) {
     return { success: false, error: permissionCheck.error };
   }
-  // const callingUser = permissionCheck.user!; // 필요시 사용
+  // const callingUser = permissionCheck.user!; // 필요시 사용 가능
 
   try {
-    // 필요한 필드만 payload에서 추출 (isTemporary는 업데이트하지 않는다고 가정)
+    // payload에서 업데이트할 필드들을 추출 (isTemporary는 업데이트하지 않는다고 가정)
     const {
       name, dateTime, groupId, locationName, locationCoordinates,
       participantIds, useReserveFund, nonReserveFundParticipants,
@@ -439,23 +439,23 @@ export async function updateMeetingAction(
       isShareEnabled, shareToken, shareExpiryDate, isSettled
     } = payload;
 
-    // 업데이트할 데이터를 담을 객체 초기화
+    // 업데이트할 데이터를 담을 객체
     const meetingDataToUpdate: Partial<Omit<Meeting, 'id' | 'createdAt'>> = {};
 
-    // isSettled 상태 결정 로직을 먼저 처리
+    // 정산(isSettled) 상태 변경 로직: 회비 설정이 변경되면 정산 상태를 해제해야 할 수 있음
     const reserveFundSettingsChanged = payload.useReserveFund !== undefined ||
                                      payload.partialReserveFundAmount !== undefined ||
                                      payload.nonReserveFundParticipants !== undefined;
 
     if (meetingToUpdate.isSettled && reserveFundSettingsChanged) {
-      await dbRevertMeetingDeduction(id);
+      await dbRevertMeetingDeduction(id); // 기존 정산에 따른 회비 차감액이 있다면 되돌림
       meetingDataToUpdate.isSettled = false;
       revalidatePath('/reserve-fund');
     } else if (payload.hasOwnProperty('isSettled')) {
       meetingDataToUpdate.isSettled = isSettled;
     }
 
-    // 나머지 필드들을 meetingDataToUpdate에 추가 (payload에 해당 속성이 있는 경우에만)
+    // 전달된 payload 속성들만 업데이트 객체에 추가
     if (payload.hasOwnProperty('name')) meetingDataToUpdate.name = name;
     if (payload.hasOwnProperty('dateTime')) meetingDataToUpdate.dateTime = dateTime;
     if (payload.hasOwnProperty('groupId')) meetingDataToUpdate.groupId = groupId;
@@ -532,7 +532,7 @@ export async function updateMeetingAction(
     revalidatePath('/meetings');
     revalidatePath(`/meetings/${id}`);
     revalidatePath('/');
-    // isSettled 상태가 false로 변경된 경우 또는 payload에 isSettled가 명시적으로 false로 온 경우 reserve-fund 경로도 revalidate
+    // 정산 상태가 false로 변경되었거나, payload에서 isSettled가 명시적으로 false로 전달된 경우 회비 관련 경로 재검증
     if ( (meetingToUpdate.isSettled && reserveFundSettingsChanged) || (payload.isSettled === false && meetingDataToUpdate.isSettled === false) ) {
       revalidatePath('/reserve-fund');
     }
@@ -561,7 +561,7 @@ export async function deleteMeetingAction(id: string, currentUserId?: string | n
   }
 
   try {
-    await dbDeleteMeeting(id); // This now also reverts fund deduction
+    await dbDeleteMeeting(id); // 이 함수는 회비 차감액 되돌리기를 포함
     revalidatePath('/meetings');
     revalidatePath('/');
     revalidatePath('/reserve-fund');
@@ -573,7 +573,7 @@ export async function deleteMeetingAction(id: string, currentUserId?: string | n
   }
 }
 
-// Expense Actions
+// 지출 관련 액션
 export async function createExpenseAction(expenseData: Omit<Expense, 'id' | 'createdAt'>, currentUserId?: string | null) {
   const permissionCheck = await _ensureUserPermission(currentUserId);
   if (!permissionCheck.success) {
@@ -696,7 +696,7 @@ export async function deleteExpenseAction(expenseId: string, meetingId: string, 
   }
 }
 
-// Reserve Fund Actions
+// 회비 관련 액션
 export async function setReserveFundBalanceAction(groupId: string, newBalance: number, description?: string, currentUserId?: string | null) {
   if (!groupId) {
     return { success: false, error: "그룹 ID가 필요합니다." };
@@ -712,7 +712,7 @@ export async function setReserveFundBalanceAction(groupId: string, newBalance: n
     let hasPermission = false;
     if (callingUser.role === 'admin') {
       hasPermission = true;
-    } else if (callingUser.role === 'user') { // 'user' 역할만 그룹 소유자 확인
+    } else if (callingUser.role === 'user') { // 'user' 역할 사용자는 그룹 소유자인지 확인
       const groupDocRef = doc(db, 'friendGroups', groupId);
       const groupSnap = await getDoc(groupDocRef);
       if (groupSnap.exists()) {
@@ -729,7 +729,7 @@ export async function setReserveFundBalanceAction(groupId: string, newBalance: n
 
     await dbSetReserveFundBalance(groupId, newBalance, description || "수동 잔액 조정");
     revalidatePath('/reserve-fund');
-    revalidatePath('/'); // Dashboard shows reserve balance
+    revalidatePath('/'); // 대시보드 등 회비 잔액을 표시하는 페이지 재검증
     return { success: true, newBalance };
   } catch (error) {
     console.error("setReserveFundBalanceAction Error:", error);
@@ -747,7 +747,7 @@ export async function finalizeMeetingSettlementAction(meetingId: string, current
   if (!permissionCheck.success) {
     return { success: false, error: permissionCheck.error };
   }
-  // const callingUser = permissionCheck.user!; // 필요시 사용
+  // const callingUser = permissionCheck.user!; // 현재는 사용되지 않음, 필요시 활용
 
   try {
     const meeting = await dbGetMeetingById(meetingId);
@@ -769,11 +769,11 @@ export async function finalizeMeetingSettlementAction(meetingId: string, current
        revalidatePath('/');
        return { success: true, meeting: updatedMeeting, message: `모임 (${meeting.name}) 정산 확정. 지출 내역이 없어 회비는 사용되지 않았습니다.` };
     }
-    
-    // getReserveFundBalance는 이제 groupId를 필수로 받으므로, meeting.groupId를 사용합니다.
+
+    // meeting.groupId를 사용하여 해당 그룹의 회비 잔액을 가져옴
     const currentReserveBalance = await getReserveFundBalance(meeting.groupId);
     const amountToDeduct = meeting.partialReserveFundAmount;
-    
+
     let message = "";
     let actualDeduction = 0;
 
@@ -824,7 +824,7 @@ export async function finalizeMeetingSettlementAction(meetingId: string, current
   }
 }
 
-// User Role Management Action
+// 사용자 역할 관리 액션
 export async function updateUserRoleAction(userIdToUpdate: string, newRole: User['role'], currentAdminId?: string | null) {
   if (userIdToUpdate === currentAdminId) {
     return { success: false, error: "자신의 역할은 변경할 수 없습니다." };
@@ -838,7 +838,7 @@ export async function updateUserRoleAction(userIdToUpdate: string, newRole: User
   if (!permissionCheck.success) {
     return { success: false, error: permissionCheck.error };
   }
-  // const adminUser = permissionCheck.user!; // 필요시 사용
+  // const adminUser = permissionCheck.user!; // 현재는 사용되지 않음, 필요시 활용
 
   try {
     const updatedUser = await dbUpdateUser(userIdToUpdate, { role: newRole });
@@ -854,7 +854,7 @@ export async function updateUserRoleAction(userIdToUpdate: string, newRole: User
   }
 }
 
-// Meeting Share Action
+// 모임 공유 액션
 export async function toggleMeetingShareAction(meetingId: string, currentUserId: string, enable: boolean, expiryDays: number = 7) {
   const permissionCheck = await _ensureUserPermission(currentUserId, { entityName: '공유 설정 변경' });
   if (!permissionCheck.success) {
@@ -908,7 +908,7 @@ export async function toggleMeetingShareAction(meetingId: string, currentUserId:
   }
 }
 
-// --- 친구 그룹 액션 ---
+// 친구 그룹 관련 액션
 export async function createFriendGroupAction(
   name: string,
   currentUserId: string,
@@ -922,10 +922,10 @@ export async function createFriendGroupAction(
   if (!permissionCheck.success) {
     return { success: false, error: permissionCheck.error };
   }
-  // const currentUser = permissionCheck.user!; // _ensureUserPermission이 user 객체를 반환하므로 필요시 사용
+  // const currentUser = permissionCheck.user!; // 현재는 사용되지 않음, _ensureUserPermission이 user 객체를 반환
 
   try {
-    // 역할 검사는 _ensureUserPermission에서 이미 처리됨
+    // 역할 검사는 _ensureUserPermission에서 이미 처리되었음
     const newGroup = await dbAddFriendGroup({ name, ownerUserId: currentUserId, memberIds });
     revalidatePath('/friends');
     revalidatePath('/meetings/new');
@@ -1097,8 +1097,11 @@ export async function getFriendGroupsForUserAction(currentUserId: string) {
 export async function getFriendsByGroupAction(groupId: string) {
   try {
     const friends = await dbGetFriendsByGroup(groupId);
+    // friends가 undefined일 경우를 대비하여 빈 배열로 기본값 설정
     return { success: true, friends: friends ?? [] };
   } catch (error) {
-    return { success: false, error: '그룹별 친구 목록 조회에 실패했습니다.' };
+    console.error(`getFriendsByGroupAction Error for groupId ${groupId}:`, error);
+    const errorMessage = error instanceof Error ? error.message : '그룹별 친구 목록 조회 중 알 수 없는 오류가 발생했습니다.';
+    return { success: false, error: errorMessage };
   }
 }

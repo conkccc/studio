@@ -31,9 +31,9 @@ const friendSchema = z.object({
 type FriendFormData = z.infer<typeof friendSchema>;
 
 export interface AddFriendDialogProps {
-  triggerButton?: React.ReactNode; // Optional custom trigger
-  onFriendAdded?: (friend: Friend) => void; // Callback after successful addition, type changed to Friend
-  groupId?: string; // 그룹별 친구 추가 지원
+  triggerButton?: React.ReactNode;
+  onFriendAdded?: (friend: Friend) => void;
+  groupId?: string;
 }
 
 export function AddFriendDialog({ triggerButton, onFriendAdded, groupId }: AddFriendDialogProps) {
@@ -56,7 +56,7 @@ export function AddFriendDialog({ triggerButton, onFriendAdded, groupId }: AddFr
       toast({ title: '오류', description: '그룹이 선택되지 않았습니다.', variant: 'destructive' });
       return;
     }
-    if (!appUser?.id) { // 사용자 ID 확인
+    if (!appUser?.id) {
       toast({ title: '오류', description: '사용자 정보를 찾을 수 없습니다. 다시 로그인해주세요.', variant: 'destructive' });
       return;
     }
@@ -70,8 +70,8 @@ export function AddFriendDialog({ triggerButton, onFriendAdded, groupId }: AddFr
       if (result.success) {
         toast({ title: '성공', description: '새로운 친구가 추가되었습니다.' });
         form.reset();
-        setOpen(false); // 성공 시 다이얼로그 닫기 (새로고침 전)
-        router.refresh(); // 현재 라우트의 서버 데이터 새로고침
+        setOpen(false);
+        router.refresh();
         if (onFriendAdded && result.friend) {
           onFriendAdded(result.friend);
         }

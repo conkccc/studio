@@ -29,14 +29,14 @@ import { Button } from '@/components/ui/button';
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
-import type { User } from '@/lib/types'; // Import User type
+import type { User } from '@/lib/types';
 
 interface NavItem {
   href: string;
   label: string;
   icon: React.ElementType;
   matchExact?: boolean;
-  allowedRoles?: Array<User['role'] | 'authenticatedUser'>; // 'authenticatedUser' for any logged-in user
+  allowedRoles?: Array<User['role'] | 'authenticatedUser'>;
 }
 
 const navItems: NavItem[] = [
@@ -69,7 +69,7 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   const signOutUser = async () => {
     await signOut();
-    handleClose(); // Ensure sidebar closes after sign out attempt
+    handleClose();
   };
 
   useEffect(() => {
@@ -97,13 +97,13 @@ export function AppShell({ children }: { children: ReactNode }) {
     <SidebarMenu>
       {navItems
         .filter(item => {
-          if (loading || !appUser) return false; // Don't render if loading or no appUser
-          if (userRole === 'none') return false; // Hide all operational items for 'none' role
+          if (loading || !appUser) return false;
+          if (userRole === 'none') return false;
 
-          if (!item.allowedRoles) { // If no specific roles defined, show to any authenticated user (excluding 'none')
+          if (!item.allowedRoles) {
             return true;
           }
-          if (item.allowedRoles.includes('authenticatedUser')) { // Generic authenticated check
+          if (item.allowedRoles.includes('authenticatedUser')) {
             return true;
           }
           return item.allowedRoles.includes(appUser.role);
@@ -113,26 +113,23 @@ export function AppShell({ children }: { children: ReactNode }) {
           return (
             <SidebarMenuItem key={item.href}>
               <SidebarMenuButton
-                asChild={!isSheetContext} // Link is child only in desktop sidebar
+                asChild={!isSheetContext}
                 isActive={isActive}
                 className="w-full"
                 tooltip={isMobile ? undefined : item.label}
                 onClick={() => {
-                  if (isSheetContext) { // In mobile sheet, button itself handles navigation via router.push
+                  if (isSheetContext) {
                     router.push(item.href);
                   }
-                  handleClose(); // Always close on click
+                  handleClose();
                 }}
               >
                 {isSheetContext ? (
-                  // Mobile: Button contains icon and text directly
                   <div className="flex w-full items-center gap-2 text-sm">
                     <item.icon aria-hidden="true" className="h-5 w-5 shrink-0" />
                     <span className="truncate">{item.label}</span>
                   </div>
                 ) : (
-                  // Desktop: Button wraps Link (asChild=true implicitly by not being isSheetContext)
-                  // So, Link becomes the actual button content
                   <Link href={item.href} className="flex w-full items-center gap-2">
                     <item.icon aria-hidden="true" />
                     <span>{item.label}</span>
@@ -145,17 +142,15 @@ export function AppShell({ children }: { children: ReactNode }) {
     </SidebarMenu>
   );
 
-  // --- 인증/권한 리디렉션 useEffect로 일원화 ---
   useEffect(() => {
-    // 로그인 페이지, 공유 페이지는 예외
     if (
-      isClient && // Ensure this runs only on the client
+      isClient &&
       !loading &&
       (!currentUser || userRole === 'none') &&
       pathname !== '/login' &&
       !pathname.startsWith('/share/meeting')
     ) {
-      router.replace('/login'); // window.location.replace 대신 router.replace 사용
+      router.replace('/login');
     }
   }, [currentUser, userRole, pathname, loading, isClient, router]);
 
@@ -167,23 +162,13 @@ export function AppShell({ children }: { children: ReactNode }) {
     );
   }
 
-  // Refined condition to explicitly check for 'none' role
   const canShowAppShell = currentUser && userRole !== null && userRole !== 'none';
 
-  if (pathname === '/login' && !canShowAppShell) { // If on login page and CANNOT show shell (e.g. already logged in with valid role)
-     // This case might need review: if already logged in with valid role, /login should redirect to /
-     // If currentUser exists and role is valid, canShowAppShell would be true.
-     // If !canShowAppShell is due to loading, the loading screen handles it.
-     // If !canShowAppShell is due to !currentUser or role=='none', then login page should render.
-     // The existing logic: "if on login page AND we are NOT in a state to show the app shell" -> render children (login form)
-     // This seems okay. If canShowAppShell is true while on /login, user should be redirected away from login.
+  if (pathname === '/login' && !canShowAppShell) {
     return <main className="flex-1">{children}</main>;
   }
 
-  // If not on a public path and cannot show app shell (e.g. no user, or role is 'none' after loading)
   if (!canShowAppShell && pathname !== '/login' && !pathname.startsWith('/share/meeting')) {
-    // This state should ideally be brief as the useEffect for redirection will trigger.
-    // Showing "리디렉션 중..." is a good fallback.
     return (
       <div className="flex justify-center items-center min-h-screen">
         <p>리디렉션 중...</p>
@@ -191,16 +176,8 @@ export function AppShell({ children }: { children: ReactNode }) {
     );
   }
 
-  // If canShowAppShell is false (e.g. user is null or role is 'none')
-  // AND current path IS one of the public paths (login, share), then children should render without full shell.
-  // However, the main layout below is guarded by canShowAppShell for sidebar and main content structure.
-  // This means if canShowAppShell is false, the main layout with sidebar won't render.
-  // The login page case is handled above. For share/meeting, it might need special handling if it uses this shell.
-  // For now, the logic seems to protect rendering children within the full authed shell.
-
   return (
     <div className="flex min-h-screen w-full bg-muted/40">
-      {/* Sidebar is only rendered if canShowAppShell is true */}
       {!isMobile && canShowAppShell && (
         <Sidebar collapsible="icon" variant="sidebar" side="left" className="border-r group/sidebar">
           <SidebarHeader className="p-4">
@@ -314,7 +291,6 @@ export function AppShell({ children }: { children: ReactNode }) {
             </Button>
           )}
           <div className="flex-1">
-            {/* 데스크탑 헤더의 추가 컨텐츠 영역 (필요시 사용) */}
           </div>
         </header>
         <main className="flex-1 p-4 sm:p-6">

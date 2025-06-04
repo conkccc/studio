@@ -5,8 +5,8 @@ import React, { useState, useTransition, Fragment, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useToast } from '@/hooks/use-toast';
-import { updateFriendAction, deleteFriendAction, getFriendsByGroupAction } from '@/lib/actions'; // Consolidated imports
-import { useAuth } from '@/contexts/AuthContext'; // Import useAuth
+import { updateFriendAction, deleteFriendAction, getFriendsByGroupAction } from '@/lib/actions';
+import { useAuth } from '@/contexts/AuthContext';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -23,7 +23,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 
 interface FriendListClientProps {
   initialFriends: Friend[];
-  onFriendAdded?: () => void; // 이 prop은 FriendListByGroup에서 친구 추가 후 목록 새로고침에 사용됨
+  onFriendAdded?: () => void;
   onFriendDeleted?: (friendId: string) => void;
 }
 
@@ -38,14 +38,6 @@ export function FriendListClient({ initialFriends, isReadOnly = false, onFriendA
   useEffect(() => {
     setFriends(initialFriends);
   }, [initialFriends]);
-
-  // onFriendAdded prop은 FriendListByGroup 컴포넌트 레벨에서 친구 추가 후 데이터를 다시 불러오는 용도로 사용되므로,
-  // FriendListClient 내부에서 initialFriends 변경 감지로 onFriendAdded를 호출하는 useEffect는 제거합니다.
-  // useEffect(() => {
-  //   if (onFriendAdded) {
-  //     onFriendAdded();
-  //   }
-  // }, [initialFriends, onFriendAdded]);
 
   const handleEdit = (friend: Friend) => {
     setEditingFriendId(friend.id);
@@ -212,7 +204,6 @@ export function FriendListByGroup({ groupId, isReadOnly = false }: FriendListByG
   const [friends, setFriends] = useState<Friend[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // 친구 추가 후 즉시 목록 갱신을 위한 핸들러
   const handleFriendAdded = () => {
     setLoading(true);
     getFriendsByGroupAction(groupId).then(res => {

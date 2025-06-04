@@ -18,7 +18,6 @@ export default function MeetingsPage() {
       setDataLoading(true);
       return;
     }
-    // MeetingCard가 참여자 이름 등을 표시하기 위해 allFriends 목록을 필요로 할 수 있습니다.
     if (currentUser) {
       const fetchAllFriends = async () => {
         setDataLoading(true);
@@ -60,17 +59,6 @@ export default function MeetingsPage() {
     );
   }
 
-  // Viewer role check: Viewers cannot access the main meetings management page directly
-  // This specific check might be too restrictive depending on whether viewers should see *any* list here.
-  // The MeetingListClient itself will filter based on refFriendGroupIds for viewers.
-  // If viewers should not even see the page structure, this check is fine.
-  // However, the original requirement was that MeetingListClient handles data fetching based on role.
-  // So, perhaps a viewer *can* see this page, but MeetingListClient will show them a limited view.
-  // For now, let's assume viewers *can* access the page, and MeetingListClient does the data scoping.
-  // The original page had a check for `!(isAdmin || userRole === 'user')`.
-  // 역할 기반 접근 제어는 MeetingListClient 내부 또는 AppShell에서 처리될 수 있습니다.
-  // 이 페이지 자체는 로그인된 사용자는 접근 가능하도록 합니다.
-
   return (
     <div className="space-y-6 p-4 md:p-6">
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
@@ -80,12 +68,9 @@ export default function MeetingsPage() {
             지난 모임을 확인하고 새로운 모임을 만드세요.
           </p>
         </div>
-        {/* "새 모임 만들기" 버튼은 MeetingListClient 내부에 역할 기반으로 표시됩니다. */}
       </div>
 
-      {/* MeetingListClient는 자체적으로 모임 데이터를 가져오고 로딩 상태를 관리합니다. */}
-      {/* MeetingCard에서 친구 이름을 표시하기 위해 allFriends prop을 전달합니다. */}
-      { dataLoading && !allFriends.length ? ( // allFriends 로딩 중일 때만 별도 로딩 표시
+      { dataLoading && !allFriends.length ? (
          <div className="flex justify-center items-center min-h-[200px]">
             <p className="text-muted-foreground">친구 목록 로딩중...</p>
          </div>

@@ -40,7 +40,7 @@ import Link from 'next/link';
 import { cn } from '@/lib/utils';
 import { Loader } from '@googlemaps/js-api-loader';
 import { Accordion, AccordionItem, AccordionTrigger, AccordionContent } from '@/components/ui/accordion';
-import type { User } from '@/lib/types'; // Import User type
+import type { User } from '@/lib/types';
 
 const googleMapsLibraries: ("places" | "maps" | "marker")[] = ["places", "maps", "marker"];
 
@@ -48,7 +48,7 @@ interface MeetingDetailsClientProps {
   initialMeeting: Meeting;
   initialExpenses: Expense[];
   allFriends: Friend[];
-  allUsers: User[]; // Added allUsers prop
+  allUsers: User[];
   isReadOnlyShare?: boolean;
 }
 
@@ -56,7 +56,7 @@ export function MeetingDetailsClient({
   initialMeeting,
   initialExpenses,
   allFriends,
-  allUsers, // Destructure allUsers
+  allUsers,
   isReadOnlyShare = false,
 }: MeetingDetailsClientProps) {
   const [meeting, setMeeting] = useState<Meeting>(initialMeeting);
@@ -68,19 +68,17 @@ export function MeetingDetailsClient({
   const [shareEnabled, setShareEnabled] = useState(initialMeeting.isShareEnabled || false);
   const [selectedExpiryDays, setSelectedExpiryDays] = useState<string>(
     initialMeeting.shareExpiryDate && initialMeeting.dateTime
-      ? Math.max(1, differenceInCalendarDays(initialMeeting.shareExpiryDate, new Date())).toString() // Ensure at least 1 day if date is in past
-      : "7" // Default to 7 days
+      ? Math.max(1, differenceInCalendarDays(initialMeeting.shareExpiryDate, new Date())).toString()
+      : "7"
   );
   const [currentShareLink, setCurrentShareLink] = useState<string | null>(null);
   const [isShareSettingsSaving, setIsShareSettingsSaving] = useState(false);
 
   const { toast } = useToast();
   const router = useRouter();
-  const { appUser, currentUser, isAdmin, userRole } = useAuth(); // Destructure appUser
-  const isCreator = appUser?.id === meeting.creatorId; // Use appUser.id for creator check
-  // userRole: 'admin' | 'user' | 'none' | 'viewer'
+  const { appUser, currentUser, isAdmin, userRole } = useAuth();
+  const isCreator = appUser?.id === meeting.creatorId;
 
-  // 권한 플래그: user도 모든 정보는 볼 수 있으나, 수정/삭제/추가 등은 불가
   const canManageMeetingActions = (isAdmin || isCreator) && !isReadOnlyShare;
   const canManageExpenses = (isAdmin || isCreator) && !isReadOnlyShare;
   const canFinalize = isAdmin && meeting.useReserveFund && meeting.partialReserveFundAmount && meeting.partialReserveFundAmount > 0 && !meeting.isSettled && expenses.length > 0 && !isReadOnlyShare;
@@ -129,8 +127,8 @@ export function MeetingDetailsClient({
         if (diffDays >= 90) setSelectedExpiryDays("90");
         else if (diffDays >= 30) setSelectedExpiryDays("30");
         else if (diffDays >= 7) setSelectedExpiryDays("7");
-        else if (diffDays > 0) setSelectedExpiryDays(diffDays.toString()); // For custom or very near expiry
-        else setSelectedExpiryDays("7"); // Default or if expired
+        else if (diffDays > 0) setSelectedExpiryDays(diffDays.toString());
+        else setSelectedExpiryDays("7");
     } else {
         setSelectedExpiryDays("7");
     }
@@ -168,7 +166,6 @@ export function MeetingDetailsClient({
       const { AdvancedMarkerElement } = window.google.maps.marker;
       const currentCoords = meeting.locationCoordinates!;
 
-      // 항상 새로 생성
       mapInstanceRef.current = new window.google.maps.Map(mapContainerRef.current, {
         center: currentCoords,
         zoom: 15,
@@ -182,7 +179,6 @@ export function MeetingDetailsClient({
         title: meeting.locationName || '선택된 장소',
       });
     } else if (!showMap) {
-      // 숨길 때 ref 초기화
       if (markerInstanceRef.current) {
         markerInstanceRef.current.map = null;
         markerInstanceRef.current = null;
@@ -193,7 +189,7 @@ export function MeetingDetailsClient({
     }
   }, [showMap, isMapsLoaded, meeting.locationCoordinates, meeting.locationName]);
 
-  const participants = useMemo(() => // This is for regular meetings
+  const participants = useMemo(() =>
     meeting.participantIds
       .map(id => allFriends.find(f => f.id === id))
       .filter((f): f is Friend => Boolean(f)),
@@ -204,11 +200,11 @@ export function MeetingDetailsClient({
   const displayParticipants = useMemo(() => {
     if (meeting.isTemporary) {
       return meeting.temporaryParticipants?.map((p, index) => ({
-        id: `temp_${index}_${p.name}`, // Synthetic ID for UI key/selection
+        id: `temp_${index}_${p.name}`,
         name: p.name,
         description: '',
-        groupId: meeting.groupId, // Associate with the meeting's group if any
-        createdAt: new Date(), // Placeholder
+        groupId: meeting.groupId,
+        createdAt: new Date(),
       })) || [];
     }
     return participants;
@@ -223,7 +219,6 @@ export function MeetingDetailsClient({
         name += " (나)";
       }
     } else if (appUser && appUser.id === meeting.creatorId) {
-      // Fallback if creator is not in allUsers but is the current user
       name = (appUser.name || appUser.email || appUser.id.substring(0,6)) + " (나)";
     }
     return name;
@@ -375,7 +370,6 @@ export function MeetingDetailsClient({
               <CardDescription className="text-base mt-1">
                 만든이: {creatorName}
               </CardDescription>
-              {/* Share Expiry Date Display Logic */}
               {(() => {
                 if (!meeting || !meeting.isShareEnabled) {
                   return null;
@@ -400,7 +394,7 @@ export function MeetingDetailsClient({
                     return <p className="text-sm text-gray-600 mt-2">공유 마감: {format(expiryDate, 'yyyy년 MM월 dd일 HH:mm', { locale: ko })}</p>;
                   }
                 } else {
-                  return null; // No valid expiry date to display
+                  return null;
                 }
               })()}
             </div>
@@ -468,8 +462,6 @@ export function MeetingDetailsClient({
                       size="sm"
                       className="sm:w-auto"
                       onClick={() => {
-                        //const coords = meeting.locationCoordinates!;
-                        //const url = `https://www.google.com/maps/search/?api=1&query=${coords.lat},${coords.lng}`;
                         const url = `https://www.google.com/maps/search/?api=1&query=${meeting.locationName}`;
                         window.open(url, '_blank', 'noopener,noreferrer');
                       }}
@@ -478,7 +470,6 @@ export function MeetingDetailsClient({
                     </Button>
                   </div>
                 )}
-                {/* 지도 보기 토글 시 지도 표시 */}
                 {meeting.locationCoordinates && showMap && (
                   <div
                     ref={mapContainerRef}
@@ -501,7 +492,6 @@ export function MeetingDetailsClient({
               </div>
             </div>
           </div>
-          {/* Participant Info Display */}
           <div className="flex items-start gap-2">
             <UsersIcon className="h-5 w-5 mt-0.5 text-primary flex-shrink-0" />
             <div>
@@ -530,7 +520,6 @@ export function MeetingDetailsClient({
             </div>
           </div>
 
-          {/* Fee Info Display */}
           {meeting.isTemporary ? (
             <div className="p-3 bg-secondary/30 rounded-md border text-sm space-y-1">
               <div className="flex items-center gap-2">
@@ -584,7 +573,6 @@ export function MeetingDetailsClient({
             </div>
           )}
 
-          {/* Memo Section */}
           {(meeting.memo && meeting.memo.trim() !== '' && (
               <div className="mt-6">
                 <Label className="font-medium">메모</Label>
@@ -685,7 +673,7 @@ export function MeetingDetailsClient({
                 {canManageExpenses && (
                   <AddExpenseDialog
                     meetingId={meeting.id}
-                    participants={displayParticipants} // Use displayParticipants
+                    participants={displayParticipants}
                     onExpenseAdded={handleExpenseAdded}
                     triggerButton={
                       <Button variant="outline" size="sm" disabled={isDeleting || isFinalizing || (meeting.isSettled && !isAdmin) || isReadOnlyUser}>
@@ -705,8 +693,8 @@ export function MeetingDetailsClient({
                         key={expense.id}
                         expense={expense}
                         meetingId={meeting.id}
-                        allFriends={allFriends} // allFriends might be needed if paidById can be a real friend
-                        participants={displayParticipants} // Use displayParticipants for consistency
+                        allFriends={allFriends}
+                        participants={displayParticipants}
                         onExpenseUpdated={handleExpenseUpdated}
                         onExpenseDeleted={handleExpenseDeleted}
                         isMeetingSettled={meeting.isSettled || false}
@@ -731,13 +719,11 @@ export function MeetingDetailsClient({
                 </CardDescription>
               ) : (
                 <>
-                  {/* Finalize button and related descriptions for regular meetings */}
-                  {canManageExpenses && !meeting.isSettled && !isReadOnlyShare && ( // Ensure !isReadOnlyShare for finalize button container
+                  {canManageExpenses && !meeting.isSettled && !isReadOnlyShare && (
                     <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-                      {canFinalize && ( // canFinalize already includes !isReadOnlyShare
+                      {canFinalize && (
                         <AlertDialog>
                           <AlertDialogTrigger asChild>
-                            {/* meeting.isTemporary check is technically redundant here due to outer if, but kept for safety/clarity */}
                             <Button disabled={isFinalizing || isDeleting || meeting.isTemporary} size="sm">
                               {isFinalizing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <CheckCircle2 className="mr-2 h-4 w-4" />}
                               정산 확정 및 회비 사용 기록
@@ -772,7 +758,6 @@ export function MeetingDetailsClient({
                         <AlertCircle className="h-4 w-4"/> 지출 내역이 없어 회비 사용을 확정할 수 없습니다.
                     </CardDescription>
                   )}
-                  {/* Display if meeting is settled without reserve fund usage (for regular meetings) */}
                   {!meeting.useReserveFund && meeting.isSettled && !isReadOnlyShare && (
                      <CardDescription className="text-green-600 flex items-center gap-1 mt-2">
                         <CheckCircle2 className="h-4 w-4"/> 이 모임의 정산이 완료되었습니다 (회비 미사용).

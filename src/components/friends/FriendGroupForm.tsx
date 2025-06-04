@@ -1,8 +1,8 @@
 import { useState } from 'react';
 import { createFriendGroupAction } from '@/lib/actions';
-import { Input } from '@/components/ui/input'; // Input 컴포넌트 import
-import { Button } from '@/components/ui/button'; // Button 컴포넌트 import
-import { Loader2 } from 'lucide-react'; // 로딩 스피너 import
+import { Input } from '@/components/ui/input';
+import { Button } from '@/components/ui/button';
+import { Loader2 } from 'lucide-react';
 
 interface FriendGroupFormProps {
   userId: string;

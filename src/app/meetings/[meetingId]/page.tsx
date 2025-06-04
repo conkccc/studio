@@ -30,10 +30,6 @@ export default async function MeetingDetailPage({ params: paramsPromise }: { par
   const initialExpenses = expensesResult.success && expensesResult.expenses ? expensesResult.expenses : [];
   const allFriends = friendsResult.success && friendsResult.friends ? friendsResult.friends : [];
   
-  // MeetingDetailsClient는 클라이언트 컴포넌트이며, 내부에서 useAuth를 통해 appUser/currentUser 정보를 가져와 사용합니다.
-  // 서버 컴포넌트인 이 페이지에서는 인증 정보를 직접 MeetingDetailsClient에 prop으로 내릴 필요는 없습니다.
-  // (단, MeetingDetailsClient가 서버에서만 알 수 있는 추가적인 사용자 관련 정보가 필요하다면 여기서 전달해야 함)
-
   return (
     <div className="space-y-6">
       <MeetingDetailsClient

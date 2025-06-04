@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button';
 import { UsersRound, CalendarCheck, PiggyBank, ArrowRight, LineChart, Briefcase, Info } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useEffect, useState } from 'react';
-import { getReserveFundBalanceByGroup } from '@/lib/data-store';
+import { getReserveFundBalance } from '@/lib/data-store';
 import { getMeetingsForUserAction } from '@/lib/actions';
 import type { Meeting } from '@/lib/types';
 
@@ -43,10 +43,9 @@ export default function DashboardPage() {
         if (meetingsResult.success && meetingsResult.meetings && meetingsResult.meetings.length > 0) {
           setRecentMeetings(meetingsResult.meetings);
 
-          // For simplicity, show reserve balance of the group of the very latest meeting if it exists
           const latestMeetingForBalance = meetingsResult.meetings[0];
           if (latestMeetingForBalance && latestMeetingForBalance.groupId) {
-            const groupReserveBalance = await getReserveFundBalanceByGroup(latestMeetingForBalance.groupId);
+            const groupReserveBalance = await getReserveFundBalance(latestMeetingForBalance.groupId);
             setReserveBalance(groupReserveBalance);
           } else {
             setReserveBalance(null);
@@ -91,8 +90,6 @@ export default function DashboardPage() {
   });
 
   const renderMeetingSummary = (meeting: Meeting): string => {
-    // Placeholder: 실제 지출 요약은 비동기적으로 가져와야 합니다.
-    // 현재는 모임 이름과 날짜, 정산 상태만 표시합니다.
     return `모임 '${meeting.name}' (${new Date(meeting.dateTime).toLocaleDateString()}) ${meeting.isSettled ? '(정산 완료)' : '(정산 필요)'}`;
   };
 
@@ -126,7 +123,6 @@ export default function DashboardPage() {
         </section>
       )}
       
-      {/* Recent Activity Section - visible to admin, user, viewer but content filtered by getMeetingsForUserAction */}
       {appUser && appUser.role !== 'none' && (
         <section className="mb-12">
           <Card>
@@ -160,9 +156,6 @@ export default function DashboardPage() {
                 )}
               </div>
 
-              {/* Reserve balance display can remain if relevant, or be conditional on selected group for non-admins */}
-              {/* For simplicity, if user is admin, this could be total balance or a specific group's balance */}
-              {/* If user is not admin, this part might be less relevant or show balance of a default/primary group */}
               {isAdmin && reserveBalance !== null && (
                  <div>
                   <h3 className="font-semibold mb-1 text-lg">특정 그룹 회비 잔액 (예시)</h3>

@@ -3,7 +3,7 @@ import Link from 'next/link';
 import type { Meeting, Friend, User } from '@/lib/types';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { CalendarDays, MapPin, Users, ArrowRight } from 'lucide-react'; // Info 아이콘 제거
+import { CalendarDays, MapPin, Users, ArrowRight } from 'lucide-react';
 import { format, differenceInCalendarDays, isValid } from 'date-fns';
 import { ko } from 'date-fns/locale';
 import { useAuth } from '@/contexts/AuthContext';
@@ -21,10 +21,9 @@ export function MeetingCard({ meeting, allFriends, allUsers }: MeetingCardProps)
   const participants = meeting.participantIds
     .map(id => {
       const f = allFriends.find(f => f.id === id);
-      // Assuming participantIds are friend IDs.
       return f ? f.name + (f.description ? ` (${f.description})` : '') : undefined;
     })
-    .filter((name): name is string => Boolean(name)); // 타입 단언 대신 타입 가드 사용
+    .filter((name): name is string => Boolean(name));
 
   const creatorName = useMemo(() => {
     const creator = allUsers.find(user => user.id === meeting.creatorId);
@@ -34,7 +33,6 @@ export function MeetingCard({ meeting, allFriends, allUsers }: MeetingCardProps)
       }
       return creator.name || '이름 없음';
     }
-    // Fallback if creator not found in allUsers or creatorId is somehow missing
     return meeting.creatorId ? `ID: ${meeting.creatorId.substring(0, 6)}...` : '알 수 없음';
   }, [meeting.creatorId, allUsers, appUser]);
 

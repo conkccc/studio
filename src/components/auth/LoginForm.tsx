@@ -7,7 +7,6 @@ import { auth } from '@/lib/firebase';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/hooks/use-toast';
 import { useRouter } from 'next/navigation';
-// import { useAuth } from '@/contexts/AuthContext'; // 현재 사용되지 않음
 
 export function LoginForm() {
   const [isLoading, setIsLoading] = useState(false);
@@ -19,9 +18,8 @@ export function LoginForm() {
     const provider = new GoogleAuthProvider();
     try {
       await signInWithPopup(auth, provider);
-      // 로그인 성공 후의 처리는 AuthContext 및 페이지/컴포넌트 레벨에서 이루어집니다.
       toast({ title: '로그인 성공', description: '대시보드로 이동합니다.' });
-      router.push('/'); 
+      router.push('/');
     } catch (error) {
       console.error("Google login error:", error);
       const errorMessage = error instanceof Error ? error.message : 'Google 로그인 중 오류가 발생했습니다.';
