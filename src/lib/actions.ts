@@ -26,6 +26,7 @@ import {
   getFriendGroupsByUser as dbGetFriendGroupsByUser,
   dbGetAllFriendGroups,
   getMeetings as dbGetMeetings, // Import for the new meeting action
+  getUsers as dbGetUsers, // Import getUsers for getAllUsersAction
 } from './data-store';
 import type { Friend, Meeting, Expense, ReserveFundTransaction, User, FriendGroup } from './types';
 import { Timestamp, arrayRemove as firestoreArrayRemove, arrayUnion as firestoreArrayUnion } from 'firebase/firestore'; // Added firestoreArrayUnion
@@ -83,6 +84,17 @@ export async function createFriendAction(payload: { name: string; description?: 
     console.error("createFriendAction Error:", error);
     const errorMessage = error instanceof Error ? error.message : '친구 추가 중 오류가 발생했습니다.';
     return { success: false, error: errorMessage };
+  }
+}
+
+export async function getAllUsersAction() {
+  try {
+    const users = await dbGetUsers(); // Use imported getUsers (aliased as dbGetUsers or directly)
+    return { success: true, users };
+  } catch (error) {
+    console.error('getAllUsersAction Error:', error);
+    const errorMessage = error instanceof Error ? error.message : '모든 사용자 목록을 가져오는데 실패했습니다.';
+    return { success: false, error: errorMessage, users: [] };
   }
 }
 

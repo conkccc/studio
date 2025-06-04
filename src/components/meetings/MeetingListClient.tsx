@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
-import type { Meeting, Friend, User } from '@/lib/types'; // Added User
+import type { Meeting, Friend, User } from '@/lib/types';
 import { MeetingCard } from './MeetingCard';
 import { useRouter, usePathname, useSearchParams } from 'next/navigation';
 import {
@@ -13,20 +13,19 @@ import {
 } from "@/components/ui/select";
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Button } from '@/components/ui/button';
-import { ChevronLeft, ChevronRight, PlusCircle, Loader2 } from 'lucide-react'; // Added icons
-import { useAuth } from '@/contexts/AuthContext'; // Corrected path
-import { getMeetingsForUserAction } from '@/lib/actions'; // Assuming this action will be created
+import { ChevronLeft, ChevronRight, PlusCircle, Loader2 } from 'lucide-react';
+import { useAuth } from '@/contexts/AuthContext';
+import { getMeetingsForUserAction, getAllUsersAction } from '@/lib/actions'; // Added getAllUsersAction
 import { useToast } from '@/hooks/use-toast';
 import Link from 'next/link'; // For "새 모임 만들기" button
 
 const MEETINGS_PER_PAGE = 9; // Example: 9 meetings per page for a 3-col layout
 
 interface MeetingListClientProps {
-  allFriends: Friend[]; // Keep allFriends if MeetingCard needs it directly
+  allFriends: Friend[]; // Keep allFriends as MeetingCard uses it for participants display
 }
 
 export function MeetingListClient({ allFriends }: MeetingListClientProps) {
-  // Destructure loading as authLoading to distinguish from internal isLoading state
   const { currentUser, loading: authLoading, appUser } = useAuth();
   const router = useRouter();
   const pathname = usePathname();
@@ -34,6 +33,7 @@ export function MeetingListClient({ allFriends }: MeetingListClientProps) {
   const { toast } = useToast();
 
   const [meetings, setMeetings] = useState<Meeting[]>([]);
+  const [allUsers, setAllUsers] = useState<User[]>([]); // State for all users
   const [isLoading, setIsLoading] = useState(true);
   const [availableYears, setAvailableYears] = useState<number[]>([]);
   const [totalPages, setTotalPages] = useState(0);
@@ -47,55 +47,60 @@ export function MeetingListClient({ allFriends }: MeetingListClientProps) {
 
   const [filterType, setFilterType] = useState<'all' | 'regular' | 'temporary'>('all');
 
-  const fetchMeetings = useCallback(async () => {
-    // Guard against fetching if auth is loading, or if currentUser/appUser is not yet available.
-    // Prefer appUser.id if available and if action expects our internal User ID structure,
-    // but getMeetingsForUserAction is designed to take requestingUserId (which can be uid) and fetch appUser itself.
-    // So, currentUser.uid is fine.
+  const fetchData = useCallback(async () => { // Renamed from fetchMeetings to fetchData
     if (authLoading || !currentUser?.uid) {
-      setIsLoading(false); // Ensure loading is false if we return early
+      setIsLoading(false);
       setMeetings([]);
+      setAllUsers([]); // Clear allUsers as well
       setTotalPages(0);
       setAvailableYears([]);
       return;
     }
     setIsLoading(true);
     try {
-      // If activeYear is "all" (selected from dropdown), yearToFetch is undefined.
-      // Otherwise, it's the selected year number.
-      const yearToFetch = activeYear === "all"
-        ? undefined
-        : parseInt(activeYear, 10); // activeYear can now be "2024" or "all"
+      const yearToFetch = activeYear === "all" ? undefined : parseInt(activeYear, 10);
 
-      const result = await getMeetingsForUserAction({
-        requestingUserId: currentUser.uid,
-        year: yearToFetch,
-        page: currentPage,
-        limitParam: MEETINGS_PER_PAGE,
-      });
+      // Fetch meetings and all users in parallel
+      const [meetingsResult, usersResult] = await Promise.all([
+        getMeetingsForUserAction({
+          requestingUserId: currentUser.uid,
+          year: yearToFetch,
+          page: currentPage,
+          limitParam: MEETINGS_PER_PAGE,
+        }),
+        getAllUsersAction() // Fetch all users
+      ]);
 
-      if (result.success) {
-        setMeetings(result.meetings || []);
-        setTotalPages(Math.ceil((result.totalCount || 0) / MEETINGS_PER_PAGE));
-        setAvailableYears(result.availableYears || []);
+      if (meetingsResult.success) {
+        setMeetings(meetingsResult.meetings || []);
+        setTotalPages(Math.ceil((meetingsResult.totalCount || 0) / MEETINGS_PER_PAGE));
+        setAvailableYears(meetingsResult.availableYears || []);
       } else {
-        toast({ title: "오류", description: result.error || "모임 목록을 불러오는데 실패했습니다.", variant: "destructive" });
+        toast({ title: "오류", description: meetingsResult.error || "모임 목록을 불러오는데 실패했습니다.", variant: "destructive" });
         setMeetings([]);
         setTotalPages(0);
       }
+
+      if (usersResult.success) {
+        setAllUsers(usersResult.users || []);
+      } else {
+        toast({ title: "오류", description: usersResult.error || "사용자 목록을 불러오는데 실패했습니다.", variant: "destructive" });
+        setAllUsers([]);
+      }
+
     } catch (e) {
-      toast({ title: "오류", description: "모임 목록 로딩 중 예기치 않은 오류 발생.", variant: "destructive" });
+      toast({ title: "오류", description: "데이터 로딩 중 예기치 않은 오류 발생.", variant: "destructive" });
       setMeetings([]);
+      setAllUsers([]);
       setTotalPages(0);
     } finally {
       setIsLoading(false);
     }
-  }, [currentUser, authLoading, activeYear, currentPage, toast]); // Added authLoading to dependencies
+  }, [currentUser, authLoading, activeYear, currentPage, toast]);
 
   useEffect(() => {
-    // fetchMeetings will now internally check for currentUser and authLoading
-    fetchMeetings();
-  }, [fetchMeetings]); // fetchMeetings itself is memoized with correct dependencies
+    fetchData(); // Call renamed function
+  }, [fetchData]);
 
   const handleYearChange = (year: string) => {
     const current = new URLSearchParams(Array.from(searchParams.entries()));
@@ -175,8 +180,7 @@ export function MeetingListClient({ allFriends }: MeetingListClientProps) {
           <>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 pt-4">
               {clientFilteredMeetings.map((meeting) => (
-                // MeetingCard uses its own useAuth() hook, so no need to pass currentUser or appUser from here.
-                <MeetingCard key={meeting.id} meeting={meeting} allFriends={allFriends} />
+                <MeetingCard key={meeting.id} meeting={meeting} allFriends={allFriends} allUsers={allUsers} />
               ))}
             </div>
             {totalPages > 1 && (

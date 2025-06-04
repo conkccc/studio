@@ -1,6 +1,6 @@
 'use client';
 import Link from 'next/link';
-import type { Meeting, Friend } from '@/lib/types';
+import type { Meeting, Friend, User } from '@/lib/types'; // Import User
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { CalendarDays, MapPin, Users, ArrowRight, Info } from 'lucide-react';
@@ -11,26 +11,32 @@ import { useMemo } from 'react';
 
 interface MeetingCardProps {
   meeting: Meeting;
-  allFriends: Friend[];
+  allFriends: Friend[]; // For participant display
+  allUsers: User[];   // For creator display
 }
 
-export function MeetingCard({ meeting, allFriends }: MeetingCardProps) {
-  const { currentUser, isAdmin } = useAuth();
+export function MeetingCard({ meeting, allFriends, allUsers }: MeetingCardProps) {
+  const { appUser } = useAuth(); // Use appUser for current logged-in user details
 
   const participants = meeting.participantIds
     .map(id => {
       const f = allFriends.find(f => f.id === id);
+      // Assuming participantIds are friend IDs. If they are user IDs, this should use allUsers.
       return f ? f.name + (f.description ? ` (${f.description})` : '') : undefined;
     })
-    .filter(Boolean); 
+    .filter(Boolean) as string[];
 
   const creatorName = useMemo(() => {
-    if (currentUser && meeting.creatorId === currentUser.uid && isAdmin) {
-      return '관리자 (나)';
+    const creator = allUsers.find(user => user.id === meeting.creatorId);
+    if (creator) {
+      if (appUser && appUser.id === creator.id) {
+        return `${creator.name || '이름 없음'} (나)`;
+      }
+      return creator.name || '이름 없음';
     }
-    const creatorFriend = allFriends.find(f => f.id === meeting.creatorId);
-    return creatorFriend ? creatorFriend.name + (creatorFriend.description ? ` (${creatorFriend.description})` : '') : '관리자';
-  }, [meeting.creatorId, allFriends, currentUser, isAdmin]);
+    // Fallback if creator not found in allUsers or creatorId is somehow missing
+    return meeting.creatorId ? `ID: ${meeting.creatorId.substring(0, 6)}...` : '알 수 없음';
+  }, [meeting.creatorId, allUsers, appUser]);
 
 
   const formatDate = () => {
