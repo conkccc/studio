@@ -1,43 +1,27 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-// getFriends might still be used for admin, getFriendGroupsByUser is used
-import { getFriends } from '@/lib/data-store';
-// Assuming getFriendsByGroupAction exists for fetching friends of a specific group
 import { getFriendGroupsForUserAction, getFriendsByGroupAction } from '@/lib/actions';
 import { CreateMeetingForm } from '@/components/meetings/CreateMeetingForm';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
-import { useToast } from '@/hooks/use-toast'; // For error notifications
+import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/AuthContext';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import type { Friend, FriendGroup } from '@/lib/types';
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
-import { ChevronsUpDown, Check } from 'lucide-react';
-import { cn } from '@/lib/utils';
 
 export default function NewMeetingPage() {
-  const { currentUser, appUser, isAdmin, userRole, loading: authLoading } = useAuth(); // Use appUser for id
-  const { toast } = useToast(); // For error notifications
+  const { currentUser, appUser, isAdmin, userRole, loading: authLoading } = useAuth();
+  const { toast } = useToast();
 
   const [allOwnedGroups, setAllOwnedGroups] = useState<FriendGroup[]>([]);
   const [selectedMeetingGroupId, setSelectedMeetingGroupId] = useState<string | null>(null);
   const [friendsForParticipantSelect, setFriendsForParticipantSelect] = useState<Friend[]>([]);
-  const [isLoadingInitialData, setIsLoadingInitialData] = useState(true); // For groups and initial friends (if any)
-  const [isLoadingParticipants, setIsLoadingParticipants] = useState(false); // For friends of selected group
+  const [isLoadingInitialData, setIsLoadingInitialData] = useState(true);
+  const [isLoadingParticipants, setIsLoadingParticipants] = useState(false);
 
   const [isTemporaryMeeting, setIsTemporaryMeeting] = useState(false);
 
-  const handleTemporaryChange = (isTemporary: boolean) => {
-    setIsTemporaryMeeting(isTemporary);
-    if (isTemporary) {
-      setSelectedMeetingGroupId(null); // Clear group selection if switching to temporary
-      setFriendsForParticipantSelect([]); // Clear participant list
-    }
-  };
-
-  // Fetch initial data: groups for the dropdown
   useEffect(() => {
     if (authLoading || !appUser?.id) {
       setIsLoadingInitialData(false);
@@ -50,8 +34,8 @@ export default function NewMeetingPage() {
         const groupResponse = await getFriendGroupsForUserAction(appUser.id);
         if (groupResponse.success && groupResponse.groups) {
           if (appUser.role === 'admin') {
-            setAllOwnedGroups(groupResponse.groups); // Admin sees all accessible groups in dropdown
-          } else { // 'user' or 'viewer' (though viewer shouldn't be here)
+            setAllOwnedGroups(groupResponse.groups);
+          } else {
             setAllOwnedGroups(groupResponse.groups.filter(g => g.ownerUserId === appUser.id));
           }
         } else {
@@ -69,19 +53,9 @@ export default function NewMeetingPage() {
     fetchInitialData();
   }, [authLoading, appUser, toast]);
 
-
-  // Fetch friends when selectedMeetingGroupId changes
   useEffect(() => {
     const fetchFriendsForGroup = async () => {
       if (!selectedMeetingGroupId) {
-        // If no group is selected, or if it's a temporary meeting,
-        // participant list should be empty or handled by CreateMeetingForm based on its 'friends' prop.
-        // For non-temporary meetings, if no group is selected, users might not be able to pick participants
-        // until a group is chosen.
-        setFriendsForParticipantSelect([]);
-        return;
-      }
-      if (isTemporaryMeeting) { // No specific group friends for temporary meetings.
         setFriendsForParticipantSelect([]);
         return;
       }
@@ -104,8 +78,12 @@ export default function NewMeetingPage() {
       }
     };
 
-    fetchFriendsForGroup();
-  }, [selectedMeetingGroupId, isTemporaryMeeting, toast]);
+    if (selectedMeetingGroupId) {
+        fetchFriendsForGroup();
+    } else {
+        setFriendsForParticipantSelect([]);
+    }
+  }, [selectedMeetingGroupId, toast]);
 
 
   if (authLoading || isLoadingInitialData) {
@@ -119,16 +97,15 @@ export default function NewMeetingPage() {
   if (!currentUser && process.env.NEXT_PUBLIC_DEV_MODE_SKIP_AUTH !== "true") { 
     return (
       <div className="container mx-auto py-8 text-center">
-        <h1 className="text-2xl font-bold mb-4">로그인 필요</h1>
-        <p className="text-muted-foreground mb-6">새 모임을 만들려면 로그인이 필요합니다.</p>
-        <Button asChild>
+        <h1 className="text-2xl font-bold mb-4">로그인이 필요합니다</h1>
+        <p className="text-muted-foreground">새 모임을 만들려면 로그인이 필요합니다.</p>
+         <Button asChild className="mt-4">
           <Link href="/login">로그인 페이지로 이동</Link>
         </Button>
       </div>
     );
   }
   
-  // Allow 'admin' or 'user' to access this page
   if (!(isAdmin || userRole === 'user')) {
     return (
       <div className="container mx-auto py-8 text-center">
@@ -141,7 +118,7 @@ export default function NewMeetingPage() {
     );
   }
 
-  const currentUserId = appUser!.id; // appUser is confirmed to exist here due to authLoading/!appUser checks
+  const currentUserId = appUser!.id;
 
   return (
     <div className="max-w-2xl mx-auto">
@@ -153,13 +130,12 @@ export default function NewMeetingPage() {
         <CardContent>
           <CreateMeetingForm
             currentUserId={currentUserId}
-            groups={allOwnedGroups} // Groups for the dropdown in the form
-            selectedGroupId={selectedMeetingGroupId} // To control the form's group selection
-            onGroupChange={setSelectedMeetingGroupId} // Callback for when group selection changes in form
-            friends={isTemporaryMeeting ? [] : friendsForParticipantSelect} // Friends for participant selection
-            isLoadingFriends={isLoadingParticipants} // Loading state for friends list
-            onTemporaryChange={handleTemporaryChange}
-            isEditMode={false} // Explicitly set for clarity
+            groups={allOwnedGroups}
+            selectedGroupId={selectedMeetingGroupId}
+            onGroupChange={setSelectedMeetingGroupId}
+            friends={friendsForParticipantSelect}
+            isLoadingFriends={isLoadingParticipants}
+            isEditMode={false}
           />
         </CardContent>
       </Card>

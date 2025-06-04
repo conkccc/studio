@@ -1,17 +1,17 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import { useAuth } from '@/contexts/AuthContext'; // Corrected path
+import { useAuth } from '@/contexts/AuthContext';
 import { getUsers } from '@/lib/data-store';
-import { getAllFriendGroupsAction } from '@/lib/actions'; // Assuming this action exists
-import type { User, FriendGroup } from '@/lib/types'; // Added FriendGroup
+import { getAllFriendGroupsAction } from '@/lib/actions';
+import type { User, FriendGroup } from '@/lib/types';
 import { UserListClient } from '@/components/users/UserListClient';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 
 export default function UsersPage() {
-  const { currentUser, isAdmin, loading: authLoading } = useAuth(); // userRole not directly used here
+  const { currentUser, isAdmin, loading: authLoading } = useAuth();
   const [users, setUsers] = useState<User[]>([]);
   const [allFriendGroups, setAllFriendGroups] = useState<FriendGroup[]>([]);
   const [dataLoading, setDataLoading] = useState(true);
@@ -31,17 +31,15 @@ export default function UsersPage() {
     const fetchData = async () => {
       setDataLoading(true);
       try {
-        // Fetch users
         const fetchedUsers = await getUsers();
         setUsers(fetchedUsers);
 
-        // Fetch all friend groups - only if admin
-        const groupsResult = await getAllFriendGroupsAction(); // Assuming this action exists
+        const groupsResult = await getAllFriendGroupsAction();
         if (groupsResult.success && groupsResult.groups) {
           setAllFriendGroups(groupsResult.groups);
         } else {
           console.error("Failed to fetch all friend groups:", groupsResult.error);
-          setAllFriendGroups([]); // Set to empty array on error
+          setAllFriendGroups([]);
         }
       } catch (error) {
         console.error("Failed to fetch data for users page:", error);
@@ -54,7 +52,6 @@ export default function UsersPage() {
     fetchData();
   }, [authLoading, isAdmin, currentUser]);
 
-  // Combined loading state check
   if (authLoading || (isAdmin && dataLoading)) {
     return (
       <div className="flex justify-center items-center min-h-[calc(100vh-150px)]">
@@ -87,7 +84,7 @@ export default function UsersPage() {
         <CardContent>
           <UserListClient
             initialUsers={users}
-            currentAdminId={currentUser?.uid || ''} // Corrected to currentUser.uid for FirebaseUser
+            currentAdminId={currentUser?.uid || ''}
             isAdmin={isAdmin}
             allFriendGroups={allFriendGroups}
           />

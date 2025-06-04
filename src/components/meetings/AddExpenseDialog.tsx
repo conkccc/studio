@@ -21,7 +21,7 @@ import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover
 import { Check, ChevronsUpDown, Loader2 } from 'lucide-react';
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { cn } from '@/lib/utils';
-import { useAuth } from '@/contexts/AuthContext'; // For currentUserId
+import { useAuth } from '@/contexts/AuthContext';
 
 const expenseSchema = z.object({
   description: z.string().min(1, '설명을 입력해주세요.').max(100, '설명은 100자 이내여야 합니다.'),
@@ -73,7 +73,7 @@ export function AddExpenseDialog({ meetingId, participants, onExpenseAdded, trig
   const [isPending, startTransition] = useTransition();
   const { toast } = useToast();
   const [payerSearchOpen, setPayerSearchOpen] = useState(false);
-  const { currentUser } = useAuth(); // For currentUserId
+  const { currentUser } = useAuth();
 
   const form = useForm<ExpenseFormData>({
     resolver: zodResolver(expenseSchema),
@@ -91,7 +91,7 @@ export function AddExpenseDialog({ meetingId, participants, onExpenseAdded, trig
   const watchTotalAmount = form.watch('totalAmount');
 
   React.useEffect(() => {
-    if (open) { // Reset/reinitialize form when dialog opens
+    if (open) {
         form.reset({
             description: '',
             totalAmount: 0,
@@ -119,7 +119,6 @@ export function AddExpenseDialog({ meetingId, participants, onExpenseAdded, trig
       if (result.success && result.expense) {
         toast({ title: '성공', description: '새로운 지출 항목이 추가되었습니다.' });
         onExpenseAdded(result.expense);
-        // Form reset is now handled by useEffect on 'open' state change
         setOpen(false);
       } else {
         toast({
@@ -131,7 +130,7 @@ export function AddExpenseDialog({ meetingId, participants, onExpenseAdded, trig
     });
   };
 
-  const formatNumber = (value: number | string) => {
+  const formatNumber = (value: number | string): string => {
     if (typeof value === 'number') return value.toLocaleString();
     if (value === '' || value === null || value === undefined) return '';
     const num = parseFloat(String(value).replace(/,/g, ''));
@@ -141,7 +140,6 @@ export function AddExpenseDialog({ meetingId, participants, onExpenseAdded, trig
   return (
     <Dialog open={open} onOpenChange={(isOpen) => {
       setOpen(isOpen);
-      // No explicit form.reset() needed here, useEffect handles it on 'open'
     }}>
       <DialogTrigger asChild>
         {triggerButton ? triggerButton : <Button>새 지출 추가</Button>}
@@ -291,7 +289,7 @@ export function AddExpenseDialog({ meetingId, participants, onExpenseAdded, trig
                         <Controller
                           name={`customSplits.${index}.amount`}
                           control={form.control}
-                          defaultValue={0} // Default value for each amount field
+                          defaultValue={0}
                           render={({ field }) => (
                              <Input 
                                 type="text" 

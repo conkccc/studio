@@ -5,8 +5,8 @@ import React, { useState, useTransition, Fragment, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useToast } from '@/hooks/use-toast';
-import { updateFriendAction, deleteFriendAction, getFriendsByGroupAction } from '@/lib/actions'; // Consolidated imports
-import { useAuth } from '@/contexts/AuthContext'; // Import useAuth
+import { updateFriendAction, deleteFriendAction, getFriendsByGroupAction } from '@/lib/actions';
+import { useAuth } from '@/contexts/AuthContext';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -20,7 +20,6 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Edit3, Trash2, User, Check, X, Loader2 } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
-// Removed redundant getFriendsByGroupAction import as it's consolidated above
 
 interface FriendListClientProps {
   initialFriends: Friend[];
@@ -34,18 +33,11 @@ export function FriendListClient({ initialFriends, isReadOnly = false, onFriendA
   const [editForm, setEditForm] = useState<{ name: string; description?: string }>({ name: '', description: '' });
   const { toast } = useToast();
   const [isPending, startTransition] = useTransition();
-  const { appUser } = useAuth(); // Get appUser
+  const { appUser } = useAuth();
 
   useEffect(() => {
     setFriends(initialFriends);
   }, [initialFriends]);
-
-  // 친구 추가 후 콜백이 있으면 실행
-  useEffect(() => {
-    if (onFriendAdded) {
-      onFriendAdded();
-    }
-  }, [initialFriends, onFriendAdded]);
 
   const handleEdit = (friend: Friend) => {
     setEditingFriendId(friend.id);
@@ -87,10 +79,6 @@ export function FriendListClient({ initialFriends, isReadOnly = false, onFriendA
       toast({ title: '오류', description: '사용자 인증 정보를 찾을 수 없습니다. 다시 로그인해주세요.', variant: 'destructive' });
       return;
     }
-
-    // Optional: Add window.confirm here if not relying solely on AlertDialog
-    // const confirmed = window.confirm(`'${friendToDelete.name}' 친구를 정말 삭제하시겠습니까?`);
-    // if (!confirmed) return;
 
     startTransition(async () => {
       const result = await deleteFriendAction({
@@ -190,7 +178,7 @@ export function FriendListClient({ initialFriends, isReadOnly = false, onFriendA
                       </AlertDialogHeader>
                       <AlertDialogFooter>
                         <AlertDialogCancel disabled={isPending || isReadOnly}>취소</AlertDialogCancel>
-                        <AlertDialogAction onClick={() => handleDelete(friend.id)} disabled={isPending || isReadOnly} className="bg-destructive hover:bg-destructive/90">
+                        <AlertDialogAction onClick={() => handleDelete(friend.id)} disabled={isPending || isReadOnly} variant="destructive">
                           {isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
                           삭제
                         </AlertDialogAction>
@@ -216,7 +204,6 @@ export function FriendListByGroup({ groupId, isReadOnly = false }: FriendListByG
   const [friends, setFriends] = useState<Friend[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // 친구 추가 후 즉시 목록 갱신을 위한 핸들러
   const handleFriendAdded = () => {
     setLoading(true);
     getFriendsByGroupAction(groupId).then(res => {

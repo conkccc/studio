@@ -68,7 +68,6 @@ export default function LoginPage() {
     );
   }
 
-  // fallback: 로그인 후 리디렉션 대기
   return (
     <div className="flex flex-col justify-center items-center min-h-screen text-center">
       <p className="text-xl text-muted-foreground">대시보드로 이동 중...</p>

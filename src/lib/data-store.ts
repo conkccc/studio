@@ -22,9 +22,11 @@ import {
   deleteField,
   DocumentData,
   DocumentSnapshot,
-  FieldPath, // Added for documentId() queries
+  FieldPath,
+  QueryConstraint, // QueryConstraint import
 } from 'firebase/firestore';
 import { db } from './firebase';
+
 // 서버 환경에서만 adminDb import
 let adminDb: import('firebase-admin/firestore').Firestore | undefined = undefined;
 if (typeof window === 'undefined') {
@@ -35,7 +37,7 @@ if (typeof window === 'undefined') {
 // Firestore 인스턴스 선택 (서버: adminDb, 클라이언트: db)
 export const firestore = typeof window === 'undefined' && adminDb ? adminDb : db;
 
-// Firestore 컬렉션/서브컬렉션 상수 직접 선언 (types.ts에 없을 경우)
+// Firestore 컬렉션 및 서브컬렉션 이름 상수
 export const USERS_COLLECTION = 'users';
 export const FRIENDS_COLLECTION = 'friends';
 export const MEETINGS_COLLECTION = 'meetings';
@@ -44,9 +46,9 @@ export const RESERVE_FUND_CONFIG_COLLECTION = 'reserveFundConfig';
 export const RESERVE_FUND_BALANCE_DOC_ID = 'balance';
 export const RESERVE_FUND_TRANSACTIONS_COLLECTION = 'reserveFundTransactions';
 
-// Helper function to convert Firestore Timestamps to JS Dates in an object
+// Firestore Timestamps를 JS Date 객체로 변환하는 헬퍼 함수
 const convertTimestampsToDates = (data: DocumentData): DocumentData => {
-  const processedData: any = { ...data };
+  const processedData: Record<string, any> = { ...data };
   const dateFields: string[] = ['createdAt', 'dateTime', 'endTime', 'date', 'shareExpiryDate'];
 
   for (const field of dateFields) {
@@ -55,7 +57,6 @@ const convertTimestampsToDates = (data: DocumentData): DocumentData => {
     } else if (processedData.hasOwnProperty(field) && processedData[field] === null) {
       processedData[field] = null;
     } else if (processedData.hasOwnProperty(field) && typeof processedData[field] === 'string') {
-      // Attempt to parse if it's a string representation of a date
       const parsedDate = new Date(processedData[field]);
       if (!isNaN(parsedDate.getTime())) {
         processedData[field] = parsedDate;
@@ -65,6 +66,7 @@ const convertTimestampsToDates = (data: DocumentData): DocumentData => {
   return processedData;
 };
 
+// Firestore DocumentSnapshot으로부터 타입에 맞는 데이터를 추출하는 헬퍼 함수
 const dataFromSnapshot = <T extends { id: string }>(snapshot: DocumentSnapshot): T | undefined => {
   if (!snapshot.exists()) return undefined;
   const data = snapshot.data();
@@ -82,7 +84,7 @@ const arrayFromSnapshot = <T extends { id: string }>(snapshot: QuerySnapshot): T
 };
 
 
-// --- User functions ---
+// --- 사용자 관련 함수 ---
 export const getUserById = async (userId: string): Promise<User | undefined> => {
   if (!userId) return undefined;
   const userDocRef = doc(db, USERS_COLLECTION, userId);
@@ -98,14 +100,15 @@ export const addUserOnLogin = async (userData: { id: string; email?: string | nu
       id: userData.id,
       email: userData.email || null,
       name: userData.name || null,
-      role: 'none', // Default role
+      role: 'none',
       createdAt: new Date(),
     };
     await setDoc(userDocRef, {
       ...newUser,
-      createdAt: Timestamp.fromDate(newUser.createdAt) // Store as Firestore Timestamp
+      createdAt: Timestamp.fromDate(newUser.createdAt)
     });
-    return newUser; // Return with JS Date
+
+    return newUser;
   }
   const existingUser = dataFromSnapshot<User>(userSnap);
   if (!existingUser) {
@@ -116,11 +119,6 @@ export const addUserOnLogin = async (userData: { id: string; email?: string | nu
 
 export const updateUser = async (userId: string, updates: Partial<Omit<User, 'id' | 'createdAt'> & { friendGroupIds?: string[] }>): Promise<User | null> => {
   const userDocRef = doc(db, USERS_COLLECTION, userId);
-  // Ensure that if friendGroupIds is explicitly passed as undefined, it's handled correctly by Firestore.
-  // updateDoc by default ignores undefined fields. If deletion is needed, use deleteField().
-  // For now, we'll pass it as is, which means undefined will not change the field,
-  // and an empty array will set it to an empty array.
-  // The key in `updates` object should be `friendGroupIds` if that's what we are sending.
   await updateDoc(userDocRef, updates);
   const updatedSnapshot = await getDoc(userDocRef);
   return dataFromSnapshot<User>(updatedSnapshot) || null;
@@ -128,12 +126,12 @@ export const updateUser = async (userId: string, updates: Partial<Omit<User, 'id
 
 export const getUsers = async (): Promise<User[]> => {
   const usersCollectionRef = collection(db, USERS_COLLECTION);
-  const q = query(usersCollectionRef, orderBy('name', 'asc')); // Consider ordering by email if name is optional
+  const q = query(usersCollectionRef, orderBy('name', 'asc'));
   const snapshot = await getDocs(q);
   return arrayFromSnapshot<User>(snapshot);
 };
 
-// --- Friend functions ---
+// --- 친구 관련 함수 ---
 export const getFriends = async (): Promise<Friend[]> => {
   const friendsCollectionRef = collection(db, FRIENDS_COLLECTION);
   const q = query(friendsCollectionRef, orderBy('name', 'asc'));
@@ -181,26 +179,27 @@ export const deleteFriend = async (id: string): Promise<void> => {
 // 그룹별 친구 목록을 가져오는 함수
 export const getFriendsByGroup = async (groupId: string): Promise<Friend[]> => {
   try {
-    if (!groupId || typeof groupId !== 'string') throw new Error('Invalid groupId');
+    if (!groupId || typeof groupId !== 'string') {
+      throw new Error('유효하지 않은 그룹 ID입니다.');
+    }
     const friendsCollectionRef = collection(db, FRIENDS_COLLECTION);
     const q = query(friendsCollectionRef, where('groupId', '==', groupId));
     const snapshot = await getDocs(q);
     const friends = arrayFromSnapshot<Friend>(snapshot);
-    // 로컬에서 name 기준 정렬
     return friends.sort((a, b) => a.name.localeCompare(b.name));
   } catch (err) {
-    console.error('getFriendsByGroup error:', err);
-    throw err;
+    console.error('getFriendsByGroup 오류:', err);
+    throw err; // 오류를 다시 throw하여 호출 측에서 처리할 수 있도록 함
   }
 };
 
-// --- Meeting functions ---
+// --- 모임 관련 함수 ---
 interface GetMeetingsParams {
   year?: number;
   limitParam?: number;
   page?: number;
   userId?: string;
-  userFriendGroupIds?: string[]; // Renamed from userRefFriendGroupIds
+  userFriendGroupIds?: string[];
 }
 
 interface GetMeetingsResult {
@@ -214,12 +213,11 @@ export const getMeetings = async ({
   limitParam,
   page = 1,
   userId,
-  userFriendGroupIds, // Renamed
+  userFriendGroupIds,
 }: GetMeetingsParams = {}): Promise<GetMeetingsResult> => {
   const meetingsCollectionRef = collection(db, MEETINGS_COLLECTION);
 
-  // Determine available years (can be based on a broader query without user/group filters for simplicity)
-  let yearFilterForAvailableYears: any[] = [];
+  let yearFilterForAvailableYears: QueryConstraint[] = [];
   if (year) {
     const startOfYear = Timestamp.fromDate(new Date(year, 0, 1));
     const endOfYear = Timestamp.fromDate(new Date(year + 1, 0, 1));
@@ -237,8 +235,7 @@ export const getMeetings = async ({
   });
   const availableYears = Array.from(yearsSet).sort((a, b) => b - a);
 
-  // Base query constraints for date range (year)
-  let dateConstraints: any[] = [];
+  let dateConstraints: QueryConstraint[] = [];
   if (year) {
     const startOfYear = Timestamp.fromDate(new Date(year, 0, 1));
     const endOfYear = Timestamp.fromDate(new Date(year + 1, 0, 1));
@@ -249,8 +246,7 @@ export const getMeetings = async ({
   let fetchedMeetings: Meeting[] = [];
   const meetingIds = new Set<string>();
 
-  if (userId || (userFriendGroupIds && userFriendGroupIds.length > 0)) { // Renamed
-    // Scenario 1: Filtering by userId and/or userFriendGroupIds
+  if (userId || (userFriendGroupIds && userFriendGroupIds.length > 0)) {
     if (userId) {
       const userMeetingsQuery = query(meetingsCollectionRef, where('creatorId', '==', userId), ...dateConstraints);
       const userMeetingsSnap = await getDocs(userMeetingsQuery);
@@ -262,8 +258,8 @@ export const getMeetings = async ({
       });
     }
 
-    if (userFriendGroupIds && userFriendGroupIds.length > 0) { // Renamed
-      const validGroupIds = userFriendGroupIds.filter(id => typeof id === 'string' && id.length > 0); // Renamed
+    if (userFriendGroupIds && userFriendGroupIds.length > 0) {
+      const validGroupIds = userFriendGroupIds.filter(id => typeof id === 'string' && id.length > 0);
       if (validGroupIds.length > 0) {
         const MAX_IN_QUERIES = 30;
         const chunks = [];
@@ -284,29 +280,25 @@ export const getMeetings = async ({
         }
       }
     }
-    // Sort merged results
     fetchedMeetings.sort((a, b) => (b.dateTime?.getTime() || 0) - (a.dateTime?.getTime() || 0));
-    
-  } else {
-    // Scenario 2: No specific user/group filter, original behavior (fetch all with year filter and Firestore pagination)
-    let qConstraints = [orderBy('dateTime', 'desc'), ...dateConstraints];
-    let finalQuery = query(meetingsCollectionRef, ...qConstraints as any);
 
-    // Count for pagination needs to be based on this potentially filtered query
+  } else {
+    let qConstraints: QueryConstraint[] = [orderBy('dateTime', 'desc'), ...dateConstraints];
+    let finalQuery = query(meetingsCollectionRef, ...qConstraints);
+
     const countQueryForPagination = query(meetingsCollectionRef, ...dateConstraints);
     const totalCountSnapshotForPagination = await getCountFromServer(countQueryForPagination);
     const totalCountForPagination = totalCountSnapshotForPagination.data().count;
 
     if (limitParam && page > 1) {
       const docsToSkip = (page - 1) * limitParam;
-      let skipperQueryConstraints = [orderBy('dateTime', 'desc'), ...dateConstraints, firestoreLimit(docsToSkip)];
-      let skipperQuery = query(meetingsCollectionRef, ...skipperQueryConstraints as any);
+      let skipperQueryConstraints: QueryConstraint[] = [orderBy('dateTime', 'desc'), ...dateConstraints, firestoreLimit(docsToSkip)];
+      let skipperQuery = query(meetingsCollectionRef, ...skipperQueryConstraints);
 
       const skipperSnapshot = await getDocs(skipperQuery);
       if (skipperSnapshot.docs.length > 0 && skipperSnapshot.docs.length === docsToSkip) {
-        finalQuery = query(meetingsCollectionRef, ...qConstraints as any, firestoreStartAfter(skipperSnapshot.docs[skipperSnapshot.docs.length - 1]));
+        finalQuery = query(meetingsCollectionRef, ...qConstraints, firestoreStartAfter(skipperSnapshot.docs[skipperSnapshot.docs.length - 1]));
       } else if (skipperSnapshot.docs.length < docsToSkip) {
-        // Not enough documents to skip to the desired page
          return { meetings: [], totalCount: totalCountForPagination, availableYears };
       }
     }
@@ -315,14 +307,11 @@ export const getMeetings = async ({
     }
     const snapshot = await getDocs(finalQuery);
     fetchedMeetings = arrayFromSnapshot<Meeting>(snapshot);
-    // totalCount for this path is totalCountForPagination
     return { meetings: fetchedMeetings, totalCount: totalCountForPagination, availableYears };
   }
 
-  // For Scenario 1 (userId or userFriendGroupIds filtered), totalCount is the number of fetched (and merged) meetings before pagination
   const totalCount = fetchedMeetings.length;
 
-  // Apply in-memory pagination for Scenario 1
   let paginatedMeetings = fetchedMeetings;
   if (limitParam) {
     const startIndex = (page - 1) * limitParam;
@@ -339,41 +328,37 @@ export const getMeetingById = async (id: string): Promise<Meeting | undefined> =
   return dataFromSnapshot<Meeting>(snapshot);
 };
 
-// The payload from createMeetingAction is Omit<Meeting, 'id' | 'createdAt' | 'isSettled' | 'isShareEnabled' | 'shareToken' | 'shareExpiryDate' | 'expenses'> & {creatorId: string}
-// Let's make the parameter type here compatible.
+// Firestore에 저장될 모임 데이터의 최종 형태에 가깝게 타입을 정의합니다.
+// actions.ts의 createMeetingAction에서 전달되는 payload와 호환됩니다.
 export const addMeeting = async (
   meetingPayloadFromAction: Partial<Omit<Meeting, 'id' | 'createdAt' | 'isSettled' | 'isShareEnabled' | 'shareToken' | 'shareExpiryDate' | 'expenses'>> &
-                            { creatorId: string; dateTime: Date | Timestamp } // Required fields from payload
+                            { creatorId: string; dateTime: Date | Timestamp }
 ): Promise<Meeting> => {
 
-  const dataToStore: any = {
-    // Default values for fields that Firestore expects or have app-level defaults
+  const dataToStore: DocumentData = {
     isSettled: false,
     isShareEnabled: false,
     shareToken: null,
     shareExpiryDate: null,
-    expenses: [], // Default to empty array
-    participantIds: [], // Default to empty array
-    nonReserveFundParticipants: [], // Default to empty array
-    useReserveFund: false, // Default
+    expenses: [],
+    participantIds: [],
+    nonReserveFundParticipants: [],
+    useReserveFund: false,
 
-    ...meetingPayloadFromAction, // Spread the payload from action; this will overwrite defaults if provided in payload
+    ...meetingPayloadFromAction,
 
-    // Ensure crucial fields are correctly formatted or set
     dateTime: meetingPayloadFromAction.dateTime instanceof Date
                 ? Timestamp.fromDate(meetingPayloadFromAction.dateTime)
-                : meetingPayloadFromAction.dateTime, // Assume it could already be a Timestamp if passed through
+                : meetingPayloadFromAction.dateTime,
 
-    // Handle endTime: convert to Timestamp if Date, or set to null if undefined/null in payload
     endTime: meetingPayloadFromAction.endTime
              ? (meetingPayloadFromAction.endTime instanceof Date
                 ? Timestamp.fromDate(meetingPayloadFromAction.endTime)
                 : meetingPayloadFromAction.endTime)
              : null,
-    createdAt: Timestamp.now(), // Always set server-side at creation
+    createdAt: Timestamp.now(),
   };
 
-  // Ensure specific numeric fields are numbers if they exist
   if (dataToStore.partialReserveFundAmount !== undefined) {
     dataToStore.partialReserveFundAmount = Number(dataToStore.partialReserveFundAmount);
   }
@@ -384,24 +369,19 @@ export const addMeeting = async (
     dataToStore.feePerPerson = Number(dataToStore.feePerPerson);
   }
 
-  // Clean up based on isTemporary (some of this is already handled by createMeetingAction, but good for robustness)
   if (dataToStore.isTemporary) {
-    dataToStore.participantIds = meetingPayloadFromAction.temporaryParticipants || []; // Use temporaryParticipants as participantIds for temporary meetings
+    dataToStore.participantIds = meetingPayloadFromAction.temporaryParticipants || [];
     dataToStore.useReserveFund = false;
-    // Fields to remove for temporary meetings if they somehow got here
     const fieldsToRemoveForTemp = ['partialReserveFundAmount', 'nonReserveFundParticipants'];
     fieldsToRemoveForTemp.forEach(f => delete dataToStore[f]);
-    // totalFee and feePerPerson are kept if defined
   } else {
-    // For regular meetings, remove temporary-specific fields
     const fieldsToRemoveForRegular = ['temporaryParticipants', 'totalFee', 'feePerPerson'];
     fieldsToRemoveForRegular.forEach(f => delete dataToStore[f]);
     if (dataToStore.useReserveFund && dataToStore.partialReserveFundAmount === undefined) {
-      dataToStore.partialReserveFundAmount = 0; // Default if using fund but amount not set
+      dataToStore.partialReserveFundAmount = 0;
     }
   }
 
-  // Generic: Remove any top-level properties that are undefined before sending to Firestore
   Object.keys(dataToStore).forEach(key => {
     if (dataToStore[key] === undefined) {
       delete dataToStore[key];
@@ -409,14 +389,14 @@ export const addMeeting = async (
   });
 
   const meetingsCollectionRef = collection(db, MEETINGS_COLLECTION);
-  const docRef = await addDoc(meetingsCollectionRef, dataToStore as DocumentData);
+  const docRef = await addDoc(meetingsCollectionRef, dataToStore);
   const newMeetingDocSnap = await getDoc(docRef);
   return dataFromSnapshot<Meeting>(newMeetingDocSnap)!;
 };
 
 export const updateMeeting = async (id: string, updates: Partial<Omit<Meeting, 'id' | 'createdAt'>>): Promise<Meeting | null> => {
   const meetingDocRef = doc(db, MEETINGS_COLLECTION, id);
-  const updateData: { [key: string]: any } = { ...updates };
+  const updateData: DocumentData = { ...updates };
 
   if (updates.dateTime) {
     updateData.dateTime = Timestamp.fromDate(new Date(updates.dateTime));
@@ -426,7 +406,7 @@ export const updateMeeting = async (id: string, updates: Partial<Omit<Meeting, '
   }
   if (updates.hasOwnProperty('partialReserveFundAmount')) {
     if (updates.partialReserveFundAmount === undefined) {
-      updateData.partialReserveFundAmount = deleteField(); // updateDoc에서는 deleteField() 허용
+      updateData.partialReserveFundAmount = deleteField();
     } else {
       updateData.partialReserveFundAmount = Number(updates.partialReserveFundAmount);
     }
@@ -481,14 +461,13 @@ export const getMeetingByShareToken = async (token: string): Promise<Meeting | u
 
   if (meeting && meeting.shareExpiryDate) {
     if (meeting.shareExpiryDate < new Date()) {
-      return undefined; // Expired
+      return undefined; // 토큰 만료
     }
   }
   return meeting;
 };
 
-
-// --- Expense functions ---
+// --- 지출 관련 함수 ---
 export const getExpensesByMeetingId = async (meetingId: string): Promise<Expense[]> => {
   if (!meetingId) return [];
   const expensesCollectionRef = collection(db, MEETINGS_COLLECTION, meetingId, EXPENSES_SUBCOLLECTION);
@@ -529,28 +508,37 @@ export const deleteExpense = async (meetingId: string, expenseId: string ): Prom
   await deleteDoc(expenseDocRef);
 };
 
-// --- Reserve Fund Functions ---
-const getReserveFundBalanceDocRef = () => doc(db, RESERVE_FUND_CONFIG_COLLECTION, RESERVE_FUND_BALANCE_DOC_ID);
-
-export const getReserveFundBalance = async (): Promise<number|null> => {
-  const balanceDocRef = getReserveFundBalanceDocRef();
-  const balanceSnap = await getDoc(balanceDocRef);
-  if (balanceSnap.exists()) {
-    const data = balanceSnap.data();
-    if (typeof data?.balance === 'number') {
-      return data.balance;
-    } else {
-      // balance 필드가 아예 없을 때 null 반환
-      return null;
-    }
+// --- 회비 관련 함수 ---
+export const getReserveFundBalance = async (groupId: string): Promise<number|null> => {
+  if (!groupId || groupId.trim() === '') {
+    console.error("getReserveFundBalance: 유효하지 않은 groupId가 제공되었습니다.");
+    return null; // Promise.resolve(null) 대신 직접 null 반환
   }
+  const balanceDocRef = doc(db, RESERVE_FUND_CONFIG_COLLECTION, `balance_${groupId}`);
   try {
-    await setDoc(balanceDocRef, { balance: 0 }, { merge: true });
+    const balanceSnap = await getDoc(balanceDocRef);
+    if (balanceSnap.exists()) {
+      const data = balanceSnap.data();
+      if (typeof data?.balance === 'number') {
+        return data.balance;
+      } else {
+        console.warn(`getReserveFundBalance: groupId [${groupId}]의 balance 필드가 유효하지 않거나 없습니다. 기본값 0을 반환합니다.`);
+        return 0;
+      }
+    } else {
+      // 잔액 문서가 존재하지 않으면 0을 기본값으로 생성
+      try {
+        await setDoc(balanceDocRef, { balance: 0 }, { merge: true });
+        return 0;
+      } catch (setDocError) {
+        console.error(`getReserveFundBalance: groupId [${groupId}]에 대한 잔액 문서 생성 실패:`, setDocError);
+        return null; // 생성 실패 시 null 반환
+      }
+    }
   } catch (error) {
-      console.error("Error initializing reserve fund balance:", error);
-      return null;
+    console.error(`getReserveFundBalance: groupId [${groupId}]의 잔액 조회 중 오류 발생:`, error);
+    return null; // 오류 발생 시 null 반환
   }
-  return null;
 };
 
 export const getLoggedReserveFundTransactions = async (limitCount: number = 5): Promise<ReserveFundTransaction[]> => {
@@ -562,7 +550,6 @@ export const getLoggedReserveFundTransactions = async (limitCount: number = 5): 
 
 export const dbSetReserveFundBalance = async (groupId: string, newBalance: number, description?: string): Promise<void> => {
   const batch = writeBatch(db);
-  // 그룹별 balance 문서로 경로 변경
   const balanceDocRef = doc(db, 'reserveFundConfig', `balance_${groupId}`);
 
   const balanceSnap = await getDoc(balanceDocRef);
@@ -577,27 +564,28 @@ export const dbSetReserveFundBalance = async (groupId: string, newBalance: numbe
     amount: newBalance,
     description: description || `잔액 ${newBalance.toLocaleString()}원으로 설정됨`,
     date: new Date(),
-    groupId, 
+    groupId,
   };
   const newLogDocRef = doc(collection(db, RESERVE_FUND_TRANSACTIONS_COLLECTION));
   batch.set(newLogDocRef, {
     ...logEntry,
-    date: Timestamp.fromDate(logEntry.date) // Store as Timestamp
+    date: Timestamp.fromDate(logEntry.date)
   });
   await batch.commit();
 };
 
 export const dbRecordMeetingDeduction = async (groupId: string, meetingId: string, meetingName: string, amountDeducted: number, date: Date, batch?: any): Promise<void> => {
-  if (amountDeducted <= 0.001) return;
+  if (amountDeducted <= 0.001) return; // 매우 작은 금액은 무시 (부동소수점 오차 방지)
 
   const useExistingBatch = !!batch;
   const currentBatch = useExistingBatch ? batch : writeBatch(db);
-  const balanceDocRef = getReserveFundBalanceDocRef();
+  const balanceDocRef = doc(db, RESERVE_FUND_CONFIG_COLLECTION, `balance_${groupId}`);
 
+  // 배치 외부에서 실행될 경우, 잔액 문서 존재 여부 확인 및 초기화
   if (!useExistingBatch) {
     const balanceSnap = await getDoc(balanceDocRef);
     if (!balanceSnap.exists()) {
-       currentBatch.set(balanceDocRef, { balance: 0 });
+       currentBatch.set(balanceDocRef, { balance: 0 }); // 존재하지 않으면 0으로 초기화
     }
   }
   currentBatch.update(balanceDocRef, { balance: increment(-amountDeducted) });
@@ -606,14 +594,14 @@ export const dbRecordMeetingDeduction = async (groupId: string, meetingId: strin
     type: 'meeting_deduction',
     amount: -amountDeducted,
     description: `모임 (${meetingName}) 회비 사용`,
-    date: date, // JS Date
+    date: date,
     meetingId: meetingId,
     groupId,
   };
   const newLogDocRef = doc(collection(db, RESERVE_FUND_TRANSACTIONS_COLLECTION));
   currentBatch.set(newLogDocRef, {
     ...logEntry,
-    date: Timestamp.fromDate(logEntry.date) // Store as Timestamp
+    date: Timestamp.fromDate(logEntry.date)
   });
   if (!useExistingBatch) {
     await currentBatch.commit();
@@ -627,33 +615,46 @@ export const dbRevertMeetingDeduction = async (meetingId: string, batch?: any): 
   const q = query(transactionsCollectionRef, where('meetingId', '==', meetingId), where('type', '==', 'meeting_deduction'));
   const snapshot = await getDocs(q);
   let totalRevertedAmount = 0;
+  let groupIdForBalanceUpdate: string | undefined;
 
   if (!snapshot.empty) {
+    const firstTxData = snapshot.docs[0].data() as Partial<ReserveFundTransaction>; // 타입 단언 유지
+    groupIdForBalanceUpdate = firstTxData.groupId;
+
+    if (!groupIdForBalanceUpdate) {
+      console.error(`dbRevertMeetingDeduction: meetingId ${meetingId}에 대한 트랜잭션 로그에서 groupId를 찾을 수 없습니다. 회비 복구가 불가능합니다.`);
+      return; // groupId가 없으면 회비 복구 로직 진행 불가
+    }
+
     snapshot.forEach(txDoc => {
-      const txData = txDoc.data() as Partial<ReserveFundTransaction>;
+      const txData = txDoc.data() as Partial<ReserveFundTransaction>; // 타입 단언 유지
       if (txData.amount && typeof txData.amount === 'number') {
-        totalRevertedAmount += Math.abs(txData.amount);
+        totalRevertedAmount += Math.abs(txData.amount); // 차감된 금액은 음수이므로 절대값 사용
       }
-      currentBatch.delete(txDoc.ref);
+      currentBatch.delete(txDoc.ref); // 해당 트랜잭션 로그 삭제
     });
 
+    // 복구할 금액이 유의미한 경우에만 잔액 업데이트
     if (totalRevertedAmount > 0.001) {
-      const balanceDocRef = getReserveFundBalanceDocRef();
-       if (!useExistingBatch) {
+      const balanceDocRef = doc(db, RESERVE_FUND_CONFIG_COLLECTION, `balance_${groupIdForBalanceUpdate}`);
+      // 배치 외부에서 실행될 경우, 잔액 문서 존재 여부 확인 및 초기화
+      if (!useExistingBatch) {
         const balanceSnap = await getDoc(balanceDocRef);
         if (!balanceSnap.exists()) {
-           currentBatch.set(balanceDocRef, { balance: 0 });
+           currentBatch.set(balanceDocRef, { balance: 0 }); // 존재하지 않으면 0으로 초기화
         }
       }
       currentBatch.update(balanceDocRef, { balance: increment(totalRevertedAmount) });
     }
   }
+
+  // 배치 외부에서 실행되었고, 실제로 복구된 금액이 있을 경우에만 커밋
   if (!useExistingBatch && totalRevertedAmount > 0.001) {
     await currentBatch.commit();
   }
 };
 
-// --- FriendGroup functions ---
+// --- 친구 그룹 관련 함수 ---
 export const getFriendGroupsByUser = async (userId: string): Promise<FriendGroup[]> => {
   if (!userId) return [];
 
@@ -661,65 +662,57 @@ export const getFriendGroupsByUser = async (userId: string): Promise<FriendGroup
 
   const groupsCollectionRef = collection(db, 'friendGroups');
   let allGroups: FriendGroup[] = [];
-  const groupIds = new Set<string>();
+  const groupIdsProcessed = new Set<string>(); // 중복 처리를 위한 Set
 
-  // Query 1: Groups owned by the user
+  // 사용자가 소유한 그룹 조회
   const ownedGroupsQuery = query(groupsCollectionRef, where('ownerUserId', '==', userId), orderBy('createdAt', 'asc'));
   const ownedGroupsSnapshot = await getDocs(ownedGroupsQuery);
-  const ownedGroups = arrayFromSnapshot<FriendGroup>(ownedGroupsSnapshot);
-  ownedGroups.forEach(group => {
-    if (!groupIds.has(group.id)) {
+  arrayFromSnapshot<FriendGroup>(ownedGroupsSnapshot).forEach(group => {
+    if (!groupIdsProcessed.has(group.id)) {
       allGroups.push(group);
-      groupIds.add(group.id);
+      groupIdsProcessed.add(group.id);
     }
   });
 
-  // Query 2: Groups referenced in user.friendGroupIds
-  // Firestore 'in' queries are limited to 30 comparison values.
-  // If friendGroupIds can exceed this, chunking is needed.
-  const friendGroupIds = user?.friendGroupIds?.filter(id => typeof id === 'string' && id.length > 0); // Renamed
+  // 사용자의 friendGroupIds 필드에 있는 그룹 ID 조회 (참조된 그룹)
+  const friendGroupIdsFromUser = user?.friendGroupIds?.filter(id => typeof id === 'string' && id.length > 0);
 
-  if (friendGroupIds && friendGroupIds.length > 0) { // Renamed
-    const MAX_IN_QUERIES = 30; // Firestore limit for 'in' queries as of last check
-    const chunks = [];
-    for (let i = 0; i < friendGroupIds.length; i += MAX_IN_QUERIES) { // Renamed
-      chunks.push(friendGroupIds.slice(i, i + MAX_IN_QUERIES)); // Renamed
+  if (friendGroupIdsFromUser && friendGroupIdsFromUser.length > 0) {
+    const MAX_IN_QUERIES = 30; // Firestore 'in' 쿼리의 최대 항목 수 (최근 30개로 변경됨)
+    const idChunks = [];
+    for (let i = 0; i < friendGroupIdsFromUser.length; i += MAX_IN_QUERIES) {
+      idChunks.push(friendGroupIdsFromUser.slice(i, i + MAX_IN_QUERIES));
     }
 
-    for (const chunk of chunks) {
+    for (const chunk of idChunks) {
       if (chunk.length > 0) {
         const referencedGroupsQuery = query(groupsCollectionRef, where(new FieldPath('__name__'), 'in', chunk));
-        // No orderBy here as it might conflict with 'in' on documentId or not be efficient.
-        // Order can be applied client-side if needed after merging.
         const referencedGroupsSnapshot = await getDocs(referencedGroupsQuery);
-        const referencedGroups = arrayFromSnapshot<FriendGroup>(referencedGroupsSnapshot);
-        referencedGroups.forEach(group => {
-          if (!groupIds.has(group.id)) {
+        arrayFromSnapshot<FriendGroup>(referencedGroupsSnapshot).forEach(group => {
+          if (!groupIdsProcessed.has(group.id)) { // 아직 추가되지 않은 그룹만 추가
             allGroups.push(group);
-            groupIds.add(group.id);
+            groupIdsProcessed.add(group.id);
           }
         });
       }
     }
   }
-
-  // Sort all groups by createdAt date, similar to the original single query
+  // 최종적으로 생성 시간 오름차순으로 정렬
   allGroups.sort((a, b) => (a.createdAt?.getTime() || 0) - (b.createdAt?.getTime() || 0));
-
   return allGroups;
 };
 
 export const addFriendGroup = async (groupData: Omit<FriendGroup, 'id' | 'createdAt'>): Promise<FriendGroup> => {
   const newGroupData = {
     ...groupData,
-    createdAt: new Date(),
+    createdAt: new Date(), // 생성 시간 기록
   };
   const groupsCollectionRef = collection(db, 'friendGroups');
   const docRef = await addDoc(groupsCollectionRef, {
     ...newGroupData,
-    createdAt: Timestamp.fromDate(newGroupData.createdAt)
+    createdAt: Timestamp.fromDate(newGroupData.createdAt) // Firestore Timestamp로 변환
   });
-  return { ...newGroupData, id: docRef.id };
+  return { ...newGroupData, id: docRef.id }; // 생성된 ID와 함께 데이터 반환
 };
 
 export const updateFriendGroup = async (id: string, updates: Partial<Omit<FriendGroup, 'id' | 'createdAt'>>): Promise<FriendGroup | null> => {
@@ -732,45 +725,24 @@ export const updateFriendGroup = async (id: string, updates: Partial<Omit<Friend
 export const deleteFriendGroup = async (id: string): Promise<void> => {
   const groupDocRef = doc(db, 'friendGroups', id);
   await deleteDoc(groupDocRef);
+  // TODO: 이 그룹을 참조하는 사용자의 friendGroupIds 필드도 정리해야 할 수 있음 (선택적)
+  // TODO: 이 그룹에 속한 친구들의 groupId 필드도 정리해야 할 수 있음 (선택적)
 };
 
-// --- 그룹별 회비 관리 함수 ---
-export const getReserveFundBalanceByGroup = async (groupId: string): Promise<number|null> => {
-  const balanceDocRef = doc(db, 'reserveFundConfig', `balance_${groupId}`);
-  const balanceSnap = await getDoc(balanceDocRef);
-  if (balanceSnap.exists()) {
-    const data = balanceSnap.data();
-    if (typeof data?.balance === 'number') {
-      return data.balance;
-    } else {
-      return null;
-    }
-  }
-  try {
-    await setDoc(balanceDocRef, { balance: 0 }, { merge: true });
-  } catch (error) {
-    console.error("Error initializing reserve fund balance for group:", error);
-    return null;
-  }
-  return null;
-};
+// --- 그룹별 회비 로그 조회 함수 ---
+// getReserveFundBalanceByGroup 함수는 getReserveFundBalance로 통합되었으므로 해당 주석은 제거했습니다.
 
 export const getLoggedReserveFundTransactionsByGroup = async (groupId: string, limitCount: number = 5): Promise<ReserveFundTransaction[]> => {
   const transactionsCollectionRef = collection(db, 'reserveFundTransactions');
-  const q = query(transactionsCollectionRef, where('groupId', '==', groupId));
+  const q = query(transactionsCollectionRef, where('groupId', '==', groupId), orderBy('date', 'desc'), firestoreLimit(limitCount));
   const snapshot = await getDocs(q);
-  // 최근 5개만 가져오고 날짜순 정렬
-  const all = arrayFromSnapshot<ReserveFundTransaction>(snapshot);
-  return all
-    .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
-    .slice(0, limitCount);
+  return arrayFromSnapshot<ReserveFundTransaction>(snapshot);
 };
 
-// --- Function to get ALL friend groups ---
+// --- 모든 친구 그룹 조회 (관리자용) ---
 export const dbGetAllFriendGroups = async (): Promise<FriendGroup[]> => {
   const groupsCollectionRef = collection(db, 'friendGroups');
-  // Optional: order them by name or createdAt, though client might sort anyway
-  const q = query(groupsCollectionRef, orderBy('name', 'asc'));
+  const q = query(groupsCollectionRef, orderBy('name', 'asc')); // 이름순으로 정렬
   const snapshot = await getDocs(q);
   return arrayFromSnapshot<FriendGroup>(snapshot);
 };

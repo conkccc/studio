@@ -18,10 +18,10 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { createFriendAction } from '@/lib/actions';
 import { useToast } from '@/hooks/use-toast';
-import { useAuth } from '@/contexts/AuthContext'; // Added useAuth import
+import { useAuth } from '@/contexts/AuthContext';
 import { Loader2 } from 'lucide-react';
-import { useRouter } from 'next/navigation'; // Added for router.refresh()
-import type { Friend } from '@/lib/types'; // Ensure Friend type is imported
+import { useRouter } from 'next/navigation';
+import type { Friend } from '@/lib/types';
 
 const friendSchema = z.object({
   name: z.string().min(1, '이름을 입력해주세요.').max(50, '이름은 50자 이내여야 합니다.'),
@@ -31,17 +31,17 @@ const friendSchema = z.object({
 type FriendFormData = z.infer<typeof friendSchema>;
 
 export interface AddFriendDialogProps {
-  triggerButton?: React.ReactNode; // Optional custom trigger
-  onFriendAdded?: (friend: Friend) => void; // Callback after successful addition, type changed to Friend
-  groupId?: string; // 그룹별 친구 추가 지원
+  triggerButton?: React.ReactNode;
+  onFriendAdded?: (friend: Friend) => void;
+  groupId?: string;
 }
 
 export function AddFriendDialog({ triggerButton, onFriendAdded, groupId }: AddFriendDialogProps) {
   const [open, setOpen] = useState(false);
   const [isPending, startTransition] = useTransition();
   const { toast } = useToast();
-  const router = useRouter(); // Initialize router
-  const { appUser } = useAuth(); // Get appUser
+  const router = useRouter();
+  const { appUser } = useAuth();
 
   const form = useForm<FriendFormData>({
     resolver: zodResolver(friendSchema),
@@ -56,7 +56,7 @@ export function AddFriendDialog({ triggerButton, onFriendAdded, groupId }: AddFr
       toast({ title: '오류', description: '그룹이 선택되지 않았습니다.', variant: 'destructive' });
       return;
     }
-    if (!appUser?.id) { // Guard for appUser
+    if (!appUser?.id) {
       toast({ title: '오류', description: '사용자 정보를 찾을 수 없습니다. 다시 로그인해주세요.', variant: 'destructive' });
       return;
     }
@@ -70,8 +70,8 @@ export function AddFriendDialog({ triggerButton, onFriendAdded, groupId }: AddFr
       if (result.success) {
         toast({ title: '성공', description: '새로운 친구가 추가되었습니다.' });
         form.reset();
-        setOpen(false); // Close dialog *before* refreshing
-        router.refresh(); // Refresh server data for the current route
+        setOpen(false);
+        router.refresh();
         if (onFriendAdded && result.friend) {
           onFriendAdded(result.friend);
         }

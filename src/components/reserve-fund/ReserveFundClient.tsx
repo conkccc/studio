@@ -1,6 +1,5 @@
 'use client';
 
-// Removed specific import of ReserveFundTransaction as it's imported later with other types
 import React, { useState, useEffect, useCallback, useTransition } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -8,12 +7,12 @@ import * as z from 'zod';
 import {
   setReserveFundBalanceAction,
   getFriendGroupsForUserAction,
-  getAllUsersAction // Import getAllUsersAction
+  getAllUsersAction
 } from '@/lib/actions';
 import {
-  getReserveFundBalanceByGroup,
+  getReserveFundBalance, // 수정된 함수 import
   getLoggedReserveFundTransactionsByGroup
-} from '@/lib/data-store'; // Assuming direct use for now
+} from '@/lib/data-store';
 import type { ReserveFundTransaction, FriendGroup, User } from '@/lib/types';
 import { useToast } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
@@ -24,8 +23,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { format } from 'date-fns';
 import { ko } from 'date-fns/locale';
-import { TrendingDown, Edit, Loader2, History, PiggyBank, Landmark, Users } from 'lucide-react'; // Added icons
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"; // For group selection
+import { TrendingDown, Edit, Loader2, History, PiggyBank, Landmark, Users } from 'lucide-react';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -37,8 +36,9 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
-import { useAuth } from '@/contexts/AuthContext'; // Corrected path
+import { useAuth } from '@/contexts/AuthContext';
 
+const MAX_RESERVE_FUND_TRANSACTION = 10;
 type DisplayFriendGroup = FriendGroup & { isOwned: boolean };
 
 const balanceUpdateSchema = z.object({
@@ -52,17 +52,17 @@ const balanceUpdateSchema = z.object({
 type BalanceUpdateFormData = z.infer<typeof balanceUpdateSchema>;
 
 export function ReserveFundClient() {
-  const { currentUser, appUser, loading: authLoading } = useAuth(); // Added appUser, authLoading
+  const { currentUser, appUser, loading: authLoading } = useAuth();
   const [accessibleGroups, setAccessibleGroups] = useState<DisplayFriendGroup[]>([]);
-  const [allUsers, setAllUsers] = useState<User[]>([]); // State for all users
+  const [allUsers, setAllUsers] = useState<User[]>([]);
   const [selectedGroup, setSelectedGroup] = useState<DisplayFriendGroup | null>(null);
   const [transactions, setTransactions] = useState<ReserveFundTransaction[]>([]);
   const [currentBalance, setCurrentBalance] = useState<number | null>(null);
 
-  const [isLoadingData, setIsLoadingData] = useState(true); // Combined loading state for groups and users
+  const [isLoadingData, setIsLoadingData] = useState(true);
   const [isLoadingFundDetails, setIsLoadingFundDetails] = useState(false);
   const [isUpdateDialogOpen, setIsUpdateDialogOpen] = useState(false);
-  const [isSubmitting, startTransition] = useTransition(); // For form submission
+  const [isSubmitting, startTransition] = useTransition();
   const { toast } = useToast();
 
   const form = useForm<BalanceUpdateFormData>({
@@ -70,7 +70,6 @@ export function ReserveFundClient() {
     defaultValues: { newBalance: 0, description: '수동 잔액 조정' },
   });
 
-  // Fetch accessible groups and all users
   useEffect(() => {
     if (authLoading || !currentUser?.uid || !appUser?.id) {
       setIsLoadingData(false);
@@ -84,12 +83,7 @@ export function ReserveFundClient() {
       getAllUsersAction()
     ]).then(([groupsResult, usersResult]) => {
       if (groupsResult.success && groupsResult.groups) {
-        // getFriendGroupsForUserAction already sets isOwned and isReferenced
         setAccessibleGroups(groupsResult.groups as DisplayFriendGroup[]);
-        // Auto-select first group if available (optional, can be removed if explicit selection is preferred)
-        // if (groupsResult.groups.length > 0) {
-        //   setSelectedGroup(groupsResult.groups[0] as DisplayFriendGroup);
-        // }
       } else {
         toast({ title: '오류', description: groupsResult.error || '접근 가능한 그룹 목록을 불러오지 못했습니다.', variant: 'destructive' });
         setAccessibleGroups([]);
@@ -106,27 +100,25 @@ export function ReserveFundClient() {
       setAccessibleGroups([]);
       setAllUsers([]);
     }).finally(() => setIsLoadingData(false));
-  }, [currentUser?.uid, appUser, authLoading, toast]); // appUser.id is part of appUser dependency
+  }, [currentUser?.uid, appUser, authLoading, toast]);
 
-  // Fetch fund details when selectedGroup changes
   useEffect(() => {
-    if (!selectedGroup) {
+    if (!selectedGroup || !selectedGroup.id) {
       setCurrentBalance(null);
       setTransactions([]);
       return;
     }
     setIsLoadingFundDetails(true);
     Promise.all([
-      getReserveFundBalanceByGroup(selectedGroup.id),
-      getLoggedReserveFundTransactionsByGroup(selectedGroup.id, 20) // Fetch more transactions
+      getReserveFundBalance(selectedGroup.id), 
+      getLoggedReserveFundTransactionsByGroup(selectedGroup.id, MAX_RESERVE_FUND_TRANSACTION)
     ]).then(([balanceResult, transactionsResult]) => {
-      setCurrentBalance(balanceResult === null ? 0 : balanceResult); // Treat null balance as 0 for display/form
+      setCurrentBalance(balanceResult === null ? 0 : balanceResult);
       form.reset({ newBalance: balanceResult === null ? 0 : balanceResult, description: '수동 잔액 조정'});
-      // Assuming getLogged... returns array directly
       setTransactions(transactionsResult || []);
-    }).catch(() => {
-      toast({ title: '오류', description: `${selectedGroup.name} 그룹의 회비 정보를 가져오는데 실패했습니다.`, variant: 'destructive'});
-      setCurrentBalance(0); // Reset on error
+    }).catch((error) => {
+      toast({ title: '오류', description: `${selectedGroup.name} 그룹의 회비 정보를 가져오는데 실패했습니다. (${error?.message || error})`, variant: 'destructive'});
+      setCurrentBalance(0);
       setTransactions([]);
       form.reset({ newBalance: 0, description: '수동 잔액 조정'});
     }).finally(() => setIsLoadingFundDetails(false));
@@ -135,24 +127,22 @@ export function ReserveFundClient() {
 
   const handleBalanceUpdate = (data: BalanceUpdateFormData) => {
     if (!selectedGroup || !appUser) return;
-    // Updated permission check to align with UI visibility (canSetBalance logic)
     if (!(appUser.role === 'admin' || (appUser.role === 'user' && selectedGroup.isOwned))) {
       toast({ title: '권한 없음', description: '그룹 소유자 또는 관리자만 잔액을 수정할 수 있습니다.', variant: 'destructive'});
       return;
     }
     startTransition(async () => {
       const newBalance = typeof data.newBalance === 'number' ? data.newBalance : parseFloat(String(data.newBalance));
-      const result = await setReserveFundBalanceAction(selectedGroup.id, newBalance, data.description || '', appUser.id); // Use appUser.id
+      const result = await setReserveFundBalanceAction(selectedGroup.id, newBalance, data.description || '', appUser.id);
 
       if (result.success && result.newBalance !== undefined) {
         toast({ title: '성공', description: '회비 잔액이 업데이트되었습니다.' });
         setCurrentBalance(result.newBalance);
-        // Optimistically add/update transaction log or re-fetch
         const newLogEntry: ReserveFundTransaction = {
-          id: `temp-${Date.now()}`, // Temporary ID
+          id: `temp-${Date.now()}`,
           groupId: selectedGroup.id,
           type: 'balance_update',
-          amount: result.newBalance, // For balance_update, amount is the new balance.
+          amount: result.newBalance,
           description: data.description || `잔액 ${result.newBalance.toLocaleString()}원으로 설정됨`,
           date: new Date(),
         };
@@ -165,16 +155,14 @@ export function ReserveFundClient() {
     });
   };
   
-  const formatNumber = (value: number | string | undefined | null) => {
+  const formatNumber = (value: number | string | undefined | null): string => {
     if (value === null || value === undefined || value === '') return '';
     if (typeof value === 'number') return value.toLocaleString();
     const num = parseFloat(String(value).replace(/,/g, ''));
     return isNaN(num) ? String(value) : num.toLocaleString();
   };
 
-  const isAdmin = appUser?.role === 'admin';
   const canSetBalance = appUser?.role === 'admin' || (appUser?.role === 'user' && selectedGroup?.isOwned === true);
-  // const isViewer = appUser?.role === 'viewer'; // Not directly used, but good for clarity if needed
 
   const handleGroupSelect = (groupId: string) => {
     const group = accessibleGroups.find(g => g.id === groupId);
@@ -202,20 +190,19 @@ export function ReserveFundClient() {
     );
   }
 
-  // Simplified main title for cards when a group is selected
   const simpleGroupTitle = selectedGroup ? `${selectedGroup.name} 회비` : "그룹 회비";
 
   return (
     <div className="space-y-6">
       <Card className="shadow-lg">
         <CardHeader>
-          <CardTitle className="flex items-center mb-2"> {/* Added mb-2 for spacing below title */}
+          <CardTitle className="flex items-center mb-2">
             <Users className="mr-2 h-6 w-6 text-primary" />
             그룹 선택
           </CardTitle>
         </CardHeader>
-        <CardContent> {/* Moved Select into CardContent for better layout control */}
-          <div className="flex items-center space-x-2 mb-4"> {/* Container for Label + Select */}
+        <CardContent>
+          <div className="flex items-center space-x-2 mb-4">
             <Label htmlFor="group-select-dropdown" className="text-sm font-medium">선택된 그룹:</Label>
             <Select onValueChange={handleGroupSelect} value={selectedGroup?.id || ""}>
               <SelectTrigger id="group-select-dropdown" aria-label="그룹 선택" className="w-auto min-w-[250px] max-w-xs">
@@ -256,7 +243,7 @@ export function ReserveFundClient() {
                     <span className="text-xs">모임에서 회비를 사용하면 이 잔액에서 자동으로 차감됩니다.</span>
                 </CardDescription>
               </div>
-              {canSetBalance && ( // Updated condition here
+              {canSetBalance && (
                 <AlertDialog open={isUpdateDialogOpen} onOpenChange={setIsUpdateDialogOpen}>
                   <AlertDialogTrigger asChild>
                     <Button variant="outline" disabled={isLoadingFundDetails || isSubmitting}>
@@ -266,7 +253,6 @@ export function ReserveFundClient() {
                   <AlertDialogContent className="sm:max-w-md">
                     <AlertDialogHeader>
                       <AlertDialogTitle>'{selectedGroup.name}' 회비 잔액 직접 수정</AlertDialogTitle>
-                      {/* Removed redundant description from here as per feedback, title is clear */}
                     </AlertDialogHeader>
                     <form onSubmit={form.handleSubmit(handleBalanceUpdate)} className="space-y-4 py-4">
                       <div>
@@ -305,14 +291,13 @@ export function ReserveFundClient() {
                 </AlertDialog>
               )}
             </CardHeader>
-            {/* Balance display moved to CardDescription */}
           </Card>
 
           <Card className="shadow-md">
             <CardHeader>
               <CardTitle className="flex items-center gap-2 mb-2">
                 <History className="h-5 w-5 text-primary"/>
-                변경 내역 {/* Static title as per refined interpretation */}
+                변경 내역
               </CardTitle>
               <CardDescription>
                 {selectedGroup ? `'${selectedGroup.name}' 그룹의 ` : ""}

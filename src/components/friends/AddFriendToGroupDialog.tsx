@@ -58,7 +58,6 @@ export function AddFriendToGroupDialog({
   });
 
   useEffect(() => {
-    // Reset form when dialog opens or groupId changes
     if (isOpen) {
       form.reset({ name: '', description: '' });
     }
@@ -91,7 +90,7 @@ export function AddFriendToGroupDialog({
     }
   };
 
-  if (!groupId) return null; // Don't render if no groupId
+  if (!groupId) return null;
 
   return (
     <Dialog open={isOpen} onOpenChange={setIsOpen}>

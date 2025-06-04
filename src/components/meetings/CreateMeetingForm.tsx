@@ -20,7 +20,7 @@ import { useToast } from '@/hooks/use-toast';
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { Switch } from '@/components/ui/switch';
 import { Checkbox } from "@/components/ui/checkbox";
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"; // Added for temporary fee type
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Loader } from '@googlemaps/js-api-loader';
 import usePlacesAutocomplete, { getGeocode, getLatLng } from 'use-places-autocomplete';
 
@@ -28,10 +28,10 @@ const meetingSchemaBase = z.object({
   name: z.string().min(1, '모임 이름을 입력해주세요.').max(100, '모임 이름은 100자 이내여야 합니다.'),
   dateTime: z.date({ required_error: '시작 날짜와 시간을 선택해주세요.' }),
   endTime: z.date().optional(),
-  locationName: z.string().max(100, '장소 이름은 100자 이내여야 합니다.').optional(), // min(1) 제거, optional 추가
+  locationName: z.string().max(100, '장소 이름은 100자 이내여야 합니다.').optional(),
   locationCoordinates: z.object({ lat: z.number(), lng: z.number() }).optional(),
-  participantIds: z.array(z.string()).optional(), // Made optional, will be validated by refine
-  useReserveFund: z.boolean().optional(), // Made optional
+  participantIds: z.array(z.string()).optional(),
+  useReserveFund: z.boolean().optional(),
   isTemporary: z.boolean().optional(),
   temporaryParticipants: z.array(z.object({ name: z.string().min(1, '임시 참여자 이름은 비워둘 수 없습니다.') })).optional(),
   totalFee: z.number().min(0, '총 회비는 0 이상이어야 합니다.').optional(),
@@ -40,30 +40,12 @@ const meetingSchemaBase = z.object({
     (val) => (val === '' || val === undefined || val === null ? undefined : Number(String(val).replace(/,/g, ''))),
     z.number().min(0, '금액은 0 이상이어야 합니다.').optional()
   ),
-  nonReserveFundParticipants: z.array(z.string()).optional(), // Made optional
+  nonReserveFundParticipants: z.array(z.string()).optional(),
   memo: z.string().max(2000, '메모는 2000자 이내여야 합니다.').optional(),
 });
 
-// const meetingSchema = meetingSchemaBase.refine(data => {
-//   if (data.useReserveFund && (data.partialReserveFundAmount === undefined || data.partialReserveFundAmount <= 0)) {
-//     return false;
-//   }
-//   return true;
-// }, {
-//   message: '회비 사용 시, 사용할 회비 금액을 0보다 크게 입력해야 합니다.',
-//   path: ['partialReserveFundAmount'],
-// }).refine(data => {
-//   if (data.endTime && data.dateTime && data.dateTime >= data.endTime) {
-//     return false;
-//   }
-//   return true;
-// }, {
-//   message: '종료 시간은 시작 시간보다 이후여야 합니다.',
-//   path: ['endTime'],
-// });
-
 const meetingSchema = meetingSchemaBase
-  .refine(data => { // 기존 회비 사용 시 금검증
+  .refine(data => {
     if (!data.isTemporary && data.useReserveFund && (data.partialReserveFundAmount === undefined || data.partialReserveFundAmount <= 0)) {
       return false;
     }
@@ -72,7 +54,7 @@ const meetingSchema = meetingSchemaBase
     message: '회비 사용 시, 사용할 회비 금액을 0보다 크게 입력해야 합니다.',
     path: ['partialReserveFundAmount'],
   })
-  .refine(data => { // 기존 종료 시간 검증
+  .refine(data => {
     if (data.endTime && data.dateTime && data.dateTime >= data.endTime) {
       return false;
     }
@@ -81,7 +63,7 @@ const meetingSchema = meetingSchemaBase
     message: '종료 시간은 시작 시간보다 이후여야 합니다.',
     path: ['endTime'],
   })
-  .refine(data => { // 참여자 검증 (기존 모임)
+  .refine(data => {
     if (!data.isTemporary && (!data.participantIds || data.participantIds.length === 0)) {
       return false;
     }
@@ -90,65 +72,31 @@ const meetingSchema = meetingSchemaBase
     message: '기존 모임에는 참여자를 최소 1명 선택해주세요.',
     path: ['participantIds'],
   })
-  .refine(data => { // 참여자 검증 (임시 모임)
+  .refine(data => {
     if (data.isTemporary && (!data.temporaryParticipants || data.temporaryParticipants.length === 0)) {
       return false;
     }
     return true;
   }, {
     message: '임시 모임에는 참여자를 최소 1명 추가해주세요.',
-    path: ['temporaryParticipants'], // 실제 UI와 연결된 경로로 수정 필요할 수 있음
-  })
-  // Removed refine that made temporary fees mandatory. min(0) on fields themselves will validate if provided.
-  .refine(data => { // 임시 모임 회비 유효성 검사 (값이 있다면 0 이상) - This is already covered by min(0) in schema base.
-    if (data.isTemporary) { // This refine is now only for negative checks if min(0) was not present. Given min(0) exists, this refine is redundant or could be more specific.
-      if (data.totalFee !== undefined && data.totalFee < 0) { // min(0) already covers this
-        return false;
-      }
-      if (data.feePerPerson !== undefined && data.feePerPerson < 0) { // min(0) already covers this
-        return false;
-      }
-    }
-    return true;
-  }, {
-    // message: '회비는 0 이상의 값이어야 합니다.', // This message might be too generic if it flags.
-    // Specific field errors from Zod schema base for min(0) are likely better.
-    // For now, let's ensure no conflicting message if values are positive or undefined.
-    // Path can be tricky; if we keep this refine, it should point to a relevant path or be a form-level error.
-    // However, since min(0) is on the fields, this refine might be entirely removable.
-    // Let's simplify and rely on the field-level min(0).
-    // If specific cross-field validation for temp fees is needed later (e.g. if totalFee and feePerPerson are mutually exclusive), a refine would be appropriate.
-    // For now, removing the mandatory check is the main goal. The negative check is already there.
-    // To be safe and ensure no new error messages appear unexpectedly from this refine,
-    // let's just remove the previous mandatory check and ensure this one doesn't cause issues.
-    // The most straightforward way is to remove the previous mandatory refine block entirely.
-    // The min(0) on totalFee and feePerPerson in meetingSchemaBase handles the "0 이상" part.
-    // So, the entire block for "회비 검증 (임시 모임)" can be removed.
-    // Let's re-evaluate: The original task was to make it optional. min(0).optional() in base does this.
-    // The refine was for "one of them must be present". That's what needs to go.
-    // The negative check part of that refine is redundant with min(0).
-    // So, just removing that specific refine block that checks `data.totalFee === undefined && data.feePerPerson === undefined` is the primary goal.
-    // The other part of that refine `if (data.isTemporary && data.totalFee !== undefined && data.totalFee < 0) return false;` is covered by `totalFee: z.number().min(0)...`
-    // Thus, the entire refine block for temporary fee validation can be removed.
-    // This means the last .refine in the provided code will be deleted.
+    path: ['temporaryParticipants'],
   });
 
 type MeetingFormData = z.infer<typeof meetingSchema>;
 
 interface MeetingFormProps {
   friends: Friend[];
-  isLoadingFriends?: boolean; // Added this prop
+  isLoadingFriends?: boolean;
   currentUserId: string;
   isEditMode?: boolean;
   initialData?: Meeting;
-  groupId?: string; // This is the groupId the meeting will be associated with
-  onTemporaryChange?: (isTemporary: boolean) => void;
-  groups?: FriendGroup[]; // List of groups for the "Assign to Group" dropdown
-  selectedGroupId?: string | null; // Currently selected group ID for the meeting
-  onGroupChange?: (id: string | null) => void; // Callback when group selection changes
+  groupId?: string;
+  groups?: FriendGroup[];
+  selectedGroupId?: string | null;
+  onGroupChange?: (id: string | null) => void;
 }
 
-const googleMapsLibraries: ("places" | "maps" | "marker")[] = ["places", "maps", "marker"];
+const googleMapsLibrariesForSearch: ("places" | "maps" | "marker")[] = ["places", "maps", "marker"];
 
 interface LocationSearchInputProps {
   form: ReturnType<typeof useForm<MeetingFormData>>;
@@ -166,9 +114,8 @@ function LocationSearchInput({ form, isPending, isMapsLoaded, mapsLoadError, onL
     setValue: setPlacesValue,
     clearSuggestions: clearPlacesSuggestions,
   } = usePlacesAutocomplete({
-    requestOptions: { /* Optional: configure to your liking */ },
+    requestOptions: {},
     debounce: 300,
-    // disabled: !isMapsLoaded || !!mapsLoadError, // This was the problematic line causing build errors, now removed
   });
 
   const { toast } = useToast();
@@ -177,19 +124,9 @@ function LocationSearchInput({ form, isPending, isMapsLoaded, mapsLoadError, onL
   useEffect(() => {
     const formLocationName = form.getValues('locationName');
     if (formLocationName !== placesValue && !inputFocused) {
-      setPlacesValue(formLocationName || '', false); // Set 'false' to not trigger suggestions
+      setPlacesValue(formLocationName || '', false);
     }
   }, [form, placesValue, setPlacesValue, inputFocused]);
-
-
-  useEffect(() => {
-    if (ready) {
-      console.log("Places Autocomplete ready state: true");
-    } else {
-      console.log("Places Autocomplete ready state: false (isMapsLoaded:", isMapsLoaded, ", mapsLoadError:", mapsLoadError,")");
-    }
-  }, [ready, isMapsLoaded, mapsLoadError]);
-
 
   const handlePlaceSelect = async (suggestion: google.maps.places.AutocompletePrediction) => {
     setPlacesValue(suggestion.description, false);
@@ -215,7 +152,7 @@ function LocationSearchInput({ form, isPending, isMapsLoaded, mapsLoadError, onL
       <div className="relative flex items-center">
         <MapPinIcon className="absolute left-2 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
         <Input
-          id="locationNameInput" // Changed ID for clarity
+          id="locationNameInput"
           value={placesValue}
           onChange={(e) => {
             setPlacesValue(e.target.value);
@@ -228,10 +165,8 @@ function LocationSearchInput({ form, isPending, isMapsLoaded, mapsLoadError, onL
           onFocus={() => setInputFocused(true)}
           onBlur={() => {
             setInputFocused(false);
-            // If there are suggestions and user clicks away, clear them
-            // setTimeout(() => clearPlacesSuggestions(), 100); // Small delay to allow click on suggestion
           }}
-          disabled={!ready || isPending} // Simplified disabled state, relies on `ready` from usePlacesAutocomplete
+          disabled={!ready || isPending}
           className="pl-8"
           placeholder={!isMapsLoaded ? "지도 API 로딩 중..." : mapsLoadError ? `지도 API 로드 실패: ${mapsLoadError.message.substring(0,30)}...` : "장소 검색..."}
           autoComplete="off"
@@ -266,16 +201,13 @@ function LocationSearchInput({ form, isPending, isMapsLoaded, mapsLoadError, onL
 
 export function CreateMeetingForm({
   friends,
-  isLoadingFriends, // Destructure new prop
+  isLoadingFriends,
   currentUserId,
   isEditMode = false,
   initialData,
-  // groupId prop seems redundant if selectedGroupId from parent is used for meeting's group
-  // Let's assume selectedGroupId (passed as prop) is the definitive group for the meeting
-  onTemporaryChange,
   groups = [],
-  selectedGroupId: currentMeetingGroupId, // Renaming for clarity within form, this is the group for the meeting
-  onGroupChange, // This is the callback to parent when form's group dropdown changes
+  selectedGroupId: currentMeetingGroupId,
+  onGroupChange,
 }: MeetingFormProps) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
@@ -284,7 +216,6 @@ export function CreateMeetingForm({
   const [startDateOpen, setStartDateOpen] = useState(false);
   const [endDateOpen, setEndDateOpen] = useState(false);
 
-  // Removed local isTemporaryMeeting state, will use form.watch('isTemporary') directly
   const [temporaryParticipants, setTemporaryParticipants] = useState<{ name: string }[]>([]);
   const [currentTempParticipantName, setCurrentTempParticipantName] = useState('');
   const [tempMeetingFeeType, setTempMeetingFeeType] = useState<'total' | 'perPerson'>('total');
@@ -300,9 +231,6 @@ export function CreateMeetingForm({
   const markerInstanceRef = useRef<google.maps.marker.AdvancedMarkerElement | null>(null);
 
   const [groupPopoverOpen, setGroupPopoverOpen] = useState(false);
-
-  // 1. 컴포넌트 최상단에 추가
-  const isTemporaryInitialized = useRef(false);
 
   const form = useForm<MeetingFormData>({
     resolver: zodResolver(meetingSchema),
@@ -323,11 +251,11 @@ export function CreateMeetingForm({
       feePerPerson: initialData.feePerPerson,
     } : {
       name: '',
-      dateTime: new Date(), // Default to now for new meetings
+      dateTime: new Date(),
       endTime: undefined,
       locationName: '',
       locationCoordinates: undefined,
-      participantIds: friends.map(f => f.id), // 모든 친구가 기본 선택
+      participantIds: friends.map(f => f.id),
       useReserveFund: false,
       partialReserveFundAmount: undefined,
       nonReserveFundParticipants: [],
@@ -339,7 +267,6 @@ export function CreateMeetingForm({
     },
   });
 
-  // useWatch로 모든 필드 구독
   const watchUseReserveFund = useWatch({ control: form.control, name: 'useReserveFund' });
   const watchParticipantIds = useWatch({ control: form.control, name: 'participantIds' });
   const watchedLocationCoordinates = useWatch({ control: form.control, name: 'locationCoordinates' });
@@ -349,22 +276,11 @@ export function CreateMeetingForm({
   const endTimeValue = useWatch({ control: form.control, name: 'endTime' });
   const watchPartialReserveFundAmount = useWatch({ control: form.control, name: 'partialReserveFundAmount' });
   const watchNonReserveFundParticipants = useWatch({ control: form.control, name: 'nonReserveFundParticipants' });
-  const watchTemporaryParticipants = useWatch({ control: form.control, name: 'temporaryParticipants' });
 
-  // selectedParticipants useMemo로 최적화
   const selectedParticipants = useMemo(
     () => friends.filter(friend => watchParticipantIds?.includes(friend.id)),
     [friends, watchParticipantIds]
   );
-
-  // useEffect(() => {
-  //   // This effect calls the onTemporaryChange prop when the form's isTemporary value changes.
-  //   // It's important that onTemporaryChange itself doesn't cause a re-render that changes watchedIsTemporary again.
-  //   // (Assuming onTemporaryChange is a stable function or handled correctly by parent)
-  //   if (onTemporaryChange) {
-  //     onTemporaryChange(watchedIsTemporary || false);
-  //   }
-  // }, [watchedIsTemporary, onTemporaryChange]);
 
   useEffect(() => {
     const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
@@ -372,43 +288,40 @@ export function CreateMeetingForm({
       const errorMsg = "Google Maps API key is not configured. Please set NEXT_PUBLIC_GOOGLE_MAPS_API_KEY.";
       console.error(errorMsg);
       setMapsLoadError(new Error(errorMsg));
-      setIsMapsLoaded(false); // Explicitly set to false
+      setIsMapsLoaded(false);
       return;
     }
 
     const loader = new Loader({
       apiKey: apiKey,
       version: "weekly",
-      libraries: googleMapsLibraries,
+      libraries: googleMapsLibrariesForSearch,
     });
 
-    console.log("Attempting to load Google Maps API...");
     loader.load()
       .then(() => {
         if (!window.google || !window.google.maps || !window.google.maps.places || !window.google.maps.marker || !window.google.maps.marker.AdvancedMarkerElement) {
-          const errorMsg = "Google Maps API or required libraries (places, maps, marker) not found after load. Check API key restrictions or enabled APIs in GCP console.";
+          const errorMsg = "Google Maps API 또는 필수 라이브러리(places, maps, marker) 로드 실패. API 키 제한 또는 GCP 콘솔 설정을 확인하세요.";
           console.error(errorMsg);
           setMapsLoadError(new Error(errorMsg));
           setIsMapsLoaded(false);
           return;
         }
-        console.log("Google Maps API and required libraries loaded successfully.");
         setIsMapsLoaded(true);
         setMapsLoadError(null);
       })
       .catch(e => {
-        console.error("Failed to load Google Maps API. Error details:", e);
+        console.error("Google Maps API 로드 실패. 오류 상세:", e);
         setMapsLoadError(e as Error);
         setIsMapsLoaded(false);
       });
   }, []);
 
-
   useEffect(() => {
     if (showMap && isMapsLoaded && !mapsLoadError && mapContainerRef.current && window.google?.maps?.Map && window.google?.maps?.marker?.AdvancedMarkerElement) {
         const { AdvancedMarkerElement } = window.google.maps.marker;
         
-        const defaultCenter = { lat: 37.5665, lng: 126.9780 }; // Seoul
+        const defaultCenter = { lat: 37.5665, lng: 126.9780 };
         const currentCoords = watchedLocationCoordinates || defaultCenter;
         const zoomLevel = watchedLocationCoordinates ? 15 : 10;
 
@@ -435,11 +348,11 @@ export function CreateMeetingForm({
             } else {
                 markerInstanceRef.current.position = watchedLocationCoordinates;
                 markerInstanceRef.current.title = watchLocationName || '선택된 장소';
-                markerInstanceRef.current.map = mapInstanceRef.current; // Ensure marker is on the map
+                markerInstanceRef.current.map = mapInstanceRef.current;
             }
         } else {
             if (markerInstanceRef.current) {
-                markerInstanceRef.current.map = null; // Hide marker if no coords
+                markerInstanceRef.current.map = null;
             }
         }
     } else if (!showMap && markerInstanceRef.current) {
@@ -449,30 +362,11 @@ export function CreateMeetingForm({
     return () => {
       if (markerInstanceRef.current) {
         markerInstanceRef.current.map = null;
-        // markerInstanceRef.current = null; // Avoid nullifying ref directly here, let React manage it
       }
-      // if (mapInstanceRef.current) { // Map instance cleanup is more complex if needed
-      //   mapInstanceRef.current = null;
-      // }
-      // console.log("Map effect cleanup run");
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps 
-  }, [isMapsLoaded, mapsLoadError, watchedLocationCoordinates, watchLocationName, showMap]); // Removed mapInstanceRef, markerInstanceRef from deps
+  }, [isMapsLoaded, mapsLoadError, watchedLocationCoordinates, watchLocationName, showMap]);
 
-
-  // useEffect(() => {
-  //   // locationName이 ''이고, locationCoordinates가 undefined가 아닐 때만 setValue
-  //   const coords = form.getValues('locationCoordinates');
-  //   if (watchLocationName === '' && coords !== undefined) {
-  //     form.setValue('locationCoordinates', undefined, { shouldValidate: true });
-  //     if (showMap) setShowMap(false);
-  //     return; // setValue 후 바로 return하여 effect가 다시 실행되는 것을 방지
-  //   }
-  //   // eslint-disable-next-line react-hooks/exhaustive-deps
-  // }, [watchLocationName]);
-
-
-  // If you need to re-initialize local state for temporary meeting fields when initialData changes, do it here:
   useEffect(() => {
     if (isEditMode && initialData) {
       setTemporaryParticipants(initialData.isTemporary ? (initialData.temporaryParticipants || []) : []);
@@ -494,13 +388,12 @@ export function CreateMeetingForm({
     }
   }, [isEditMode, initialData]);
 
-  const formatNumberInput = (value: number | string | undefined) => {
+  const formatNumberInput = (value: number | string | undefined): string => {
     if (value === undefined || value === '' || value === null) return '';
     const num = parseFloat(String(value).replace(/,/g, ''));
     return isNaN(num) ? '' : num.toLocaleString();
   };
 
-  // --- 회비 금액 입력: 입력 중에는 raw value, onBlur에서만 콤마 포맷 적용 ---
   const [reserveFundInput, setReserveFundInput] = useState<string>(
     initialData && initialData.partialReserveFundAmount !== undefined && initialData.partialReserveFundAmount !== null
       ? Number(initialData.partialReserveFundAmount).toLocaleString()
@@ -517,34 +410,34 @@ export function CreateMeetingForm({
 
   const onSubmit = (data: MeetingFormData) => {
     startTransition(async () => {
-      let payload: Omit<Meeting, 'id' | 'createdAt' | 'isSettled'>;
+      type PayloadType = Omit<Meeting, 'id' | 'createdAt' | 'isSettled' | 'isShareEnabled' | 'shareToken' | 'shareExpiryDate'> & { creatorId: string };
+      let payloadForDb: PayloadType;
 
       if (data.isTemporary) {
-        payload = {
+        payloadForDb = {
           name: data.name,
           dateTime: data.dateTime,
           endTime: data.endTime,
-          locationName: data.locationName || '', // Ensure string
+          locationName: data.locationName || '',
           locationCoordinates: data.locationCoordinates || undefined,
           creatorId: currentUserId,
-          groupId: currentMeetingGroupId || (initialData?.groupId ?? ''), // Use currentMeetingGroupId
+          groupId: currentMeetingGroupId || (initialData?.groupId ?? ''),
           memo: data.memo || undefined,
           isTemporary: true,
           temporaryParticipants: data.temporaryParticipants || [],
           totalFee: data.totalFee,
           feePerPerson: data.feePerPerson,
-          // 기존 모임 필드는 초기화/제외
           participantIds: [],
           useReserveFund: false,
           partialReserveFundAmount: undefined,
           nonReserveFundParticipants: [],
         };
       } else {
-        payload = {
+        payloadForDb = {
           name: data.name,
           dateTime: data.dateTime,
           endTime: data.endTime,
-          locationName: data.locationName || '', // Ensure string
+          locationName: data.locationName || '',
           locationCoordinates: data.locationCoordinates || undefined,
           participantIds: data.participantIds || [],
           creatorId: currentUserId,
@@ -555,20 +448,16 @@ export function CreateMeetingForm({
               : undefined,
           nonReserveFundParticipants: data.nonReserveFundParticipants || [],
           memo: data.memo || undefined,
-          groupId: currentMeetingGroupId || (initialData?.groupId ?? ''), // Use currentMeetingGroupId
+          groupId: currentMeetingGroupId || (initialData?.groupId ?? ''),
           isTemporary: false,
-          // 임시 모임 필드는 초기화/제외
           temporaryParticipants: undefined,
           totalFee: undefined,
           feePerPerson: undefined,
         };
       }
 
-      // Firestore에 저장 시 undefined가 아닌 null로 저장하고 싶다면 여기서 변환
-      // 예: payload.endTime = payload.endTime || null;
-
       if (isEditMode && initialData) {
-        const result = await updateMeetingAction(initialData.id, payload, currentUserId);
+        const result = await updateMeetingAction(initialData.id, payloadForDb as Partial<Meeting>, currentUserId);
         if (result.success && result.meeting) {
           toast({ title: '성공', description: '모임 정보가 수정되었습니다.' });
           router.push(`/meetings/${result.meeting.id}`);
@@ -581,12 +470,11 @@ export function CreateMeetingForm({
           });
         }
       } else {
-        // 로그인 체크: currentUserId 없으면 에러
         if (!currentUserId) {
           toast({ title: '로그인이 필요합니다.', description: '로그인 후 다시 시도해 주세요.', variant: 'destructive' });
           return;
         }
-        const result = await createMeetingAction(payload, currentUserId);
+        const result = await createMeetingAction(payloadForDb, currentUserId);
         if (result.success && result.meeting) {
           toast({ title: '성공', description: '새로운 모임이 생성되었습니다.' });
           router.push(`/meetings/${result.meeting.id}`);
@@ -602,11 +490,9 @@ export function CreateMeetingForm({
   };
 
   const handleLocationSelected = useCallback((coords: { lat: number; lng: number } | undefined, name: string) => {
-    if (!coords && !name && showMap) { // If location is cleared
+    if (!coords && !name && showMap) {
         setShowMap(false);
     }
-    // If coords are selected, user can click "지도 보기" to show map.
-    // No automatic showing of map on selection.
   }, [showMap]);
 
   const handleToggleMap = () => {
@@ -618,7 +504,6 @@ export function CreateMeetingForm({
     }
   };
 
-  // useMemo로 disabled 상태 미리 계산
   const isFormDisabled = useMemo(() => isPending || (isEditMode && initialData?.isSettled), [isPending, isEditMode, initialData]);
 
   return (
@@ -629,7 +514,6 @@ export function CreateMeetingForm({
         {form.formState.errors.name && <p className="text-sm text-destructive mt-1">{form.formState.errors.name.message}</p>}
       </div>
 
-      {/* Temporary Meeting Switch moved here */}
       <div className="mb-4">
         <div className="flex items-center space-x-2 mt-2">
           <Controller
@@ -640,7 +524,7 @@ export function CreateMeetingForm({
                 id="temporaryMeetingSwitch"
                 checked={!!field.value}
                 onCheckedChange={field.onChange}
-                disabled={isFormDisabled}
+                disabled={isFormDisabled || isEditMode}
               />
             )}
           />
@@ -649,8 +533,6 @@ export function CreateMeetingForm({
         {form.formState.errors.isTemporary && <p className="text-sm text-destructive mt-1">{form.formState.errors.isTemporary.message}</p>}
       </div>
 
-      {/* 그룹 선택 드롭다운: 임시 모임이 아닐 때만 표시, 임시 모임 UI 바로 아래 */}
-      {/* Ensure `groups` is not empty and `onGroupChange` (renamed from setSelectedGroupId in parent) is provided */}
       {!watchedIsTemporary && groups && groups.length > 0 && typeof onGroupChange === 'function' && (
         <div className="mt-2 mb-4">
           <label className="block mb-1 font-medium">친구 그룹 선택 {!initialData?.groupId && <span className="text-destructive">*</span>}</label>
@@ -682,8 +564,6 @@ export function CreateMeetingForm({
                         onSelect={() => {
                           if (onGroupChange) onGroupChange(group.id);
                           setGroupPopoverOpen(false);
-                          // 그룹 선택 시 해당 그룹의 모든 친구를 참여자로 자동 선택
-                          // group.memberIds를 사용하여 그룹의 멤버 ID로 참여자 지정
                           const groupFriends = Array.isArray(group.memberIds) ? group.memberIds : [];
                           form.setValue('participantIds', groupFriends, { shouldValidate: true });
                         }}
@@ -742,9 +622,9 @@ export function CreateMeetingForm({
                 defaultValue={dateTimeValue ? format(dateTimeValue, "HH:mm") : "12:00"}
                 onChange={(e) => {
                   const newTime = e.target.value;
-                  const currentDateTime = dateTimeValue || new Date(); // Fallback to new Date() if dateTime is undefined
+                  const currentDateTime = dateTimeValue || new Date();
                   const [hours, minutes] = newTime.split(':').map(Number);
-                  const newDate = new Date(currentDateTime); // Create a new Date object to avoid mutating the original
+                  const newDate = new Date(currentDateTime);
                   newDate.setHours(hours, minutes, 0, 0);
                   form.setValue('dateTime', newDate, { shouldValidate: true });
                 }}
@@ -774,7 +654,7 @@ export function CreateMeetingForm({
               <CalendarIcon className="mr-2 h-4 w-4" />
               {
                 (() => {
-                  const val = endTimeValue; // Use the watched value directly
+                  const val = endTimeValue;
                   return val instanceof Date && !isNaN(val.getTime())
                     ? format(val, 'PPP HH:mm', { locale: ko })
                     : <span>날짜 및 시간 선택</span>;
@@ -808,10 +688,9 @@ export function CreateMeetingForm({
                 defaultValue={endTimeValue ? format(endTimeValue, "HH:mm") : (dateTimeValue ? format(dateTimeValue, "HH:mm") : "12:00")}
                 onChange={(e) => {
                   const newTime = e.target.value;
-                  // Use endTimeValue if it exists, otherwise dateTimeValue, or fallback to new Date()
                   const baseDate = form.watch('endTime') || form.watch('dateTime') || new Date();
                   const [hours, minutes] = newTime.split(':').map(Number);
-                  const newDate = new Date(baseDate); // Create new Date object
+                  const newDate = new Date(baseDate);
                   newDate.setHours(hours, minutes, 0, 0);
                   form.setValue('endTime', newDate, { shouldValidate: true });
                 }}
@@ -826,7 +705,7 @@ export function CreateMeetingForm({
       </div>
 
       <div className="space-y-2">
-        <Label htmlFor="locationNameInput" className={cn((isEditMode && initialData?.isSettled) && "text-muted-foreground")}>장소</Label> {/* Asterisk removed */}
+        <Label htmlFor="locationNameInput" className={cn((isEditMode && initialData?.isSettled) && "text-muted-foreground")}>장소</Label>
         {isMapsLoaded && !mapsLoadError ? (
           <LocationSearchInput
             form={form}
@@ -839,7 +718,7 @@ export function CreateMeetingForm({
             <div className="relative flex items-center">
                 <MapPinIcon className="absolute left-2 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                 <Input
-                    id="locationNameFallbackInput" // Fallback ID
+                    id="locationNameFallbackInput"
                     value={watchLocationName}
                     onChange={(e) => form.setValue('locationName', e.target.value, {shouldValidate: true})}
                     disabled={isPending || (isEditMode && initialData?.isSettled)}
@@ -862,7 +741,6 @@ export function CreateMeetingForm({
                 <Eye className="mr-2 h-4 w-4" />
                 {showMap ? '지도 숨기기' : '지도 보기'}
             </Button>
-            {/* 외부 지도 보기 버튼 추가 */}
             {(watchLocationName || watchedLocationCoordinates) && (
                 <Button
                     type="button"
@@ -906,7 +784,7 @@ export function CreateMeetingForm({
             {(mapsLoadError && showMap) && <p className="flex items-center justify-center h-full text-muted-foreground">지도 API 로드 실패: {mapsLoadError.message}</p>}
       </div>
 
-      {!watchedIsTemporary && ( // Corrected: isTemporaryMeeting to watchedIsTemporary
+      {!watchedIsTemporary && (
         <div className="space-y-2">
           <div className="flex items-center space-x-2">
             <Controller
@@ -917,7 +795,7 @@ export function CreateMeetingForm({
                   id="useReserveFund"
                   checked={field.value || false}
                   onCheckedChange={field.onChange}
-                  disabled={isPending || (isEditMode && initialData?.isSettled) || watchedIsTemporary} // Corrected
+                  disabled={isPending || (isEditMode && initialData?.isSettled) || watchedIsTemporary}
                 />
               )}
             />
@@ -933,7 +811,7 @@ export function CreateMeetingForm({
             </Label>
           </div>
 
-          {watchUseReserveFund && !watchedIsTemporary && ( // Use watchedIsTemporary
+          {watchUseReserveFund && !watchedIsTemporary && (
             <div className="space-y-4 mt-4 pl-2 border-l-2 ml-2">
               <div>
                 <Label
@@ -951,7 +829,6 @@ export function CreateMeetingForm({
                       type="text"
                       value={reserveFundInput}
                       onChange={e => {
-                        // 숫자만 허용, 앞자리 0 제거, 모두 지울 수 있음
                         let raw = e.target.value.replace(/[^0-9]/g, '');
                         if (raw.startsWith('0') && raw.length > 1) raw = raw.replace(/^0+/, '');
                         if (raw === '') {
@@ -964,7 +841,6 @@ export function CreateMeetingForm({
                         }
                       }}
                       onBlur={e => {
-                        // 포맷팅: 콤마 추가, 모두 지울 수 있음
                         const raw = e.target.value.replace(/[^0-9]/g, '');
                         if (raw === '') {
                           setReserveFundInput('');
@@ -975,7 +851,7 @@ export function CreateMeetingForm({
                           field.onChange(Number(raw));
                         }
                       }}
-                      disabled={isPending || (isEditMode && initialData?.isSettled) || watchedIsTemporary} // Corrected here
+                      disabled={isPending || (isEditMode && initialData?.isSettled) || watchedIsTemporary}
                       placeholder="0"
                       autoComplete="off"
                     />
@@ -1095,7 +971,6 @@ export function CreateMeetingForm({
                  if (!(isEditMode && initialData?.isSettled)) setTempMeetingFeeType(value);
               }}
               className="flex space-x-4"
-              // disabled prop for RadioGroup should be applied to items if needed or handled by parent disabled state
             >
               <div className="flex items-center space-x-2">
                 <RadioGroupItem value="total" id="tempFeeTotal" disabled={isPending || (isEditMode && initialData?.isSettled)} />
@@ -1133,7 +1008,6 @@ export function CreateMeetingForm({
             )}
             {form.formState.errors.totalFee && tempMeetingFeeType === 'total' && <p className="text-sm text-destructive mt-1">{form.formState.errors.totalFee.message}</p>}
             {form.formState.errors.feePerPerson && tempMeetingFeeType === 'perPerson' && <p className="text-sm text-destructive mt-1">{form.formState.errors.feePerPerson.message}</p>}
-             {/* Combined error for either fee type not being set for temporary meeting */}
             {form.formState.errors.totalFee && form.formState.errors.totalFee.type === 'custom' && <p className="text-sm text-destructive mt-1">{form.formState.errors.totalFee.message}</p>}
 
           </div>
@@ -1141,7 +1015,7 @@ export function CreateMeetingForm({
       )}
 
 
-      {!watchedIsTemporary && ( // Corrected: isTemporaryMeeting to watchedIsTemporary
+      {!watchedIsTemporary && (
         <div>
           <Label className={cn((isEditMode && initialData?.isSettled) && "text-muted-foreground", watchedIsTemporary && "text-muted-foreground")}>
             참여자 <span className="text-destructive">*</span>
@@ -1155,9 +1029,9 @@ export function CreateMeetingForm({
                 className={cn(
                   "w-full justify-between",
                   (isEditMode && initialData?.isSettled) && "bg-muted/50 cursor-not-allowed",
-                  watchedIsTemporary && "bg-muted/50 cursor-not-allowed opacity-50" // Use watchedIsTemporary
+                  watchedIsTemporary && "bg-muted/50 cursor-not-allowed opacity-50"
                 )}
-                disabled={isPending || (isEditMode && initialData?.isSettled) || watchedIsTemporary} // Use watchedIsTemporary
+                disabled={isPending || (isEditMode && initialData?.isSettled) || watchedIsTemporary}
               >
                 {selectedParticipants.length > 0
                   ? selectedParticipants.map(f => f.name + (f.description ? ` (${f.description})` : "")).join(', ')
@@ -1266,4 +1140,3 @@ export function CreateMeetingForm({
     </form>
   );
 }
-

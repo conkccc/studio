@@ -3,10 +3,9 @@
 import React, { createContext, useContext, useEffect, useState, ReactNode } from 'react';
 import type { User as FirebaseUser } from 'firebase/auth';
 import { onAuthStateChanged, signOut as firebaseSignOut } from 'firebase/auth';
-import { auth, db } from '@/lib/firebase';
+import { auth } from '@/lib/firebase';
 import { useRouter, usePathname } from 'next/navigation';
-import { doc, getDoc, Timestamp } from 'firebase/firestore';
-import { addUserOnLogin, getUserById } from '@/lib/data-store';
+import { addUserOnLogin, getUserById as dbGetUserById } from '@/lib/data-store'; // getUserById 별칭 사용
 import type { User } from '@/lib/types';
 
 interface AuthContextValue {
@@ -39,25 +38,12 @@ export function AuthProvider({ children }: AuthProviderProps) {
       try {
         if (user) {
           setCurrentUser(user);
-          const userDocRef = doc(db, 'users', user.uid);
-          const userDocSnap = await getDoc(userDocRef);
+          let appUserData = await dbGetUserById(user.uid);
 
-          if (userDocSnap.exists()) {
-            // Cast directly to User to ensure all fields, including optional ones like refFriendGroupIds, are considered.
-            const fetchedDBUser = userDocSnap.data() as User;
-            const processedAppUser: User = {
-              id: user.uid,
-              email: fetchedDBUser.email || user.email, // Fallback to FirebaseUser basic profile
-              name: fetchedDBUser.name || user.displayName, // Fallback
-              role: fetchedDBUser.role, // From Firestore
-              createdAt: fetchedDBUser.createdAt instanceof Timestamp
-                          ? fetchedDBUser.createdAt.toDate()
-                          : new Date(fetchedDBUser.createdAt || Date.now()),
-              friendGroupIds: fetchedDBUser.friendGroupIds || undefined, // Renamed from refFriendGroupIds
-            };
-            setAppUser(processedAppUser);
-            setUserRole(processedAppUser.role);
-            setIsAdmin(processedAppUser.role === 'admin');
+          if (appUserData) {
+            setAppUser(appUserData);
+            setUserRole(appUserData.role);
+            setIsAdmin(appUserData.role === 'admin');
           } else {
             const newAppUser = await addUserOnLogin({
               id: user.uid,
@@ -65,8 +51,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
               name: user.displayName,
             });
             setAppUser(newAppUser);
-            setUserRole(newAppUser.role); // 'admin' | 'user' | 'none' 모두 허용
-            setIsAdmin(newAppUser.role === 'admin'); // Will be false
+            setUserRole(newAppUser.role);
+            setIsAdmin(newAppUser.role === 'admin');
           }
         } else {
           setCurrentUser(null);
@@ -90,7 +76,6 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const signOut = async () => {
     try {
       await firebaseSignOut(auth);
-      // States will be reset by onAuthStateChanged
       const publicPathsForSignOut = ['/login', '/share/meeting'];
       if (!publicPathsForSignOut.some(p => pathname.startsWith(p))) {
         router.push('/login');

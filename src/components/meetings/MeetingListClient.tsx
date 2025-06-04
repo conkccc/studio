@@ -15,14 +15,14 @@ import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Button } from '@/components/ui/button';
 import { ChevronLeft, ChevronRight, PlusCircle, Loader2 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
-import { getMeetingsForUserAction, getAllUsersAction } from '@/lib/actions'; // Added getAllUsersAction
+import { getMeetingsForUserAction, getAllUsersAction } from '@/lib/actions';
 import { useToast } from '@/hooks/use-toast';
-import Link from 'next/link'; // For "새 모임 만들기" button
+import Link from 'next/link';
 
-const MEETINGS_PER_PAGE = 9; // Example: 9 meetings per page for a 3-col layout
+const MEETINGS_PER_PAGE = 9;
 
 interface MeetingListClientProps {
-  allFriends: Friend[]; // Keep allFriends as MeetingCard uses it for participants display
+  allFriends: Friend[];
 }
 
 export function MeetingListClient({ allFriends }: MeetingListClientProps) {
@@ -33,7 +33,7 @@ export function MeetingListClient({ allFriends }: MeetingListClientProps) {
   const { toast } = useToast();
 
   const [meetings, setMeetings] = useState<Meeting[]>([]);
-  const [allUsers, setAllUsers] = useState<User[]>([]); // State for all users
+  const [allUsers, setAllUsers] = useState<User[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [availableYears, setAvailableYears] = useState<number[]>([]);
   const [totalPages, setTotalPages] = useState(0);
@@ -41,17 +41,16 @@ export function MeetingListClient({ allFriends }: MeetingListClientProps) {
   const selectedYearParam = searchParams.get('year');
   const currentPageParam = searchParams.get('page');
 
-  // Default activeYear to current year string if no year param; "all" remains an option for explicit selection
   const activeYear = useMemo(() => selectedYearParam || new Date().getFullYear().toString(), [selectedYearParam]);
   const currentPage = useMemo(() => parseInt(currentPageParam || "1", 10), [currentPageParam]);
 
   const [filterType, setFilterType] = useState<'all' | 'regular' | 'temporary'>('all');
 
-  const fetchData = useCallback(async () => { // Renamed from fetchMeetings to fetchData
+  const fetchData = useCallback(async () => {
     if (authLoading || !currentUser?.uid) {
       setIsLoading(false);
       setMeetings([]);
-      setAllUsers([]); // Clear allUsers as well
+      setAllUsers([]);
       setTotalPages(0);
       setAvailableYears([]);
       return;
@@ -60,7 +59,6 @@ export function MeetingListClient({ allFriends }: MeetingListClientProps) {
     try {
       const yearToFetch = activeYear === "all" ? undefined : parseInt(activeYear, 10);
 
-      // Fetch meetings and all users in parallel
       const [meetingsResult, usersResult] = await Promise.all([
         getMeetingsForUserAction({
           requestingUserId: currentUser.uid,
@@ -68,7 +66,7 @@ export function MeetingListClient({ allFriends }: MeetingListClientProps) {
           page: currentPage,
           limitParam: MEETINGS_PER_PAGE,
         }),
-        getAllUsersAction() // Fetch all users
+        getAllUsersAction()
       ]);
 
       if (meetingsResult.success) {
@@ -99,7 +97,7 @@ export function MeetingListClient({ allFriends }: MeetingListClientProps) {
   }, [currentUser, authLoading, activeYear, currentPage, toast]);
 
   useEffect(() => {
-    fetchData(); // Call renamed function
+    fetchData();
   }, [fetchData]);
 
   const handleYearChange = (year: string) => {
@@ -109,7 +107,7 @@ export function MeetingListClient({ allFriends }: MeetingListClientProps) {
     } else {
       current.set("year", year);
     }
-    current.set("page", "1"); // Reset page when year changes
+    current.set("page", "1");
     router.push(`${pathname}?${current.toString()}`);
   };
 
@@ -130,8 +128,6 @@ export function MeetingListClient({ allFriends }: MeetingListClientProps) {
     return meetings;
   }, [meetings, filterType]);
 
-  // currentUser might be null here if still authLoading or logged out
-  // appUser is used here for role check as it's our Firestore-backed user profile
   const canCreateMeeting = appUser && (appUser.role === 'user' || appUser.role === 'admin');
 
   return (
@@ -194,7 +190,6 @@ export function MeetingListClient({ allFriends }: MeetingListClientProps) {
                   <ChevronLeft className="h-4 w-4" />
                   이전
                 </Button>
-                {/* Basic pagination display - can be enhanced */}
                 <span className="text-sm text-muted-foreground">
                   {currentPage} / {totalPages}
                 </span>
