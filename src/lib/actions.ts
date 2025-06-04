@@ -29,7 +29,7 @@ import {
   getUsers as dbGetUsers, // Import getUsers for getAllUsersAction
 } from './data-store';
 import type { Friend, Meeting, Expense, ReserveFundTransaction, User, FriendGroup } from './types';
-import { Timestamp, arrayRemove as firestoreArrayRemove, arrayUnion as firestoreArrayUnion } from 'firebase/firestore'; // Added firestoreArrayUnion
+import { Timestamp, arrayRemove as firestoreArrayRemove, arrayUnion as firestoreArrayUnion, deleteField } from 'firebase/firestore'; // Added deleteField
 import { nanoid } from 'nanoid';
 import { addDays } from 'date-fns';
 import { db } from './firebase';
@@ -408,18 +408,45 @@ export async function updateMeetingAction(
 
 
     // Handle location fields for Firestore compatibility
-    if (meetingDataToUpdate.hasOwnProperty('locationName')) {
-      meetingDataToUpdate.locationName = meetingDataToUpdate.locationName || '';
-    }
     // If locationName is being set (even to empty) and locationCoordinates is not explicitly provided in payload,
-    // or if locationName is cleared, locationCoordinates should be nulled out.
-    if (meetingDataToUpdate.hasOwnProperty('locationCoordinates')) {
-      meetingDataToUpdate.locationCoordinates = meetingDataToUpdate.locationCoordinates || undefined;
-    } else if (meetingDataToUpdate.hasOwnProperty('locationName')) {
-      // If locationName was changed/set, and coordinates are not in payload, set them to null
-      // to ensure consistency, e.g. if a user clears a location search then types a name manually.
-      meetingDataToUpdate.locationCoordinates = undefined;
+    // or if locationName is cleared, locationCoordinates should be handled.
+    if (payload.hasOwnProperty('locationName')) { // locationName is in the payload
+      meetingDataToUpdate.locationName = payload.locationName || ''; // Set to empty string if null/undefined
+      if (!payload.hasOwnProperty('locationCoordinates')) {
+        // If locationName is being updated but locationCoordinates is not,
+        // and locationName becomes empty, then locationCoordinates should be removed.
+        if (!meetingDataToUpdate.locationName) {
+          meetingDataToUpdate.locationCoordinates = deleteField();
+        }
+        // If locationName is not empty, and coordinates were not in payload, existing coordinates are kept (by initial spread).
+        // Or, if new name implies new coords, form should send new coords or undefined.
+      }
     }
+
+    // Explicitly handle locationCoordinates from payload
+    if (payload.hasOwnProperty('locationCoordinates')) {
+      if (payload.locationCoordinates === undefined) {
+        meetingDataToUpdate.locationCoordinates = deleteField();
+      } else {
+        // This will set it to null if payload.locationCoordinates is null, or to the GeoPoint object
+        meetingDataToUpdate.locationCoordinates = payload.locationCoordinates;
+      }
+    }
+
+    // Handle other optional fields that might be explicitly set to undefined in payload
+    const optionalFieldsToDeleteIfUndefined: (keyof Partial<Omit<Meeting, 'id' | 'createdAt'>>)[] = [
+      'endTime', 'memo', 'partialReserveFundAmount', // Add other relevant fields
+    ];
+
+    optionalFieldsToDeleteIfUndefined.forEach(fieldKey => {
+      if (payload.hasOwnProperty(fieldKey) && payload[fieldKey] === undefined) {
+        if (fieldKey === 'endTime') { // endTime can be null
+          meetingDataToUpdate[fieldKey] = null;
+        } else {
+          meetingDataToUpdate[fieldKey] = deleteField();
+        }
+      }
+    });
 
 
     if (meetingToUpdate.isTemporary) { // If existing meeting is temporary
@@ -1058,23 +1085,40 @@ export async function getFriendGroupsForUserAction(currentUserId: string) {
       return { success: false, error: "사용자 정보를 찾을 수 없습니다." };
     }
 
-    // dbGetFriendGroupsByUser already fetches groups owned by user OR referenced in user.friendGroupIds
-    const allAccessibleGroups = await dbGetFriendGroupsByUser(currentUserId);
-
-    if (currentUser.role === 'viewer') {
-      // Viewers should only see groups explicitly referenced in their friendGroupIds
-      const referencedIds = currentUser.friendGroupIds || []; // Renamed
-      const filteredGroups = allAccessibleGroups.filter(group => referencedIds.includes(group.id));
-      return { success: true, groups: filteredGroups };
+    let rawGroups: FriendGroup[] = [];
+    if (currentUser.role === 'admin') {
+      rawGroups = await dbGetAllFriendGroups();
     } else {
-      // Admin and User roles can see all groups they own or are referenced in.
-      return { success: true, groups: allAccessibleGroups };
+      // For 'user' and 'viewer', dbGetFriendGroupsByUser handles owned and referenced groups.
+      // It's assumed this function already correctly sets isOwned/isReferenced or the UI handles it.
+      // For viewers, an additional filter might be applied if dbGetFriendGroupsByUser doesn't strictly limit.
+      rawGroups = await dbGetFriendGroupsByUser(currentUserId);
+      if (currentUser.role === 'viewer') {
+        const referencedIds = currentUser.friendGroupIds || [];
+        rawGroups = rawGroups.filter(group => referencedIds.includes(group.id));
+      }
     }
+
+    // Process groups to ensure isOwned and isReferenced flags are consistent, especially for admin
+    const processedGroups = rawGroups.map(group => ({
+      ...group,
+      isOwned: group.ownerUserId === currentUserId,
+      isReferenced: currentUser.friendGroupIds?.includes(group.id) || false,
+    }));
+
+    // Sort all groups by createdAt date
+    const sortedGroups = processedGroups.sort((a, b) => {
+      const dateA = a.createdAt instanceof Timestamp ? a.createdAt.toMillis() : (a.createdAt ? new Date(a.createdAt).getTime() : 0);
+      const dateB = b.createdAt instanceof Timestamp ? b.createdAt.toMillis() : (b.createdAt ? new Date(b.createdAt).getTime() : 0);
+      return dateB - dateA;
+    });
+
+    return { success: true, groups: sortedGroups };
 
   } catch (error) {
     console.error('getFriendGroupsForUserAction Error:', error);
     const errorMessage = error instanceof Error ? error.message : '친구 그룹 목록 조회 중 오류가 발생했습니다.';
-    return { success: false, error: errorMessage };
+    return { success: false, error: errorMessage, groups: [] }; // Ensure groups is an empty array on error
   }
 }
 

@@ -8,15 +8,13 @@ import * as z from 'zod';
 import {
   setReserveFundBalanceAction,
   getFriendGroupsForUserAction,
-  // We need actions to get balance and transactions for a selected group
-  // These might be direct data-store calls if actions are simple wrappers
-  // Or new actions: getReserveFundDetailsForGroupAction
+  getAllUsersAction // Import getAllUsersAction
 } from '@/lib/actions';
 import {
   getReserveFundBalanceByGroup,
   getLoggedReserveFundTransactionsByGroup
 } from '@/lib/data-store'; // Assuming direct use for now
-import type { ReserveFundTransaction, FriendGroup, User } from '@/lib/types'; // Added FriendGroup, User
+import type { ReserveFundTransaction, FriendGroup, User } from '@/lib/types';
 import { useToast } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -56,11 +54,12 @@ type BalanceUpdateFormData = z.infer<typeof balanceUpdateSchema>;
 export function ReserveFundClient() {
   const { currentUser, appUser, loading: authLoading } = useAuth(); // Added appUser, authLoading
   const [accessibleGroups, setAccessibleGroups] = useState<DisplayFriendGroup[]>([]);
+  const [allUsers, setAllUsers] = useState<User[]>([]); // State for all users
   const [selectedGroup, setSelectedGroup] = useState<DisplayFriendGroup | null>(null);
   const [transactions, setTransactions] = useState<ReserveFundTransaction[]>([]);
   const [currentBalance, setCurrentBalance] = useState<number | null>(null);
 
-  const [isLoadingGroups, setIsLoadingGroups] = useState(true);
+  const [isLoadingData, setIsLoadingData] = useState(true); // Combined loading state for groups and users
   const [isLoadingFundDetails, setIsLoadingFundDetails] = useState(false);
   const [isUpdateDialogOpen, setIsUpdateDialogOpen] = useState(false);
   const [isSubmitting, startTransition] = useTransition(); // For form submission
@@ -71,34 +70,43 @@ export function ReserveFundClient() {
     defaultValues: { newBalance: 0, description: '수동 잔액 조정' },
   });
 
-  // Fetch accessible groups
+  // Fetch accessible groups and all users
   useEffect(() => {
-    if (authLoading || !currentUser?.uid || !appUser) { // Updated guard
-      setIsLoadingGroups(false);
+    if (authLoading || !currentUser?.uid || !appUser?.id) {
+      setIsLoadingData(false);
       setAccessibleGroups([]);
+      setAllUsers([]);
       return;
     }
-    setIsLoadingGroups(true);
-    getFriendGroupsForUserAction(appUser.id) // Use appUser.id
-      .then(result => {
-        if (result.success && result.groups) {
-          const processedGroups: DisplayFriendGroup[] = result.groups.map(g => ({
-            ...g,
-            isOwned: g.ownerUserId === appUser.id, // Use appUser.id
-          }));
-          setAccessibleGroups(processedGroups);
-          // Auto-select first group if available
-          if (processedGroups.length > 0) {
-            // setSelectedGroup(processedGroups[0]); // This will trigger another effect
-          }
-        } else {
-          toast({ title: '오류', description: result.error || '접근 가능한 그룹 목록을 불러오지 못했습니다.', variant: 'destructive' });
-          setAccessibleGroups([]);
-        }
-      })
-      .catch(() => toast({ title: '오류', description: '그룹 목록 로딩 중 오류 발생.', variant: 'destructive' }))
-      .finally(() => setIsLoadingGroups(false));
-  }, [currentUser, appUser, authLoading, toast]); // Added appUser, authLoading
+    setIsLoadingData(true);
+    Promise.all([
+      getFriendGroupsForUserAction(appUser.id),
+      getAllUsersAction()
+    ]).then(([groupsResult, usersResult]) => {
+      if (groupsResult.success && groupsResult.groups) {
+        // getFriendGroupsForUserAction already sets isOwned and isReferenced
+        setAccessibleGroups(groupsResult.groups as DisplayFriendGroup[]);
+        // Auto-select first group if available (optional, can be removed if explicit selection is preferred)
+        // if (groupsResult.groups.length > 0) {
+        //   setSelectedGroup(groupsResult.groups[0] as DisplayFriendGroup);
+        // }
+      } else {
+        toast({ title: '오류', description: groupsResult.error || '접근 가능한 그룹 목록을 불러오지 못했습니다.', variant: 'destructive' });
+        setAccessibleGroups([]);
+      }
+
+      if (usersResult.success && usersResult.users) {
+        setAllUsers(usersResult.users);
+      } else {
+        toast({ title: '오류', description: usersResult.error || '사용자 목록을 불러오는데 실패했습니다.', variant: 'destructive' });
+        setAllUsers([]);
+      }
+    }).catch(() => {
+      toast({ title: '오류', description: '초기 데이터 로딩 중 오류 발생.', variant: 'destructive' });
+      setAccessibleGroups([]);
+      setAllUsers([]);
+    }).finally(() => setIsLoadingData(false));
+  }, [currentUser?.uid, appUser, authLoading, toast]); // appUser.id is part of appUser dependency
 
   // Fetch fund details when selectedGroup changes
   useEffect(() => {
@@ -173,11 +181,11 @@ export function ReserveFundClient() {
     setSelectedGroup(group || null);
   };
 
-  if (authLoading || isLoadingGroups) { // Combined loading state
+  if (authLoading || isLoadingData) {
     return <div className="flex justify-center items-center h-40"><Loader2 className="h-8 w-8 animate-spin text-primary" /> <p className="ml-2">정보 로딩 중...</p></div>;
   }
 
-  if (!appUser) { // Check appUser for rendering content
+  if (!appUser) {
      return <p className="text-center text-muted-foreground py-8">로그인이 필요합니다.</p>;
   }
 
@@ -214,9 +222,19 @@ export function ReserveFundClient() {
                 <SelectValue placeholder="회비 정보를 볼 그룹을 선택하세요..." />
               </SelectTrigger>
               <SelectContent>
-                {accessibleGroups.map(group => (
-                  <SelectItem key={group.id} value={group.id}>{group.name} {group.isOwned ? '(내 그룹)' : ''}</SelectItem>
-                ))}
+                {accessibleGroups.map(group => {
+                  const ownerName = appUser?.role === 'admin' && !group.isOwned
+                                    ? allUsers.find(u => u.id === group.ownerUserId)?.name
+                                    : null;
+                  const displayName = ownerName
+                                    ? `${group.name} (소유자: ${ownerName})`
+                                    : (group.isOwned ? `${group.name} (내 그룹)` : group.name);
+                  return (
+                    <SelectItem key={group.id} value={group.id}>
+                      {displayName}
+                    </SelectItem>
+                  );
+                })}
               </SelectContent>
             </Select>
           </div>
