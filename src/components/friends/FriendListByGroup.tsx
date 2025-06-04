@@ -39,7 +39,7 @@ export default function FriendListByGroup({ group, onDeleteGroup, isDeletingThis
     // Refetch friends for the current group to ensure the list is up-to-date
     const res = await getFriendsByGroupAction(group.id);
     if (res.success && res.friends) setFriends(res.friends);
-    else setFriends([]); // Or handle error appropriately
+    else setFriends([]);
     setLoading(false);
   };
 
@@ -74,12 +74,12 @@ export default function FriendListByGroup({ group, onDeleteGroup, isDeletingThis
             <AlertDialogHeader>
               <AlertDialogTitle>정말로 삭제하시겠습니까?</AlertDialogTitle>
               <AlertDialogDescription>
-                이 작업은 되돌릴 수 없습니다. <b>{group.name}</b> 그룹과 이 그룹에 포함된 모든 친구가 영구적으로 삭제됩니다.
+                이 작업은 되돌릴 수 없습니다. <b>{group.name}</b> 그룹이 삭제됩니다. (그룹 내 친구들은 삭제되지 않습니다.)
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
               <AlertDialogCancel disabled={isDeletingThisGroup}>취소</AlertDialogCancel>
-              <AlertDialogAction onClick={() => onDeleteGroup(group.id)} disabled={isDeletingThisGroup} className="bg-destructive hover:bg-destructive/90">
+              <AlertDialogAction onClick={() => onDeleteGroup(group.id)} disabled={isDeletingThisGroup} variant="destructive">
                 삭제
               </AlertDialogAction>
             </AlertDialogFooter>

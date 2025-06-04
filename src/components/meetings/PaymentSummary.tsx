@@ -5,7 +5,7 @@ import React, { useMemo } from 'react';
 import { Card, CardHeader, CardDescription, CardContent, CardFooter } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { TrendingUp, TrendingDown, UserCircle, PiggyBank, Info, Users, FileText } from 'lucide-react';
+import { TrendingUp, TrendingDown, UserCircle, PiggyBank, Users, FileText } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 
 interface PaymentSummaryProps {
@@ -15,19 +15,24 @@ interface PaymentSummaryProps {
   allFriends: Friend[];
 }
 
-interface LedgerEntry {
-  friendId: string;
-  amount: number;
-}
+// interface LedgerEntry { // 현재 직접 사용되지 않으므로 제거
+//   friendId: string;
+//   amount: number;
+// }
 
 interface FundPayoutToPayer {
   to: string;
   amount: number;
 }
 
+interface SettlementSuggestion {
+  from: string;
+  to: string;
+  amount: number;
+}
+
 export function PaymentSummary({ meeting, expenses, participants, allFriends }: PaymentSummaryProps) {
   
-  // --- 임시 모임일 경우: participants를 temporaryParticipants로 대체 (id 없으면 name+idx로 임시 id 부여) ---
   const effectiveParticipants = useMemo<Friend[]>(() => {
     if (meeting.isTemporary && Array.isArray(meeting.temporaryParticipants) && meeting.temporaryParticipants.length > 0) {
       return meeting.temporaryParticipants.map((p, idx) => ({
@@ -68,7 +73,7 @@ export function PaymentSummary({ meeting, expenses, participants, allFriends }: 
         fundApplicableIds: [],
         fundNonApplicableIds: participantIds,
         fundDescription: '참여자가 없습니다.',
-        perFundApplicableCost: 0 // 타입 일치
+        perFundApplicableCost: 0
       };
     }
 
@@ -104,7 +109,6 @@ export function PaymentSummary({ meeting, expenses, participants, allFriends }: 
       });
       fundDescription = `회비 적용 인원 ${numFundApplicable}명, 미적용 인원 ${numFundNonApplicable}명, 실제 사용 회비: ${fundUsed.toLocaleString()}원${fundLeft > 0.01 ? `, 미사용 회비: ${fundLeft.toLocaleString()}원` : ''}`;
     } else {
-      // 회비 없음
       participantIds.forEach(id => {
         perPersonCostWithFund[id] = perPersonCost;
       });
@@ -120,11 +124,11 @@ export function PaymentSummary({ meeting, expenses, participants, allFriends }: 
       fundApplicableIds,
       fundNonApplicableIds,
       fundDescription,
-      perFundApplicableCost // 추가: 회비 적용 인원 1인당 부담액
+      perFundApplicableCost
     };
   }, [expenses, effectiveParticipants, meeting]);
 
-  const mappedExpenses = useMemo(() => {
+  const mappedExpenses = useMemo((): Expense[] => {
     if (meeting.isTemporary && Array.isArray(meeting.temporaryParticipants) && meeting.temporaryParticipants.length > 0) {
       return expenses.map(e => {
         let newExpense = { ...e };
@@ -191,7 +195,7 @@ export function PaymentSummary({ meeting, expenses, participants, allFriends }: 
     return { fundPayouts, suggestions };
   }, [mappedExpenses, effectiveParticipants, perPersonCostDetails]);
   
-  const getFriendName = (friendId: string) => {
+  const getFriendName = (friendId: string): string => {
     const friend = allFriends.find(f => f.id === friendId)
       || effectiveParticipants.find(f => f.id === friendId);
     if (!friend) return '알 수 없음';
@@ -408,7 +412,6 @@ export function PaymentSummary({ meeting, expenses, participants, allFriends }: 
                             <TableCell className="text-right text-xs text-primary">회비 지원</TableCell>
                           </TableRow>
                         ))}
-                        {/* 일반 송금 제안: 기존 개인별 최종 정산 현황(본인부담액 반영) 기준으로만 계산 */}
                         {settlementSuggestions.suggestions.map((debt, index) => (
                           <TableRow key={`suggestion-${index}`}>
                             <TableCell>{getFriendName(debt.from)}</TableCell>
@@ -416,7 +419,7 @@ export function PaymentSummary({ meeting, expenses, participants, allFriends }: 
                             <TableCell className="text-right font-medium">
                               {debt.amount.toLocaleString(undefined, { maximumFractionDigits: 0 })}원
                             </TableCell>
-                            <TableCell className="text-right text-xs text-muted-foreground">일반 정산</TableCell>
+                            <TableCell className="text-right text-xs text-muted-foreground"></TableCell>
                           </TableRow>
                         ))}
                       </TableBody>

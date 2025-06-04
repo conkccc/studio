@@ -1,5 +1,8 @@
 import { useState } from 'react';
 import { createFriendGroupAction } from '@/lib/actions';
+import { Input } from '@/components/ui/input'; // Input 컴포넌트 import
+import { Button } from '@/components/ui/button'; // Button 컴포넌트 import
+import { Loader2 } from 'lucide-react'; // 로딩 스피너 import
 
 interface FriendGroupFormProps {
   userId: string;
@@ -20,20 +23,23 @@ export default function FriendGroupForm({ userId, onCreated }: FriendGroupFormPr
       setName('');
       onCreated?.();
     }
+    // TODO: 실패 시 에러 메시지 표시 (toast 사용 등)
   };
 
   return (
-    <form onSubmit={handleSubmit} className="flex gap-2">
-      <input
-        className="border rounded px-2 py-1 flex-1"
-        placeholder="그룹명 입력"
+    <form onSubmit={handleSubmit} className="flex items-center gap-2">
+      <Input
+        type="text"
+        placeholder="새 그룹 이름"
         value={name}
-        onChange={e => setName(e.target.value)}
+        onChange={(e) => setName(e.target.value)}
         disabled={loading}
+        className="flex-1"
       />
-      <button className="bg-blue-500 text-white px-3 py-1 rounded" type="submit" disabled={loading}>
+      <Button type="submit" disabled={loading}>
+        {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
         생성
-      </button>
+      </Button>
     </form>
   );
 }

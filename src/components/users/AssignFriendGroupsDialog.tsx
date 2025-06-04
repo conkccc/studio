@@ -11,37 +11,37 @@ import {
   DialogClose,
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
-import { Checkbox } from '@/components/ui/checkbox'; // Using Checkbox for multi-select
-import { ScrollArea } from '@/components/ui/scroll-area'; // For scrollable group list
+import { Checkbox } from '@/components/ui/checkbox';
+import { ScrollArea } from '@/components/ui/scroll-area';
 import type { User, FriendGroup } from '@/lib/types';
-import { assignFriendGroupsToUserAction } from '@/lib/actions'; // Renamed action
+import { assignFriendGroupsToUserAction } from '@/lib/actions';
 import { useToast } from '@/hooks/use-toast';
 import { Loader2 } from 'lucide-react';
 
-interface AssignFriendGroupsDialogProps { // Renamed interface
+interface AssignFriendGroupsDialogProps {
   isOpen: boolean;
   setIsOpen: (isOpen: boolean) => void;
   targetUser: User | null;
   allFriendGroups: FriendGroup[];
-  currentAdminId: string; // To pass to the action
-  onUserUpdated: (updatedUser: User) => void; // Callback to update user list
+  currentAdminId: string;
+  onUserUpdated: (updatedUser: User) => void;
 }
 
-export function AssignFriendGroupsDialog({ // Renamed component
+export function AssignFriendGroupsDialog({
   isOpen,
   setIsOpen,
   targetUser,
   allFriendGroups,
   currentAdminId,
   onUserUpdated,
-}: AssignFriendGroupsDialogProps) { // Corrected interface name in function signature
+}: AssignFriendGroupsDialogProps) {
   const [selectedGroupIds, setSelectedGroupIds] = useState<string[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const { toast } = useToast();
 
   useEffect(() => {
-    if (targetUser && targetUser.friendGroupIds) { // Renamed field
-      setSelectedGroupIds(targetUser.friendGroupIds); // Renamed field
+    if (targetUser && targetUser.friendGroupIds) {
+      setSelectedGroupIds(targetUser.friendGroupIds);
     } else {
       setSelectedGroupIds([]);
     }
@@ -64,7 +64,7 @@ export function AssignFriendGroupsDialog({ // Renamed component
     }
     setIsSubmitting(true);
     try {
-      const result = await assignFriendGroupsToUserAction({ // Call with a single object
+      const result = await assignFriendGroupsToUserAction({
         adminUserId: currentAdminId,
         targetUserId: targetUser.id,
         friendGroupIds: selectedGroupIds,
@@ -72,7 +72,7 @@ export function AssignFriendGroupsDialog({ // Renamed component
 
       if (result.success && result.user) {
         toast({ title: '성공', description: `${targetUser.name || targetUser.email}님의 참조 그룹이 업데이트되었습니다.` });
-        onUserUpdated(result.user); // Update user data in the parent component
+        onUserUpdated(result.user);
         setIsOpen(false);
       } else {
         toast({ title: '오류', description: result.error || '참조 그룹 업데이트에 실패했습니다.', variant: 'destructive' });

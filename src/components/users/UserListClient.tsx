@@ -7,26 +7,24 @@ import { useToast } from '@/hooks/use-toast';
 import { updateUserRoleAction } from '@/lib/actions';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Loader2, Settings2 } from 'lucide-react'; // Added Settings2 for assign button
+import { Loader2, Settings2 } from 'lucide-react';
 import { format, isValid } from 'date-fns';
 import { ko } from 'date-fns/locale';
 import { Timestamp } from 'firebase/firestore';
-import { AssignFriendGroupsDialog } from './AssignFriendGroupsDialog'; // Renamed import
-import type { FriendGroup } from '@/lib/types'; // For allFriendGroups prop
+import { AssignFriendGroupsDialog } from './AssignFriendGroupsDialog';
+import type { FriendGroup } from '@/lib/types';
 
 interface UserListClientProps {
   initialUsers: User[];
   currentAdminId: string;
   isAdmin: boolean;
-  allFriendGroups: FriendGroup[]; // Added prop for the dialog
+  allFriendGroups: FriendGroup[];
 }
 
 export function UserListClient({ initialUsers, currentAdminId, isAdmin, allFriendGroups }: UserListClientProps) {
   const [users, setUsers] = useState<User[]>(initialUsers);
   const [isPending, startTransition] = useTransition();
   const { toast } = useToast();
-  // const [editingUserId, setEditingUserId] = useState<string | null>(null); // Kept if used for other edits
-  // const [editLoading, setEditLoading] = useState(false); // Kept if used for other edits
 
   const [isAssignDialogOpen, setIsAssignDialogOpen] = useState(false);
   const [selectedUserForGroups, setSelectedUserForGroups] = useState<User | null>(null);
@@ -35,28 +33,19 @@ export function UserListClient({ initialUsers, currentAdminId, isAdmin, allFrien
     setUsers(initialUsers);
   }, [initialUsers]);
 
-  // Callback to refresh users if dialog updates a user
   const handleUserUpdated = (updatedUser: User) => {
     setUsers(prevUsers => prevUsers.map(u => u.id === updatedUser.id ? updatedUser : u));
-     // Re-fetch all users if more comprehensive update is needed, or rely on revalidatePath from action
+    // 액션에서 revalidatePath가 호출되므로, 전체 목록을 다시 불러올 필요는 없을 수 있습니다.
+    // 필요하다면 여기서 부모에게 알려 추가적인 데이터 페칭을 트리거할 수 있습니다.
   };
 
   const handleRoleChange = (userIdToUpdate: string, newRole: User['role']) => {
     if (userIdToUpdate === currentAdminId) {
       toast({ title: '오류', description: '자신의 역할은 변경할 수 없습니다.', variant: 'destructive' });
-      // Revert UI change if Select was uncontrolled and optimistically updated.
-      // For controlled Select, this won't be an issue as state won't change until server confirms.
-      const originalUser = initialUsers.find(u => u.id === userIdToUpdate);
-      if (originalUser) {
-        // This forces a re-render if the select value was somehow changed client-side before this check
-        setUsers(prev => prev.map(u => u.id === userIdToUpdate ? {...u, role: originalUser.role} : u));
-      }
       return;
     }
 
     startTransition(async () => {
-      // Pass currentAdminId for server-side validation if needed by the action,
-      // though primary validation should be via Firestore rules based on the CALLER's auth.
       const result = await updateUserRoleAction(userIdToUpdate, newRole, currentAdminId);
       if (result.success && result.user) {
         setUsers(prevUsers => prevUsers.map(u => u.id === userIdToUpdate ? result.user! : u));
@@ -67,19 +56,14 @@ export function UserListClient({ initialUsers, currentAdminId, isAdmin, allFrien
           description: result.error || '사용자 역할 변경에 실패했습니다.',
           variant: 'destructive',
         });
-        // Revert optimistic UI update
-        const originalUser = users.find(u => u.id === userIdToUpdate); // or initialUsers if state sync is perfect
-         if (originalUser) {
-            // This helps reset the select if it was optimistically changed by the user
-            // but the server action failed. For a controlled Select, this is more robust.
-            // Here, we're assuming the Select value might need resetting.
-            // The select's value prop should be tied to user.role from the `users` state.
-         }
+        // Select 컴포넌트는 users 상태에 바인딩되어 있으므로,
+        // users 상태가 업데이트되지 않으면 자동으로 이전 값으로 돌아갑니다.
+        // 따라서 별도의 UI 복구 로직은 필요하지 않습니다.
       }
     });
   };
   
-  const formatDate = (dateInput: Date | Timestamp | undefined | null) => {
+  const formatDate = (dateInput: Date | Timestamp | undefined | null): string => {
     if (!dateInput) return 'N/A';
     let date: Date;
     if (dateInput instanceof Timestamp) {
@@ -129,7 +113,7 @@ export function UserListClient({ initialUsers, currentAdminId, isAdmin, allFrien
                   ) : (
                     <Select
                       value={user.role}
-                      onValueChange={(newRole) => handleRoleChange(user.id, newRole as User['role'])}
+                      onValueChange={(newRole) => handleRoleChange(user.id, newRole as User['role'])} // 타입 단언 추가
                       disabled={isPending}
                     >
                       <SelectTrigger className="w-[100px] h-8 text-xs">
@@ -169,13 +153,13 @@ export function UserListClient({ initialUsers, currentAdminId, isAdmin, allFrien
       </div>
 
       {selectedUserForGroups && isAdmin && (
-        <AssignFriendGroupsDialog // Renamed component
+        <AssignFriendGroupsDialog
           isOpen={isAssignDialogOpen}
           setIsOpen={setIsAssignDialogOpen}
           targetUser={selectedUserForGroups}
           allFriendGroups={allFriendGroups}
           currentAdminId={currentAdminId}
-          onUserUpdated={handleUserUpdated} // To refresh the list or update user data
+          onUserUpdated={handleUserUpdated}
         />
       )}
     </div>

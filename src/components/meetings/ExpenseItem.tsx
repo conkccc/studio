@@ -27,12 +27,12 @@ import { useAuth } from '@/contexts/AuthContext';
 interface ExpenseItemProps {
   expense: Expense;
   meetingId: string;
-  allFriends: Friend[]; // All friends in the system
-  participants: Friend[]; // Friends participating in this specific meeting 
+  allFriends: Friend[]; // 시스템의 모든 친구 목록 (payer 이름 찾기 등)
+  participants: Friend[]; // 현재 모임에 참여한 친구 목록 (분배 대상 등)
   onExpenseUpdated: (updatedExpense: Expense) => void;
   onExpenseDeleted: (deletedExpenseId: string) => void;
   isMeetingSettled: boolean;
-  isTemporaryMeeting?: boolean; // Added for temporary meeting handling
+  isTemporaryMeeting?: boolean;
 }
 
 export function ExpenseItem({ 
@@ -47,23 +47,12 @@ export function ExpenseItem({
 }: ExpenseItemProps) {
   const { currentUser, isAdmin } = useAuth();
 
-  let resolvedPayer: Friend | undefined;
-  if (isTemporaryMeeting) {
-    resolvedPayer = participants.find(p => p.id === expense.paidById);
-    if (!resolvedPayer) {
-      resolvedPayer = allFriends.find(f => f.id === expense.paidById);
-    }
-  } else {
-    resolvedPayer = allFriends.find(f => f.id === expense.paidById);
-  }
-  const payer = resolvedPayer;
+  const payer = allFriends.find(f => f.id === expense.paidById);
 
   const { toast } = useToast();
-  const [isDeleting, setIsDeleting] = useState(false);
-  const [isEditPending, setIsEditPending] = useState(false);
-  const canManage = isAdmin || (currentUser?.uid === expense.paidById) ; 
+  const [isTransitioning, startTransition] = useTransition(); // isDeleting, isEditPending 대신 사용
 
-  const getSplitDetails = () => { 
+  const getSplitDetails = (): string => {
     if (expense.splitType === 'equally') {
       const involvedNames = (expense.splitAmongIds
         ?.map(splitId => {
@@ -118,23 +107,24 @@ export function ExpenseItem({
     return '정보 없음';
   };
   
-  const formatDate = (dateInput: Date | Timestamp) => {
+  const formatDate = (dateInput: Date | Timestamp): string => {
     let date = dateInput instanceof Timestamp ? dateInput.toDate() : new Date(dateInput);
     if (!isValid(date)) return '날짜 정보 없음';
     return format(date, 'yyyy.MM.dd HH:mm', { locale: ko });
   };
 
-
   const handleDelete = () => {
+    // 정산 완료된 모임의 지출은 관리자만 삭제 가능
     if (isMeetingSettled && !isAdmin) { 
-      toast({ title: '오류', description: '정산이 완료된 모임의 지출은 삭제할 수 없습니다.', variant: 'destructive' });
+      toast({ title: '오류', description: '정산이 완료된 모임의 지출은 관리자만 삭제할 수 있습니다.', variant: 'destructive' });
       return;
     }
-    if (!canManage && !isAdmin) {
+    // 그 외의 경우, 관리자만 삭제 가능 (canManage 제거 후 isAdmin으로 통일)
+    if (!isAdmin) {
       toast({ title: '권한 없음', description: '이 지출 항목을 삭제할 권한이 없습니다.', variant: 'destructive' });
       return;
     }
-    setIsDeleting(true);
+
     startTransition(async () => {
       const result = await deleteExpenseAction(expense.id, meetingId, currentUser?.uid || null);
       if (result.success) {
@@ -143,10 +133,8 @@ export function ExpenseItem({
       } else {
         toast({ title: '오류', description: result.error || '지출 항목 삭제에 실패했습니다.', variant: 'destructive' });
       }
-      setIsDeleting(false);
     });
   };
-  const [isTransitioning, startTransition] = useTransition();
 
   return (
     <li className="p-4 border rounded-lg bg-background shadow-sm">
@@ -176,10 +164,10 @@ export function ExpenseItem({
           <EditExpenseDialog 
             expenseToEdit={expense}
             meetingId={meetingId}
-            participants={participants}
-            allFriends={allFriends}
+            participants={participants} // EditExpenseDialog에는 모임 참여자 목록 전달
+            // allFriends={allFriends} // EditExpenseDialogProps에서 allFriends가 제거되었으므로 이 prop 전달 제거
             onExpenseUpdated={onExpenseUpdated}
-            canManage={isAdmin}
+            canManage={isAdmin} // 수정 권한은 관리자에게만 부여 (또는 추가 로직)
             isMeetingSettled={isMeetingSettled}
             triggerButton={
               <Button variant="ghost" size="sm" className="text-xs" disabled={isTransitioning || (isMeetingSettled && !isAdmin)}>
@@ -203,8 +191,8 @@ export function ExpenseItem({
               </AlertDialogHeader>
               <AlertDialogFooter>
                 <AlertDialogCancel disabled={isTransitioning}>취소</AlertDialogCancel>
-                <AlertDialogAction onClick={handleDelete} disabled={isTransitioning} className="bg-destructive hover:bg-destructive/90">
-                 {(isTransitioning) && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                <AlertDialogAction onClick={handleDelete} disabled={isTransitioning} variant="destructive">
+                 {isTransitioning && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                   삭제
                 </AlertDialogAction>
               </AlertDialogFooter>

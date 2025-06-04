@@ -20,11 +20,10 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Edit3, Trash2, User, Check, X, Loader2 } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
-// Removed redundant getFriendsByGroupAction import as it's consolidated above
 
 interface FriendListClientProps {
   initialFriends: Friend[];
-  onFriendAdded?: () => void;
+  onFriendAdded?: () => void; // 이 prop은 FriendListByGroup에서 친구 추가 후 목록 새로고침에 사용됨
   onFriendDeleted?: (friendId: string) => void;
 }
 
@@ -34,18 +33,19 @@ export function FriendListClient({ initialFriends, isReadOnly = false, onFriendA
   const [editForm, setEditForm] = useState<{ name: string; description?: string }>({ name: '', description: '' });
   const { toast } = useToast();
   const [isPending, startTransition] = useTransition();
-  const { appUser } = useAuth(); // Get appUser
+  const { appUser } = useAuth();
 
   useEffect(() => {
     setFriends(initialFriends);
   }, [initialFriends]);
 
-  // 친구 추가 후 콜백이 있으면 실행
-  useEffect(() => {
-    if (onFriendAdded) {
-      onFriendAdded();
-    }
-  }, [initialFriends, onFriendAdded]);
+  // onFriendAdded prop은 FriendListByGroup 컴포넌트 레벨에서 친구 추가 후 데이터를 다시 불러오는 용도로 사용되므로,
+  // FriendListClient 내부에서 initialFriends 변경 감지로 onFriendAdded를 호출하는 useEffect는 제거합니다.
+  // useEffect(() => {
+  //   if (onFriendAdded) {
+  //     onFriendAdded();
+  //   }
+  // }, [initialFriends, onFriendAdded]);
 
   const handleEdit = (friend: Friend) => {
     setEditingFriendId(friend.id);
@@ -87,10 +87,6 @@ export function FriendListClient({ initialFriends, isReadOnly = false, onFriendA
       toast({ title: '오류', description: '사용자 인증 정보를 찾을 수 없습니다. 다시 로그인해주세요.', variant: 'destructive' });
       return;
     }
-
-    // Optional: Add window.confirm here if not relying solely on AlertDialog
-    // const confirmed = window.confirm(`'${friendToDelete.name}' 친구를 정말 삭제하시겠습니까?`);
-    // if (!confirmed) return;
 
     startTransition(async () => {
       const result = await deleteFriendAction({
@@ -190,7 +186,7 @@ export function FriendListClient({ initialFriends, isReadOnly = false, onFriendA
                       </AlertDialogHeader>
                       <AlertDialogFooter>
                         <AlertDialogCancel disabled={isPending || isReadOnly}>취소</AlertDialogCancel>
-                        <AlertDialogAction onClick={() => handleDelete(friend.id)} disabled={isPending || isReadOnly} className="bg-destructive hover:bg-destructive/90">
+                        <AlertDialogAction onClick={() => handleDelete(friend.id)} disabled={isPending || isReadOnly} variant="destructive">
                           {isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
                           삭제
                         </AlertDialogAction>

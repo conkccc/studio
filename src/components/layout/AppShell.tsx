@@ -6,13 +6,13 @@ import { usePathname, useRouter } from 'next/navigation';
 import React, { useRef, useEffect, useState } from 'react';
 import {
   Home,
-  UsersRound, // For Friends
+  UsersRound,
   CalendarCheck,
   PiggyBank,
   Menu,
   LogOut,
   UserCircle,
-  Briefcase, // For Users menu
+  Briefcase,
 } from 'lucide-react';
 
 import {
@@ -58,7 +58,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   const [isClient, setIsClient] = useState(false);
 
   useEffect(() => {
-    setIsClient(true); // Ensure client-side only logic runs after mount
+    setIsClient(true);
   }, []);
 
   const handleClose = () => {
@@ -149,15 +149,15 @@ export function AppShell({ children }: { children: ReactNode }) {
   useEffect(() => {
     // 로그인 페이지, 공유 페이지는 예외
     if (
-      typeof window !== 'undefined' &&
-      !loading && // <-- Only redirect when loading is false
+      isClient && // Ensure this runs only on the client
+      !loading &&
       (!currentUser || userRole === 'none') &&
       pathname !== '/login' &&
       !pathname.startsWith('/share/meeting')
     ) {
-      window.location.replace('/login'); // push 대신 replace로 히스토리 방지
+      router.replace('/login'); // window.location.replace 대신 router.replace 사용
     }
-  }, [currentUser, userRole, pathname, loading]);
+  }, [currentUser, userRole, pathname, loading, isClient, router]);
 
   if (loading || !isClient) {
     return (
@@ -251,16 +251,15 @@ export function AppShell({ children }: { children: ReactNode }) {
       )}
 
       <div className={cn(
-        "flex flex-1 flex-col overflow-y-auto relative" // Added 'relative'
+        "flex flex-1 flex-col overflow-y-auto relative"
       )}>
         <header
           className={cn(
             "sticky top-0 z-30 flex h-14 shrink-0 items-center gap-4 border-b bg-background px-4 sm:px-6",
-            // If not mobile and app shell is shown, header might be simpler or part of main content flow
-            !isMobile && canShowAppShell && "sm:relative" // Adjust as needed for desktop header
+            !isMobile && canShowAppShell && "sm:relative"
           )}
         >
-          {isMobile && canShowAppShell && ( // Show menu trigger only on mobile and if app shell is visible
+          {isMobile && canShowAppShell && (
             <Sheet open={openMobile} onOpenChange={setOpenMobile}>
               <SheetTrigger asChild>
                 <Button ref={sheetTriggerRef} size="icon" variant="outline" className="sm:hidden" aria-label="메뉴 토글">
@@ -315,7 +314,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             </Button>
           )}
           <div className="flex-1">
-            {/* Potential header content for desktop if needed */}
+            {/* 데스크탑 헤더의 추가 컨텐츠 영역 (필요시 사용) */}
           </div>
         </header>
         <main className="flex-1 p-4 sm:p-6">

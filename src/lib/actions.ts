@@ -25,15 +25,71 @@ import {
   deleteFriendGroup as dbDeleteFriendGroup,
   getFriendGroupsByUser as dbGetFriendGroupsByUser,
   dbGetAllFriendGroups,
-  getMeetings as dbGetMeetings, // Import for the new meeting action
-  getUsers as dbGetUsers, // Import getUsers for getAllUsersAction
+  getMeetings as dbGetMeetings, // 새로운 모임 액션을 위한 import
+  getUsers as dbGetUsers, // getAllUsersAction을 위한 getUsers import
+  getFriendsByGroup as dbGetFriendsByGroup, // 그룹별 친구 목록 조회를 위한 import
 } from './data-store';
 import type { Friend, Meeting, Expense, ReserveFundTransaction, User, FriendGroup } from './types';
-import { Timestamp, arrayRemove as firestoreArrayRemove, arrayUnion as firestoreArrayUnion, deleteField } from 'firebase/firestore'; // Added deleteField
+import { Timestamp, arrayRemove as firestoreArrayRemove, arrayUnion as firestoreArrayUnion, deleteField } from 'firebase/firestore';
 import { nanoid } from 'nanoid';
 import { addDays } from 'date-fns';
 import { db } from './firebase';
 import { doc, getDoc, updateDoc } from 'firebase/firestore';
+
+// 타입 정의가 UserRole로 되어있다고 가정합니다. 실제 프로젝트에 맞게 수정 필요.
+type UserRole = 'admin' | 'user' | 'viewer' | 'none'; // 예시 타입
+
+interface PermissionCheckOptions {
+  requiredRole?: UserRole | UserRole[];
+  ownerId?: string;
+  adminCanOverride?: boolean;
+  entityName?: string;
+}
+
+interface PermissionCheckResult {
+  success: boolean;
+  user?: User;
+  error?: string;
+}
+
+async function _ensureUserPermission(
+  currentUserId: string | null | undefined,
+  options: PermissionCheckOptions = {}
+): Promise<PermissionCheckResult> {
+  if (!currentUserId) {
+    return { success: false, error: "인증되지 않은 사용자입니다. 로그인이 필요합니다." };
+  }
+
+  const currentUser = await dbGetUserById(currentUserId);
+  if (!currentUser) {
+    return { success: false, error: "사용자 정보를 찾을 수 없습니다." };
+  }
+
+  const { requiredRole, ownerId, adminCanOverride = true, entityName = '작업' } = options;
+
+  if (requiredRole) {
+    const roles = Array.isArray(requiredRole) ? requiredRole : [requiredRole];
+    if (!roles.includes(currentUser.role as UserRole)) {
+      return {
+        success: false,
+        error: `${entityName}을(를) 수행할 권한이 없습니다. 필요한 역할: ${roles.join(', ')}`
+      };
+    }
+  }
+
+  if (ownerId && currentUser.id !== ownerId) {
+    if (adminCanOverride && currentUser.role === 'admin') {
+      // 관리자는 소유자 검사를 통과
+    } else {
+      return {
+        success: false,
+        error: `${entityName}은(는) 소유자 또는 관리자만 수행할 수 있습니다.`
+      };
+    }
+  }
+
+  return { success: true, user: currentUser };
+}
 
 
 // Friend Actions
@@ -46,16 +102,18 @@ export async function createFriendAction(payload: { name: string; description?: 
   if (!groupId || groupId.trim() === '') {
     return { success: false, error: "그룹 ID가 지정되지 않았습니다." };
   }
-  if (!currentUserId) {
-    return { success: false, error: "사용자 ID가 필요합니다. 로그인이 필요합니다." };
+
+  const permissionCheck = await _ensureUserPermission(currentUserId, {
+    requiredRole: ['user', 'admin'], // 친구를 생성할 수 있는 역할
+    entityName: '친구 추가'
+  });
+
+  if (!permissionCheck.success) {
+    return { success: false, error: permissionCheck.error };
   }
+  const callingUser = permissionCheck.user!; // user가 존재함을 보장 (success 시)
 
   try {
-    const callingUser = await dbGetUserById(currentUserId);
-    if (!callingUser) {
-      return { success: false, error: "사용자 정보를 찾을 수 없습니다." };
-    }
-
     const groupDocRef = doc(db, 'friendGroups', groupId);
     const groupSnap = await getDoc(groupDocRef);
 
@@ -77,8 +135,6 @@ export async function createFriendAction(payload: { name: string; description?: 
     });
 
     revalidatePath('/friends');
-    // Consider revalidating specific group page if exists, e.g. /friends/group/${groupId}
-    // Client-side update in FriendGroupListClient will also refresh the list for the selected group.
     return { success: true, friend: newFriend };
   } catch (error) {
     console.error("createFriendAction Error:", error);
@@ -98,9 +154,10 @@ export async function getExpensesByMeetingIdAction(meetingId: string) {
   }
 }
 
-export async function getAllFriendsAction() { // Renamed from getFriendsAction for clarity
+// 모든 친구 목록 가져오기
+export async function getAllFriendsAction() {
   try {
-    const friends = await (await import('./data-store')).getFriends(); // Assuming getFriends exists in data-store
+    const friends = await (await import('./data-store')).getFriends();
     return { success: true, friends };
   } catch (error) {
     console.error('getAllFriendsAction Error:', error);
@@ -109,9 +166,10 @@ export async function getAllFriendsAction() { // Renamed from getFriendsAction f
   }
 }
 
+// 모든 사용자 목록 가져오기
 export async function getAllUsersAction() {
   try {
-    const users = await dbGetUsers(); // Use imported getUsers (aliased as dbGetUsers or directly)
+    const users = await dbGetUsers();
     return { success: true, users };
   } catch (error) {
     console.error('getAllUsersAction Error:', error);
@@ -120,6 +178,7 @@ export async function getAllUsersAction() {
   }
 }
 
+// ID로 특정 모임 정보 가져오기
 export async function getMeetingByIdAction(meetingId: string) {
   try {
     const meeting = await dbGetMeetingById(meetingId);
@@ -134,6 +193,7 @@ export async function getMeetingByIdAction(meetingId: string) {
   }
 }
 
+// 모든 친구 그룹 목록 가져오기
 export async function getAllFriendGroupsAction() {
   try {
     const groups = await dbGetAllFriendGroups();
@@ -151,27 +211,26 @@ export async function assignFriendGroupsToUserAction(payload: {
   targetUserId?: string | null;
   friendGroupIds?: string[] | null;
 }) {
-  const { adminUserId, targetUserId, friendGroupIds } = payload;
+  const { targetUserId, friendGroupIds } = payload; // adminUserId는 permissionCheck에서 사용
 
-  if (!adminUserId) {
-    return { success: false, error: "관리자 ID가 필요합니다." };
-  }
   if (!targetUserId) {
     return { success: false, error: "대상 사용자 ID가 필요합니다." };
   }
-  // friendGroupIds can be an empty array [], so check for null or undefined specifically.
   if (friendGroupIds === null || friendGroupIds === undefined) {
     return { success: false, error: "할당할 그룹 목록 정보가 필요합니다 (빈 배열일 수 있음)." };
   }
 
-  try {
-    const adminUser = await dbGetUserById(adminUserId);
-    if (!adminUser || adminUser.role !== 'admin') {
-      return { success: false, error: "권한이 없습니다. 관리자만 사용자에게 친구 그룹을 할당할 수 있습니다." };
-    }
+  const permissionCheck = await _ensureUserPermission(payload.adminUserId, {
+    requiredRole: 'admin',
+    entityName: '친구 그룹 할당'
+  });
 
-    // Ensure friendGroupIds is an array, even if empty. This check is technically redundant
-    // if the null/undefined check above is comprehensive, but kept for safety.
+  if (!permissionCheck.success) {
+    return { success: false, error: permissionCheck.error };
+  }
+  // const adminUser = permissionCheck.user!; // 필요시 사용
+
+  try {
     const validFriendGroupIds = Array.isArray(friendGroupIds) ? friendGroupIds : [];
 
     const updatedUser = await dbUpdateUser(targetUserId, { friendGroupIds: validFriendGroupIds });
@@ -179,24 +238,23 @@ export async function assignFriendGroupsToUserAction(payload: {
       return { success: false, error: "대상 사용자 정보 업데이트에 실패했습니다. 사용자를 찾을 수 없거나 업데이트 중 오류가 발생했습니다." };
     }
 
-    revalidatePath('/users'); // Assuming '/users' is the path where user list or details are displayed
-    revalidatePath(`/users/${targetUserId}`); // Revalidate specific user page if exists
+    revalidatePath('/users');
+    revalidatePath(`/users/${targetUserId}`);
     return { success: true, user: updatedUser };
 
   } catch (error) {
-    console.error('assignFriendGroupsToUserAction Error:', error); // Renamed in log
-    const errorMessage = error instanceof Error ? error.message : '친구 그룹 할당 중 오류가 발생했습니다.'; // Renamed in message
+    console.error('assignFriendGroupsToUserAction Error:', error);
+    const errorMessage = error instanceof Error ? error.message : '친구 그룹 할당 중 오류가 발생했습니다.';
     return { success: false, error: errorMessage };
   }
 }
 
 export async function updateFriendAction(id: string, updates: Partial<Omit<Friend, 'id' | 'createdAt'>>) {
   try {
-    // Assuming admin-only action based on UI and Firestore rules
     const updatedFriend = await dbUpdateFriend(id, updates);
     if (!updatedFriend) throw new Error('친구를 찾을 수 없습니다.');
     revalidatePath('/friends');
-    revalidatePath(`/meetings`); // participant lists might need update
+    revalidatePath(`/meetings`);
     return { success: true, friend: updatedFriend };
   } catch (error) {
     console.error("updateFriendAction Error:", error);
@@ -214,16 +272,18 @@ export async function deleteFriendAction(payload: { friendId: string; groupId: s
   if (!groupId) {
     return { success: false, error: "친구가 속한 그룹 ID가 필요합니다." };
   }
-  if (!currentUserId) {
-    return { success: false, error: "사용자 ID가 필요합니다. 로그인이 필요합니다." };
+
+  const permissionCheck = await _ensureUserPermission(currentUserId, {
+    requiredRole: ['user', 'admin'], // 친구를 삭제할 수 있는 역할
+    entityName: '친구 삭제'
+  });
+
+  if (!permissionCheck.success) {
+    return { success: false, error: permissionCheck.error };
   }
+  const callingUser = permissionCheck.user!;
 
   try {
-    const callingUser = await dbGetUserById(currentUserId);
-    if (!callingUser) {
-      return { success: false, error: "사용자 정보를 찾을 수 없습니다." };
-    }
-
     const groupDocRef = doc(db, 'friendGroups', groupId);
     const groupSnap = await getDoc(groupDocRef);
 
@@ -245,8 +305,6 @@ export async function deleteFriendAction(payload: { friendId: string; groupId: s
     });
 
     revalidatePath('/friends'); // Revalidate general friends page/dashboard
-    // Consider revalidating the specific group view if such a page exists, e.g., revalidatePath(`/friends/group/${groupId}`);
-    // For now, FriendGroupListClient re-fetches friends on group selection or after deletion.
     return { success: true };
 
   } catch (error) {
@@ -261,20 +319,17 @@ export async function createMeetingAction(
   payload: Omit<Meeting, 'id' | 'createdAt' | 'isSettled' | 'isShareEnabled' | 'shareToken' | 'shareExpiryDate'>,
   currentUserId?: string | null
 ) {
-  if (!currentUserId) {
-    return { success: false, error: "인증되지 않은 사용자입니다. 로그인이 필요합니다." };
+  const permissionCheck = await _ensureUserPermission(currentUserId, {
+    requiredRole: ['user', 'admin'],
+    entityName: '모임 생성'
+  });
+
+  if (!permissionCheck.success) {
+    return { success: false, error: permissionCheck.error };
   }
+  const creator = permissionCheck.user!;
 
   try {
-    const currentUser = await dbGetUserById(currentUserId);
-    if (!currentUser) {
-      return { success: false, error: "사용자 정보를 찾을 수 없습니다." };
-    }
-
-    if (currentUser.role !== 'admin' && currentUser.role !== 'user') {
-      return { success: false, error: "모임을 생성할 권한이 없습니다. 'admin' 또는 'user' 역할만 가능합니다." };
-    }
-
     const {
       locationCoordinates,
       locationName,
@@ -286,29 +341,23 @@ export async function createMeetingAction(
       totalFee,
       feePerPerson,
       endTime,
-      // Destructure all fields from payload to ensure they are handled
       name,
       dateTime,
       groupId,
       isTemporary,
       useReserveFund,
-      // Explicitly list all fields from Omit<Meeting, 'id' | 'createdAt' | 'isSettled' | 'isShareEnabled' | 'shareToken' | 'shareExpiryDate' | 'expenses'>
-      // Any other fields in payload that are not part of Meeting type (excluding above) will be caught by ...otherPayloadData if it were used.
-      // However, since payload is already typed, we can be more direct.
     } = payload;
 
     const meetingDataToSaveBase = {
       name,
       dateTime,
-      creatorId: currentUserId,
+      creatorId: creator.id,
       groupId: groupId || '',
       locationName: locationName || '',
       isTemporary: isTemporary || false,
-      // Default values for optional fields that should always exist with a default
       participantIds: participantIds || [],
       useReserveFund: useReserveFund || false,
       nonReserveFundParticipants: nonReserveFundParticipants || [],
-      // Fields that are truly optional and should be omitted if undefined
       ...(endTime !== undefined && { endTime }),
       ...(locationCoordinates !== undefined && { locationCoordinates }),
       ...(memo !== undefined && { memo }),
@@ -316,42 +365,38 @@ export async function createMeetingAction(
       ...(temporaryParticipants !== undefined && { temporaryParticipants }),
     };
 
-    let meetingDataToSave: any = meetingDataToSaveBase;
+    // dbAddMeeting 함수의 첫 번째 파라미터 타입을 사용 (Parameters 유틸리티 타입 활용)
+    type AddMeetingPayload = Parameters<typeof dbAddMeeting>[0];
+
+    let meetingDataToSave: AddMeetingPayload = {
+      ...meetingDataToSaveBase, // 기본값 및 필수값 포함 (creatorId 등)
+      // isTemporary 값에 따라 추가 필드 조정
+    };
 
     if (meetingDataToSave.isTemporary) {
       meetingDataToSave.temporaryParticipants = temporaryParticipants || [];
       if (totalFee !== undefined) meetingDataToSave.totalFee = totalFee;
       if (feePerPerson !== undefined) meetingDataToSave.feePerPerson = feePerPerson;
 
-      // Ensure regular meeting fields are set to defaults or omitted
-      meetingDataToSave.participantIds = []; // Or ensure it's already [] from base
-      meetingDataToSave.useReserveFund = false; // Or ensure it's already false
-      // These will be omitted if undefined due to the spread syntax or explicit check later
-      delete meetingDataToSave.partialReserveFundAmount;
-      delete meetingDataToSave.nonReserveFundParticipants;
+      meetingDataToSave.participantIds = [];
+      meetingDataToSave.useReserveFund = false;
+      delete (meetingDataToSave as Partial<AddMeetingPayload>).partialReserveFundAmount;
+      delete (meetingDataToSave as Partial<AddMeetingPayload>).nonReserveFundParticipants;
     } else {
-      // Regular meeting
-      // participantIds, useReserveFund, nonReserveFundParticipants are already handled by base or conditional spread
+      // 일반 모임
       if (meetingDataToSave.useReserveFund) {
         meetingDataToSave.partialReserveFundAmount = (typeof partialReserveFundAmount === 'number' && !isNaN(partialReserveFundAmount))
           ? partialReserveFundAmount
-          : 0; // Default to 0 if useReserveFund is true but amount is not valid or undefined
+          : 0;
       } else {
-         delete meetingDataToSave.partialReserveFundAmount;
+         delete (meetingDataToSave as Partial<AddMeetingPayload>).partialReserveFundAmount;
       }
-      // These will be omitted if undefined
-      delete meetingDataToSave.temporaryParticipants;
-      delete meetingDataToSave.totalFee;
-      delete meetingDataToSave.feePerPerson;
+      delete (meetingDataToSave as Partial<AddMeetingPayload>).temporaryParticipants;
+      delete (meetingDataToSave as Partial<AddMeetingPayload>).totalFee;
+      delete (meetingDataToSave as Partial<AddMeetingPayload>).feePerPerson;
     }
 
-    // The call to dbAddMeeting will handle its own defaults for isSettled, isShareEnabled etc.
-    // and convert dates to Timestamps.
-    // The object passed to dbAddMeeting should be Omit<Meeting, 'id' | 'createdAt' | 'isSettled' | 'isShareEnabled' | 'shareToken' | 'shareExpiryDate' | 'expenses'> & {creatorId: string}
-    // The current `meetingDataToSave` is being constructed to fit this.
-    // The dbAddMeeting function in data-store.ts will then add other defaults like createdAt, isSettled, etc.
-
-    const newMeeting = await dbAddMeeting(meetingDataToSave as Omit<Meeting, 'id' | 'createdAt' | 'isSettled' | 'isShareEnabled' | 'shareToken' | 'shareExpiryDate' | 'expenses'> & {creatorId: string});
+    const newMeeting = await dbAddMeeting(meetingDataToSave);
     revalidatePath('/meetings');
     revalidatePath('/');
     revalidatePath(`/meetings/${newMeeting.id}`);
@@ -365,213 +410,130 @@ export async function createMeetingAction(
 
 export async function updateMeetingAction(
   id: string,
-  payload: Partial<Omit<Meeting, 'id' | 'createdAt'>>, // Changed 'updates' to 'payload' for clarity
+  payload: Partial<Omit<Meeting, 'id' | 'createdAt'>>,
   currentUserId?: string | null
 ) {
-  if (!currentUserId) {
-    return { success: false, error: "인증되지 않은 사용자입니다. 로그인이 필요합니다." };
+  const meetingToUpdate = await dbGetMeetingById(id);
+  if (!meetingToUpdate) {
+    return { success: false, error: "수정할 모임을 찾을 수 없습니다." };
   }
 
+  const permissionCheck = await _ensureUserPermission(currentUserId, {
+    ownerId: meetingToUpdate.creatorId,
+    adminCanOverride: true,
+    entityName: '모임 수정'
+  });
+
+  if (!permissionCheck.success) {
+    return { success: false, error: permissionCheck.error };
+  }
+  // const callingUser = permissionCheck.user!; // 필요시 사용
+
   try {
-    const meetingToUpdate = await dbGetMeetingById(id);
-    if (!meetingToUpdate) {
-      return { success: false, error: "수정할 모임을 찾을 수 없습니다." };
-    }
+    // 필요한 필드만 payload에서 추출 (isTemporary는 업데이트하지 않는다고 가정)
+    const {
+      name, dateTime, groupId, locationName, locationCoordinates,
+      participantIds, useReserveFund, nonReserveFundParticipants,
+      partialReserveFundAmount, memo, endTime,
+      totalFee, feePerPerson, temporaryParticipants,
+      isShareEnabled, shareToken, shareExpiryDate, isSettled
+    } = payload;
 
-    const callingUser = await dbGetUserById(currentUserId);
-    const isAdminUser = callingUser?.role === 'admin';
+    // 업데이트할 데이터를 담을 객체 초기화
+    const meetingDataToUpdate: Partial<Omit<Meeting, 'id' | 'createdAt'>> = {};
 
-    if (meetingToUpdate.creatorId !== currentUserId && !isAdminUser) {
-      return { success: false, error: "모임 수정 권한이 없습니다." };
-    }
+    // isSettled 상태 결정 로직을 먼저 처리
+    const reserveFundSettingsChanged = payload.useReserveFund !== undefined ||
+                                     payload.partialReserveFundAmount !== undefined ||
+                                     payload.nonReserveFundParticipants !== undefined;
 
-    // If reserve fund settings change and meeting was settled, unsettle and revert deduction
-    // Corrected 'updates' to 'payload' for consistency with function signature
-    const reserveFundSettingsChanged = payload.useReserveFund !== undefined || payload.partialReserveFundAmount !== undefined || payload.nonReserveFundParticipants !== undefined;
     if (meetingToUpdate.isSettled && reserveFundSettingsChanged) {
       await dbRevertMeetingDeduction(id);
-      (payload as any).isSettled = false; // Unset isSettled if fund settings change
-       revalidatePath('/reserve-fund');
+      meetingDataToUpdate.isSettled = false;
+      revalidatePath('/reserve-fund');
+    } else if (payload.hasOwnProperty('isSettled')) {
+      meetingDataToUpdate.isSettled = isSettled;
     }
 
-    // Prepare data for update, respecting isTemporary status
-    // We assume isTemporary itself is NOT changed during an update in this version.
-    // The form logic would need to be more complex to allow switching meeting types.
-    const meetingDataToUpdate: Partial<Omit<Meeting, 'id' | 'createdAt'>> = { ...payload };
+    // 나머지 필드들을 meetingDataToUpdate에 추가 (payload에 해당 속성이 있는 경우에만)
+    if (payload.hasOwnProperty('name')) meetingDataToUpdate.name = name;
+    if (payload.hasOwnProperty('dateTime')) meetingDataToUpdate.dateTime = dateTime;
+    if (payload.hasOwnProperty('groupId')) meetingDataToUpdate.groupId = groupId;
+    if (payload.hasOwnProperty('locationName')) meetingDataToUpdate.locationName = locationName;
+    if (payload.hasOwnProperty('locationCoordinates')) meetingDataToUpdate.locationCoordinates = locationCoordinates;
+    if (payload.hasOwnProperty('participantIds')) meetingDataToUpdate.participantIds = participantIds;
+    if (payload.hasOwnProperty('useReserveFund')) meetingDataToUpdate.useReserveFund = useReserveFund;
+    if (payload.hasOwnProperty('nonReserveFundParticipants')) meetingDataToUpdate.nonReserveFundParticipants = nonReserveFundParticipants;
+    if (payload.hasOwnProperty('partialReserveFundAmount')) meetingDataToUpdate.partialReserveFundAmount = partialReserveFundAmount;
+    if (payload.hasOwnProperty('memo')) meetingDataToUpdate.memo = memo;
+    if (payload.hasOwnProperty('endTime')) meetingDataToUpdate.endTime = endTime;
+    if (payload.hasOwnProperty('totalFee')) meetingDataToUpdate.totalFee = totalFee;
+    if (payload.hasOwnProperty('feePerPerson')) meetingDataToUpdate.feePerPerson = feePerPerson;
+    if (payload.hasOwnProperty('temporaryParticipants')) meetingDataToUpdate.temporaryParticipants = temporaryParticipants;
 
-    // Handle share settings if isShareEnabled is in payload
     if (payload.hasOwnProperty('isShareEnabled')) {
-      if (payload.isShareEnabled === false) {
+      meetingDataToUpdate.isShareEnabled = isShareEnabled;
+      if (meetingDataToUpdate.isShareEnabled === false) {
         meetingDataToUpdate.shareToken = null;
         meetingDataToUpdate.shareExpiryDate = null;
-      } else if (payload.isShareEnabled === true) {
-        // If enabling sharing here, but no token/expiry provided in payload,
-        // rely on existing values or expect toggleMeetingShareAction to be used for proper setup.
-        // For safety, ensure they are not accidentally nulled if they had values from ...payload spread
-        // and payload.isShareEnabled was true but payload.shareToken/ExpiryDate were undefined.
-        if (payload.shareToken === undefined && meetingToUpdate.shareToken) {
-          meetingDataToUpdate.shareToken = meetingToUpdate.shareToken;
-        } else if (payload.shareToken === undefined) {
-           // This case implies enabling sharing without providing a token.
-           // This should ideally be handled by toggleMeetingShareAction to generate a token.
-           // For now, if it's enabled here without a token, we'll set to null,
-           // assuming toggleMeetingShareAction will be used later.
-           // Or, we prevent isShareEnabled:true if no token.
-           // Let's stick to the prompt: if UI for shareExpiryDate is not present, it's not set here.
-           // If isShareEnabled is true, and token/expiry are not in payload, they are left as is from ...payload spread.
-        }
-        if (payload.shareExpiryDate === undefined && meetingToUpdate.shareExpiryDate) {
-          meetingDataToUpdate.shareExpiryDate = meetingToUpdate.shareExpiryDate;
-        }
-        // No explicit setting of shareExpiryDate to a default here if enabling,
-        // as that's not the primary role of updateMeetingAction unless specific UI for expiry exists.
+      } else if (meetingDataToUpdate.isShareEnabled === true) {
+        meetingDataToUpdate.shareToken = payload.hasOwnProperty('shareToken') ? shareToken : meetingToUpdate.shareToken;
+        meetingDataToUpdate.shareExpiryDate = payload.hasOwnProperty('shareExpiryDate') ? shareExpiryDate : meetingToUpdate.shareExpiryDate;
       }
     }
 
-
-    // Handle location fields for Firestore compatibility
-    // If locationName is being set (even to empty) and locationCoordinates is not explicitly provided in payload,
-    // or if locationName is cleared, locationCoordinates should be handled.
-    if (payload.hasOwnProperty('locationName')) { // locationName is in the payload
-      meetingDataToUpdate.locationName = payload.locationName || ''; // Set to empty string if null/undefined
-      if (!payload.hasOwnProperty('locationCoordinates')) {
-        // If locationName is being updated but locationCoordinates is not,
-        // and locationName becomes empty, then locationCoordinates should be removed.
-        if (!meetingDataToUpdate.locationName) {
-          (meetingDataToUpdate as any).locationCoordinates = deleteField();
-        }
-        // If locationName is not empty, and coordinates were not in payload, existing coordinates are kept (by initial spread).
-        // Or, if new name implies new coords, form should send new coords or undefined.
+    if (payload.hasOwnProperty('locationName')) {
+      meetingDataToUpdate.locationName = locationName || '';
+      if (!payload.hasOwnProperty('locationCoordinates') && !meetingDataToUpdate.locationName) {
+        meetingDataToUpdate.locationCoordinates = undefined;
       }
     }
-
-    // Explicitly handle locationCoordinates from payload
     if (payload.hasOwnProperty('locationCoordinates')) {
-      if (payload.locationCoordinates === undefined) {
-        (meetingDataToUpdate as any).locationCoordinates = deleteField();
-      } else {
-        // This will set it to null if payload.locationCoordinates is null, or to the GeoPoint object
-        meetingDataToUpdate.locationCoordinates = payload.locationCoordinates;
-      }
+        meetingDataToUpdate.locationCoordinates = locationCoordinates;
     }
 
-    // Handle other optional fields that might be explicitly set to undefined in payload
-    const optionalFieldsToDeleteIfUndefined: (keyof Partial<Omit<Meeting, 'id' | 'createdAt'>>)[] = [
-      'endTime', 'memo', 'partialReserveFundAmount', // Add other relevant fields
-    ];
-
-    optionalFieldsToDeleteIfUndefined.forEach(fieldKey => {
-      if (payload.hasOwnProperty(fieldKey) && payload[fieldKey] === undefined) {
-        if (fieldKey === 'endTime') { // endTime can be null
-          meetingDataToUpdate[fieldKey] = null;
-        } else {
-          (meetingDataToUpdate as any)[fieldKey] = deleteField();
-        }
-      }
-    });
-
-
-    if (meetingToUpdate.isTemporary) { // If existing meeting is temporary
-      // Only update fields relevant to temporary meetings
+    if (meetingToUpdate.isTemporary) {
       delete meetingDataToUpdate.participantIds;
       delete meetingDataToUpdate.useReserveFund;
       delete meetingDataToUpdate.partialReserveFundAmount;
       delete meetingDataToUpdate.nonReserveFundParticipants;
 
-      // totalFee와 feePerPerson 업데이트 로직 for temporary meeting update
-      let feeTypeSetInPayload = false;
-      if (payload.hasOwnProperty('totalFee')) {
-        if (payload.totalFee !== undefined && typeof payload.totalFee === 'number' && !isNaN(payload.totalFee)) {
-          meetingDataToUpdate.totalFee = payload.totalFee;
-          meetingDataToUpdate.feePerPerson = undefined;
-          feeTypeSetInPayload = true;
-        } else {
-          meetingDataToUpdate.totalFee = undefined;
-        }
+      if (payload.hasOwnProperty('totalFee') && meetingDataToUpdate.totalFee !== undefined) {
+        meetingDataToUpdate.feePerPerson = undefined;
+      } else if (payload.hasOwnProperty('feePerPerson') && meetingDataToUpdate.feePerPerson !== undefined) {
+        meetingDataToUpdate.totalFee = undefined;
       }
-
-      if (payload.hasOwnProperty('feePerPerson')) {
-        if (payload.feePerPerson !== undefined && typeof payload.feePerPerson === 'number' && !isNaN(payload.feePerPerson)) {
-          meetingDataToUpdate.feePerPerson = payload.feePerPerson;
-          // If totalFee was also in payload and valid, feePerPerson takes precedence or both are set (totalFee will be nulled by this path)
-          // If totalFee was not in payload or was invalid, this will correctly set feePerPerson and nullify totalFee.
-          meetingDataToUpdate.totalFee = undefined;
-          feeTypeSetInPayload = true;
-        } else {
-          meetingDataToUpdate.feePerPerson = undefined;
-        }
-      }
-      // If neither was in payload, existing values are kept unless one of them was already null and the other had a value.
-      // This logic ensures that if one is actively set, the other is nulled.
-      // If one is cleared (e.g. payload.totalFee = null) and the other is not in payload, the other remains.
-      // If both are cleared in payload, both become null.
-
-    } else { // If existing meeting is a regular meeting
-      // Only update fields relevant to regular meetings
+    } else {
       delete meetingDataToUpdate.temporaryParticipants;
-      // Ensure temporary fee fields are nulled if they are somehow in payload for a regular meeting
       if (payload.hasOwnProperty('totalFee')) meetingDataToUpdate.totalFee = undefined;
       if (payload.hasOwnProperty('feePerPerson')) meetingDataToUpdate.feePerPerson = undefined;
 
-      // Handle useReserveFund and partialReserveFundAmount for regular meetings
-      const willUseReserveFund = payload.hasOwnProperty('useReserveFund')
-        ? !!payload.useReserveFund
-        : meetingToUpdate.useReserveFund; // Fallback to existing value if not in payload
+      const willUseReserveFundCurrent = meetingDataToUpdate.useReserveFund !== undefined ? meetingDataToUpdate.useReserveFund : meetingToUpdate.useReserveFund;
 
-      if (payload.hasOwnProperty('useReserveFund')) { // If useReserveFund is explicitly in payload
-        meetingDataToUpdate.useReserveFund = willUseReserveFund;
-      }
-
-      if (willUseReserveFund) {
-        if (payload.hasOwnProperty('partialReserveFundAmount')) {
-          if (typeof payload.partialReserveFundAmount === 'number' && !isNaN(payload.partialReserveFundAmount)) {
-            meetingDataToUpdate.partialReserveFundAmount = payload.partialReserveFundAmount;
-          } else {
-            // Invalid amount in payload while useReserveFund is true (or becoming true)
+      if (willUseReserveFundCurrent) {
+        if (meetingDataToUpdate.partialReserveFundAmount === undefined && !payload.hasOwnProperty('partialReserveFundAmount')) {
+           meetingDataToUpdate.partialReserveFundAmount = meetingToUpdate.partialReserveFundAmount !== undefined ? meetingToUpdate.partialReserveFundAmount : 0;
+        } else if (meetingDataToUpdate.partialReserveFundAmount === undefined && payload.hasOwnProperty('partialReserveFundAmount') && typeof payload.partialReserveFundAmount !== 'number' ){
             meetingDataToUpdate.partialReserveFundAmount = 0;
-          }
-        } else if (meetingDataToUpdate.useReserveFund && (meetingToUpdate.partialReserveFundAmount === undefined || typeof meetingToUpdate.partialReserveFundAmount !== 'number')) {
-          // useReserveFund is true (or becoming true via payload), but no amount in payload, and existing amount is not a valid number
-           if(payload.hasOwnProperty('useReserveFund') && !!payload.useReserveFund) { // only default to 0 if useReserveFund was explicitly set to true
-            meetingDataToUpdate.partialReserveFundAmount = 0;
-           } else if (!payload.hasOwnProperty('useReserveFund') && meetingToUpdate.useReserveFund && (meetingToUpdate.partialReserveFundAmount === null || typeof meetingToUpdate.partialReserveFundAmount !== 'number')) {
-             // If useReserveFund was already true, and no amount in payload, and existing amount is null/invalid, set to 0
-             meetingDataToUpdate.partialReserveFundAmount = 0;
-           }
-           // If useReserveFund was already true, and payload doesn't mention partialReserveFundAmount,
-           // existing valid partialReserveFundAmount (already spread from ...payload) will be kept if it was part of the payload.
-           // If payload.partialReserveFundAmount was undefined, it's now 0.
         }
-         // If payload has no 'partialReserveFundAmount' and existing 'useReserveFund' is true,
-         // meetingDataToUpdate.partialReserveFundAmount would have existing value from '...payload' spread.
-         // Ensure it's not undefined if useReserveFund is true.
-         if (meetingDataToUpdate.useReserveFund && meetingDataToUpdate.partialReserveFundAmount === undefined) {
-           meetingDataToUpdate.partialReserveFundAmount = 0;
-         }
-
       } else {
         meetingDataToUpdate.partialReserveFundAmount = undefined;
+        meetingDataToUpdate.nonReserveFundParticipants = [];
       }
 
-      // If nonReserveFundParticipants is in payload and useReserveFund is false, it should be empty or null
-      if (!willUseReserveFund && payload.hasOwnProperty('nonReserveFundParticipants')) {
+      if (meetingDataToUpdate.useReserveFund === false) {
         meetingDataToUpdate.nonReserveFundParticipants = [];
-      } else if (!willUseReserveFund && !payload.hasOwnProperty('nonReserveFundParticipants')) {
-        // If useReserveFund becomes false, and nonReserveFundParticipants was not in payload, ensure it's cleared
-        if (meetingToUpdate.nonReserveFundParticipants && meetingToUpdate.nonReserveFundParticipants.length > 0) {
-            meetingDataToUpdate.nonReserveFundParticipants = [];
-        }
       }
     }
-
 
     const updatedMeeting = await dbUpdateMeeting(id, meetingDataToUpdate);
     if (!updatedMeeting) throw new Error('모임 업데이트에 실패했습니다.');
 
     revalidatePath('/meetings');
     revalidatePath(`/meetings/${id}`);
-    revalidatePath('/'); // Dashboard might show recent meeting
-    if (reserveFundSettingsChanged || (payload.isSettled !== undefined && !payload.isSettled)) {
+    revalidatePath('/');
+    // isSettled 상태가 false로 변경된 경우 또는 payload에 isSettled가 명시적으로 false로 온 경우 reserve-fund 경로도 revalidate
+    if ( (meetingToUpdate.isSettled && reserveFundSettingsChanged) || (payload.isSettled === false && meetingDataToUpdate.isSettled === false) ) {
       revalidatePath('/reserve-fund');
     }
     return { success: true, meeting: updatedMeeting };
@@ -583,21 +545,22 @@ export async function updateMeetingAction(
 }
 
 export async function deleteMeetingAction(id: string, currentUserId?: string | null) {
-   if (!currentUserId) {
-    return { success: false, error: "인증되지 않은 사용자입니다. 로그인이 필요합니다." };
+  const meetingToDelete = await dbGetMeetingById(id);
+  if (!meetingToDelete) {
+    return { success: false, error: "삭제할 모임을 찾을 수 없습니다." };
   }
+
+  const permissionCheck = await _ensureUserPermission(currentUserId, {
+    ownerId: meetingToDelete.creatorId,
+    adminCanOverride: true,
+    entityName: '모임 삭제'
+  });
+
+  if (!permissionCheck.success) {
+    return { success: false, error: permissionCheck.error };
+  }
+
   try {
-    const meetingToDelete = await dbGetMeetingById(id);
-    if (!meetingToDelete) {
-      return { success: false, error: "삭제할 모임을 찾을 수 없습니다." };
-    }
-    const callingUser = await dbGetUserById(currentUserId);
-    const isAdminUser = callingUser?.role === 'admin';
-
-    if (meetingToDelete.creatorId !== currentUserId && !isAdminUser) {
-      return { success: false, error: "모임 삭제 권한이 없습니다." };
-    }
-
     await dbDeleteMeeting(id); // This now also reverts fund deduction
     revalidatePath('/meetings');
     revalidatePath('/');
@@ -612,16 +575,18 @@ export async function deleteMeetingAction(id: string, currentUserId?: string | n
 
 // Expense Actions
 export async function createExpenseAction(expenseData: Omit<Expense, 'id' | 'createdAt'>, currentUserId?: string | null) {
-  if (!currentUserId) {
-    return { success: false, error: "인증되지 않은 사용자입니다. 로그인이 필요합니다." };
+  const permissionCheck = await _ensureUserPermission(currentUserId);
+  if (!permissionCheck.success) {
+    return { success: false, error: permissionCheck.error };
   }
+  const callingUser = permissionCheck.user!;
+
   try {
     const meeting = await dbGetMeetingById(expenseData.meetingId);
     if (!meeting) return { success: false, error: "모임을 찾을 수 없습니다." };
 
-    const callingUser = await dbGetUserById(currentUserId);
-    const isAdminUser = callingUser?.role === 'admin';
-    const isCreator = meeting.creatorId === currentUserId;
+    const isAdminUser = callingUser.role === 'admin';
+    const isCreator = meeting.creatorId === callingUser.id;
 
     if (!isAdminUser && !isCreator) {
         return { success: false, error: "지출 항목 추가 권한이 없습니다." };
@@ -651,19 +616,22 @@ export async function updateExpenseAction(
   updates: Partial<Omit<Expense, 'id' | 'createdAt' | 'meetingId'>>,
   currentUserId?: string | null
 ) {
-  if (!currentUserId) {
-    return { success: false, error: "인증되지 않은 사용자입니다. 로그인이 필요합니다." };
-  }
   if (!meetingId || !expenseId) {
     return { success: false, error: "잘못된 요청입니다. 모임 ID 또는 지출 ID가 없습니다."};
   }
+
+  const permissionCheck = await _ensureUserPermission(currentUserId);
+  if (!permissionCheck.success) {
+    return { success: false, error: permissionCheck.error };
+  }
+  const callingUser = permissionCheck.user!;
+
   try {
     const meeting = await dbGetMeetingById(meetingId);
     if (!meeting) return { success: false, error: "모임을 찾을 수 없습니다." };
 
-    const callingUser = await dbGetUserById(currentUserId);
-    const isAdminUser = callingUser?.role === 'admin';
-    const isCreator = meeting.creatorId === currentUserId;
+    const isAdminUser = callingUser.role === 'admin';
+    const isCreator = meeting.creatorId === callingUser.id;
 
     if (!isAdminUser && !isCreator) {
         return { success: false, error: "지출 항목 수정 권한이 없습니다." };
@@ -689,19 +657,22 @@ export async function updateExpenseAction(
 }
 
 export async function deleteExpenseAction(expenseId: string, meetingId: string, currentUserId?: string | null) {
-  if (!currentUserId) {
-    return { success: false, error: "인증되지 않은 사용자입니다. 로그인이 필요합니다." };
-  }
    if (!meetingId || !expenseId) {
     return { success: false, error: "잘못된 요청입니다. 모임 ID 또는 지출 ID가 없습니다."};
   }
+
+  const permissionCheck = await _ensureUserPermission(currentUserId);
+  if (!permissionCheck.success) {
+    return { success: false, error: permissionCheck.error };
+  }
+  const callingUser = permissionCheck.user!;
+
   try {
     const meeting = await dbGetMeetingById(meetingId);
     if (!meeting) return { success: false, error: "모임을 찾을 수 없습니다." };
     
-    const callingUser = await dbGetUserById(currentUserId);
-    const isAdminUser = callingUser?.role === 'admin';
-    const isCreator = meeting.creatorId === currentUserId;
+    const isAdminUser = callingUser.role === 'admin';
+    const isCreator = meeting.creatorId === callingUser.id;
 
     if (!isAdminUser && !isCreator) {
         return { success: false, error: "지출 항목 삭제 권한이 없습니다." };
@@ -727,28 +698,26 @@ export async function deleteExpenseAction(expenseId: string, meetingId: string, 
 
 // Reserve Fund Actions
 export async function setReserveFundBalanceAction(groupId: string, newBalance: number, description?: string, currentUserId?: string | null) {
-  if (!currentUserId) {
-    return { success: false, error: "인증되지 않은 사용자입니다. 사용자 ID가 필요합니다." };
-  }
   if (!groupId) {
     return { success: false, error: "그룹 ID가 필요합니다." };
   }
 
-  try {
-    const callingUser = await dbGetUserById(currentUserId);
-    if (!callingUser) {
-      return { success: false, error: "사용자 정보를 찾을 수 없습니다." };
-    }
+  const permissionCheck = await _ensureUserPermission(currentUserId, { entityName: '회비 잔액 설정' });
+  if (!permissionCheck.success) {
+    return { success: false, error: permissionCheck.error };
+  }
+  const callingUser = permissionCheck.user!;
 
+  try {
     let hasPermission = false;
     if (callingUser.role === 'admin') {
       hasPermission = true;
-    } else if (callingUser.role === 'user') {
+    } else if (callingUser.role === 'user') { // 'user' 역할만 그룹 소유자 확인
       const groupDocRef = doc(db, 'friendGroups', groupId);
       const groupSnap = await getDoc(groupDocRef);
       if (groupSnap.exists()) {
         const groupData = groupSnap.data() as FriendGroup;
-        if (groupData.ownerUserId === currentUserId) {
+        if (groupData.ownerUserId === callingUser.id) {
           hasPermission = true;
         }
       }
@@ -770,20 +739,21 @@ export async function setReserveFundBalanceAction(groupId: string, newBalance: n
 }
 
 export async function finalizeMeetingSettlementAction(meetingId: string, currentUserId?: string | null) {
-  if (!currentUserId) {
-    return { success: false, error: "인증되지 않은 사용자입니다. 로그인이 필요합니다." };
+  const permissionCheck = await _ensureUserPermission(currentUserId, {
+    requiredRole: 'admin',
+    entityName: '정산 확정'
+  });
+
+  if (!permissionCheck.success) {
+    return { success: false, error: permissionCheck.error };
   }
-  const callingUser = await dbGetUserById(currentUserId);
-  if (!callingUser || callingUser.role !== 'admin') { // Only admins can finalize settlement now
-    return { success: false, error: "정산 확정 권한이 없습니다." };
-  }
+  // const callingUser = permissionCheck.user!; // 필요시 사용
 
   try {
     const meeting = await dbGetMeetingById(meetingId);
     if (!meeting) return { success: false, error: '모임을 찾을 수 없습니다.' };
     if (meeting.isSettled) return { success: true, meeting, message: "이미 정산이 확정된 모임입니다." };
     if (!meeting.useReserveFund || !meeting.partialReserveFundAmount || meeting.partialReserveFundAmount <= 0) {
-      // If not using reserve fund or amount is zero, just mark as settled
       const updatedMeeting = await dbUpdateMeeting(meetingId, { isSettled: true });
       if (!updatedMeeting) return { success: false, error: '정산 상태 업데이트에 실패했습니다.' };
       revalidatePath(`/meetings/${meetingId}`);
@@ -800,8 +770,9 @@ export async function finalizeMeetingSettlementAction(meetingId: string, current
        return { success: true, meeting: updatedMeeting, message: `모임 (${meeting.name}) 정산 확정. 지출 내역이 없어 회비는 사용되지 않았습니다.` };
     }
     
-    const currentReserveBalance = await getReserveFundBalance();
-    const amountToDeduct = meeting.partialReserveFundAmount; // Already a number or undefined
+    // getReserveFundBalance는 이제 groupId를 필수로 받으므로, meeting.groupId를 사용합니다.
+    const currentReserveBalance = await getReserveFundBalance(meeting.groupId);
+    const amountToDeduct = meeting.partialReserveFundAmount;
     
     let message = "";
     let actualDeduction = 0;
@@ -809,9 +780,8 @@ export async function finalizeMeetingSettlementAction(meetingId: string, current
     if (amountToDeduct && amountToDeduct > 0) {
         actualDeduction = Math.min(amountToDeduct, currentReserveBalance ?? 0);
         if (actualDeduction > 0.001) {
-            // Revert any previous deduction for this meeting before recording a new one to prevent duplicates if action is retried
             await dbRevertMeetingDeduction(meeting.id); 
-            await dbRecordMeetingDeduction(meeting.groupId, meeting.id, meeting.name, actualDeduction, meeting.dateTime); // groupId 전달
+            await dbRecordMeetingDeduction(meeting.groupId, meeting.id, meeting.name, actualDeduction, meeting.dateTime);
             message = `모임 (${meeting.name}) 정산 확정. 회비에서 ${actualDeduction.toLocaleString()}원 사용.`;
             if (actualDeduction < amountToDeduct) {
                 message += ` (설정된 금액보다 회비 잔액이 부족하여 부분 사용)`;
@@ -825,10 +795,8 @@ export async function finalizeMeetingSettlementAction(meetingId: string, current
         message = `모임 (${meeting.name}) 정산 확정. 회비 사용 설정이 없거나 금액이 0원입니다.`;
     }
 
-
     const updatedMeeting = await dbUpdateMeeting(meetingId, { isSettled: true });
     if (!updatedMeeting) {
-      // Attempt to revert deduction if settlement marking failed
       if(actualDeduction > 0.001) await dbRevertMeetingDeduction(meeting.id);
       return { success: false, error: '정산 상태 업데이트에 실패했습니다.' };
     }
@@ -840,7 +808,6 @@ export async function finalizeMeetingSettlementAction(meetingId: string, current
 
   } catch (error) {
     console.error("finalizeMeetingSettlementAction Error:", error);
-    // Attempt to revert and unsettle if error occurs mid-process
     try {
         const meetingOnError = await dbGetMeetingById(meetingId);
         if (meetingOnError && meetingOnError.useReserveFund && meetingOnError.partialReserveFundAmount && meetingOnError.partialReserveFundAmount > 0) {
@@ -859,19 +826,21 @@ export async function finalizeMeetingSettlementAction(meetingId: string, current
 
 // User Role Management Action
 export async function updateUserRoleAction(userIdToUpdate: string, newRole: User['role'], currentAdminId?: string | null) {
-  if (!currentAdminId) {
-    return { success: false, error: "인증되지 않은 사용자입니다. 관리자 로그인이 필요합니다." };
-  }
   if (userIdToUpdate === currentAdminId) {
     return { success: false, error: "자신의 역할은 변경할 수 없습니다." };
   }
 
-  try {
-    const adminUser = await dbGetUserById(currentAdminId);
-    if (!adminUser || adminUser.role !== 'admin') {
-      return { success: false, error: "사용자 역할을 변경할 권한이 없습니다. 관리자만 가능합니다." };
-    }
+  const permissionCheck = await _ensureUserPermission(currentAdminId, {
+    requiredRole: 'admin',
+    entityName: '사용자 역할 변경'
+  });
 
+  if (!permissionCheck.success) {
+    return { success: false, error: permissionCheck.error };
+  }
+  // const adminUser = permissionCheck.user!; // 필요시 사용
+
+  try {
     const updatedUser = await dbUpdateUser(userIdToUpdate, { role: newRole });
     if (!updatedUser) {
       return { success: false, error: "사용자 역할 업데이트에 실패했습니다. 사용자를 찾을 수 없습니다." };
@@ -887,9 +856,11 @@ export async function updateUserRoleAction(userIdToUpdate: string, newRole: User
 
 // Meeting Share Action
 export async function toggleMeetingShareAction(meetingId: string, currentUserId: string, enable: boolean, expiryDays: number = 7) {
-  if (!currentUserId) {
-    return { success: false, error: "인증되지 않은 사용자입니다. 로그인이 필요합니다." };
+  const permissionCheck = await _ensureUserPermission(currentUserId, { entityName: '공유 설정 변경' });
+  if (!permissionCheck.success) {
+    return { success: false, error: permissionCheck.error };
   }
+  const user = permissionCheck.user!;
 
   try {
     const meeting = await dbGetMeetingById(meetingId);
@@ -897,12 +868,8 @@ export async function toggleMeetingShareAction(meetingId: string, currentUserId:
       return { success: false, error: "모임을 찾을 수 없습니다." };
     }
 
-    const user = await dbGetUserById(currentUserId); // Fetch user data from Firestore
-    if (!user) { // Added check for user existence
-      return { success: false, error: "사용자 정보를 찾을 수 없습니다." };
-    }
-    const isCreator = meeting.creatorId === currentUserId;
-    const isAdmin = user.role === 'admin'; // user is guaranteed to exist here
+    const isCreator = meeting.creatorId === user.id;
+    const isAdmin = user.role === 'admin';
 
     if (!isCreator && !isAdmin) {
       return { success: false, error: "공유 설정을 변경할 권한이 없습니다." };
@@ -916,7 +883,7 @@ export async function toggleMeetingShareAction(meetingId: string, currentUserId:
       updates = {
         isShareEnabled: true,
         shareToken: shareToken,
-        shareExpiryDate: shareExpiryDate, // Date 타입
+        shareExpiryDate: shareExpiryDate,
       };
     } else {
       updates = {
@@ -941,29 +908,28 @@ export async function toggleMeetingShareAction(meetingId: string, currentUserId:
   }
 }
 
-// --- FriendGroup Actions ---
+// --- 친구 그룹 액션 ---
 export async function createFriendGroupAction(
   name: string,
-  currentUserId: string, // Changed from ownerUserId for clarity and to match pattern
+  currentUserId: string,
   memberIds: string[] = []
 ) {
+  const permissionCheck = await _ensureUserPermission(currentUserId, {
+    requiredRole: ['user', 'admin'],
+    entityName: '친구 그룹 생성'
+  });
+
+  if (!permissionCheck.success) {
+    return { success: false, error: permissionCheck.error };
+  }
+  // const currentUser = permissionCheck.user!; // _ensureUserPermission이 user 객체를 반환하므로 필요시 사용
+
   try {
-    if (!currentUserId) {
-      return { success: false, error: "인증되지 않은 사용자입니다. 로그인이 필요합니다." };
-    }
-    const currentUser = await dbGetUserById(currentUserId);
-    if (!currentUser) {
-      return { success: false, error: "사용자 정보를 찾을 수 없습니다." };
-    }
-
-    if (currentUser.role !== 'admin' && currentUser.role !== 'user') {
-      return { success: false, error: "친구 그룹을 생성할 권한이 없습니다. 'admin' 또는 'user' 역할만 가능합니다." };
-    }
-
+    // 역할 검사는 _ensureUserPermission에서 이미 처리됨
     const newGroup = await dbAddFriendGroup({ name, ownerUserId: currentUserId, memberIds });
-    revalidatePath('/friends'); // Main friends page (shows groups)
-    revalidatePath('/meetings/new'); // Meeting form might use friend groups
-    revalidatePath('/groups'); // Assuming a new path for listing groups might exist
+    revalidatePath('/friends');
+    revalidatePath('/meetings/new');
+    revalidatePath('/groups');
     return { success: true, group: newGroup };
   } catch (error) {
     console.error('createFriendGroupAction Error:', error);
@@ -977,22 +943,20 @@ export async function updateFriendGroupAction(
   updates: Partial<Omit<FriendGroup, 'id' | 'createdAt'>>,
   currentUserId: string
 ) {
-  try {
-    if (!currentUserId) {
-      return { success: false, error: "인증되지 않은 사용자입니다. 로그인이 필요합니다." };
-    }
-    const currentUser = await dbGetUserById(currentUserId);
-    if (!currentUser) {
-      return { success: false, error: "사용자 정보를 찾을 수 없습니다." };
-    }
+  const permissionCheck = await _ensureUserPermission(currentUserId, { entityName: '친구 그룹 수정' });
+  if (!permissionCheck.success) {
+    return { success: false, error: permissionCheck.error };
+  }
+  const currentUser = permissionCheck.user!;
 
+  try {
     const groupDocRef = doc(db, 'friendGroups', id);
     const groupSnap = await getDoc(groupDocRef);
 
     if (!groupSnap.exists()) {
       return { success: false, error: "수정할 친구 그룹을 찾을 수 없습니다." };
     }
-    const groupData = groupSnap.data() as FriendGroup; // Cast to FriendGroup
+    const groupData = groupSnap.data() as FriendGroup;
 
     if (currentUser.role !== 'admin' && groupData.ownerUserId !== currentUserId) {
       return { success: false, error: "친구 그룹을 수정할 권한이 없습니다." };
@@ -1000,13 +964,11 @@ export async function updateFriendGroupAction(
 
     const updatedGroup = await dbUpdateFriendGroup(id, updates);
     if (!updatedGroup) {
-        // This case might not be reachable if dbUpdateFriendGroup throws on error or returns null for not found,
-        // and we already checked for existence. But as a safeguard:
         return { success: false, error: "친구 그룹 업데이트에 실패했습니다."};
     }
     revalidatePath('/friends');
-    revalidatePath('/groups'); // Assuming a path for listing groups
-    revalidatePath(`/friends/${id}`); // If there's a page for a specific group
+    revalidatePath('/groups');
+    revalidatePath(`/friends/${id}`);
     return { success: true, group: updatedGroup };
   } catch (error) {
     console.error('updateFriendGroupAction Error:', error);
@@ -1016,15 +978,13 @@ export async function updateFriendGroupAction(
 }
 
 export async function deleteFriendGroupAction(id: string, currentUserId: string) {
-  try {
-    if (!currentUserId) {
-      return { success: false, error: "인증되지 않은 사용자입니다. 로그인이 필요합니다." };
-    }
-    const currentUser = await dbGetUserById(currentUserId);
-    if (!currentUser) {
-      return { success: false, error: "사용자 정보를 찾을 수 없습니다." };
-    }
+  const permissionCheck = await _ensureUserPermission(currentUserId, { entityName: '친구 그룹 삭제' });
+  if (!permissionCheck.success) {
+    return { success: false, error: permissionCheck.error };
+  }
+  const currentUser = permissionCheck.user!;
 
+  try {
     const groupDocRef = doc(db, 'friendGroups', id);
     const groupSnap = await getDoc(groupDocRef);
 
@@ -1040,7 +1000,6 @@ export async function deleteFriendGroupAction(id: string, currentUserId: string)
     await dbDeleteFriendGroup(id);
     revalidatePath('/friends');
     revalidatePath('/groups');
-    // Also consider revalidating paths for any meetings that might have used this group, if applicable.
     return { success: true };
   } catch (error) {
     console.error('deleteFriendGroupAction Error:', error);
@@ -1068,24 +1027,20 @@ export async function getMeetingsForUserAction(params: {
   }
 
   let actualUserIdForFilter: string | undefined = undefined;
-  let actualUserFriendGroupIdsForFilter: string[] | undefined = undefined; // Renamed
+  let actualUserFriendGroupIdsForFilter: string[] | undefined = undefined;
 
   if (user.role !== 'admin') {
     actualUserIdForFilter = user.id;
-    actualUserFriendGroupIdsForFilter = user.friendGroupIds && user.friendGroupIds.length > 0 ? user.friendGroupIds : undefined; // Renamed field
-    // Pass undefined if empty to ensure getMeetings logic for OR condition works as intended (no group filter if undefined)
+    actualUserFriendGroupIdsForFilter = user.friendGroupIds && user.friendGroupIds.length > 0 ? user.friendGroupIds : undefined;
   }
-  // For admin, actualUserIdForFilter and actualUserFriendGroupIdsForFilter remain undefined,
-  // so dbGetMeetings should fetch all meetings based on its internal logic.
 
   try {
-    // Ensure dbGetMeetings can handle undefined for userId and userFriendGroupIds to mean "no filter" for those specific criteria
     const result = await dbGetMeetings({
       year,
       page,
       limitParam,
       userId: actualUserIdForFilter,
-      userFriendGroupIds: actualUserFriendGroupIdsForFilter, // Renamed
+      userFriendGroupIds: actualUserFriendGroupIdsForFilter,
     });
     return { success: true, ...result };
   } catch (error) {
@@ -1095,8 +1050,6 @@ export async function getMeetingsForUserAction(params: {
   }
 }
 
-
-// 사용자가 접근 가능한 친구 그룹 목록 조회 (소유 또는 참조)
 export async function getFriendGroupsForUserAction(currentUserId: string) {
   try {
     if (!currentUserId) {
@@ -1111,9 +1064,6 @@ export async function getFriendGroupsForUserAction(currentUserId: string) {
     if (currentUser.role === 'admin') {
       rawGroups = await dbGetAllFriendGroups();
     } else {
-      // For 'user' and 'viewer', dbGetFriendGroupsByUser handles owned and referenced groups.
-      // It's assumed this function already correctly sets isOwned/isReferenced or the UI handles it.
-      // For viewers, an additional filter might be applied if dbGetFriendGroupsByUser doesn't strictly limit.
       rawGroups = await dbGetFriendGroupsByUser(currentUserId);
       if (currentUser.role === 'viewer') {
         const referencedIds = currentUser.friendGroupIds || [];
@@ -1121,14 +1071,12 @@ export async function getFriendGroupsForUserAction(currentUserId: string) {
       }
     }
 
-    // Process groups to ensure isOwned and isReferenced flags are consistent, especially for admin
     const processedGroups = rawGroups.map(group => ({
       ...group,
       isOwned: group.ownerUserId === currentUserId,
       isReferenced: currentUser.friendGroupIds?.includes(group.id) || false,
     }));
 
-    // Sort all groups by createdAt date
     const sortedGroups = processedGroups.sort((a, b) => {
       const dateA = a.createdAt instanceof Timestamp ? a.createdAt.toMillis() : (a.createdAt ? new Date(a.createdAt).getTime() : 0);
       const dateB = b.createdAt instanceof Timestamp ? b.createdAt.toMillis() : (b.createdAt ? new Date(b.createdAt).getTime() : 0);
@@ -1140,7 +1088,7 @@ export async function getFriendGroupsForUserAction(currentUserId: string) {
   } catch (error) {
     console.error('getFriendGroupsForUserAction Error:', error);
     const errorMessage = error instanceof Error ? error.message : '친구 그룹 목록 조회 중 오류가 발생했습니다.';
-    return { success: false, error: errorMessage, groups: [] }; // Ensure groups is an empty array on error
+    return { success: false, error: errorMessage, groups: [] };
   }
 }
 
@@ -1148,7 +1096,7 @@ export async function getFriendGroupsForUserAction(currentUserId: string) {
 // 그룹별 친구 목록 조회
 export async function getFriendsByGroupAction(groupId: string) {
   try {
-    const friends = await (await import('./data-store')).getFriendsByGroup(groupId);
+    const friends = await dbGetFriendsByGroup(groupId);
     return { success: true, friends: friends ?? [] };
   } catch (error) {
     return { success: false, error: '그룹별 친구 목록 조회에 실패했습니다.' };

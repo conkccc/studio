@@ -1,13 +1,12 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 
-// Define public paths that do not require authentication
 const publicPaths = ['/login', '/share/meeting', '/img', '/favicon.ico', '/api/auth']; 
 
 // --- 간단한 메모리 기반 Rate Limiting (IP 기준) ---
 const rateLimitMap = new Map<string, { count: number; last: number }>();
-const WINDOW = 60 * 1000; // 1분
-const LIMIT = 20; // 1분에 20회
+const WINDOW = 60 * 1000; // 1분 (밀리초)
+const LIMIT = 20; // 1분당 최대 요청 횟수
 
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
@@ -42,15 +41,15 @@ export function middleware(request: NextRequest) {
 export const config = {
   matcher: [
     /*
-     * Match all request paths except for the ones starting with:
-     * - _next/static (static files)
-     * - _next/image (image optimization files)
-     * - favicon.ico (favicon file)
-     * - img (image files in public/img) - Covered by publicPaths
-     * - api/auth (auth related API routes) - Covered by publicPaths
+     * 다음으로 시작하는 경로를 제외한 모든 요청 경로와 일치시킵니다:
+     * - _next/static (정적 파일)
+     * - _next/image (이미지 최적화 파일)
+     * - favicon.ico (파비콘 파일)
+     * - img/ (public/img 내의 이미지 파일 - publicPaths에서도 처리됨)
+     * - api/auth/ (인증 관련 API 라우트 - publicPaths에서도 처리됨)
      *
-     * Match all paths NOT starting with these, to apply the middleware.
-     * The '?!' is a negative lookahead.
+     * 위의 경로로 시작하지 않는 모든 경로에 미들웨어를 적용합니다.
+     * '?!'는 부정 전방 탐색(negative lookahead)입니다.
      */
     '/((?!_next/static|_next/image|favicon.ico|img/|api/auth).*)',
   ],

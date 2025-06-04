@@ -5,15 +5,15 @@ import { useEffect, useState, useCallback } from 'react';
 import {
   getMeetingByIdAction,
   getFriendsByGroupAction,
-  getFriendGroupsForUserAction,
-  getAllUsersAction // Ensure this is imported if used, though not strictly needed for this page's direct functionality if MeetingCard handles users
+  getFriendGroupsForUserAction
+  // getAllUsersAction // CreateMeetingForm에서 allUsers를 직접 사용하지 않으므로 제거
 } from '@/lib/actions';
 import { CreateMeetingForm } from '@/components/meetings/CreateMeetingForm';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
 import { useAuth } from '@/contexts/AuthContext';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
-import type { Meeting, Friend, FriendGroup, User } from '@/lib/types'; // Added FriendGroup, User
+import type { Meeting, Friend, FriendGroup, User } from '@/lib/types';
 import { useParams, useRouter } from 'next/navigation';
 import { useToast } from '@/hooks/use-toast';
 import { Loader2 } from 'lucide-react';
@@ -28,8 +28,6 @@ export default function EditMeetingPage() {
   const [meetingToEdit, setMeetingToEdit] = useState<Meeting | null>(null);
   const [friendsForForm, setFriendsForForm] = useState<Friend[]>([]);
   const [groupsForForm, setGroupsForForm] = useState<FriendGroup[]>([]);
-  // allUsers state might not be needed here if MeetingCard fetches/receives it another way
-  // For now, assuming it's not directly managed here unless CreateMeetingForm needs it.
   const [hasEditPermission, setHasEditPermission] = useState(false);
   const [isLoadingPageData, setIsLoadingPageData] = useState(true);
 
@@ -46,7 +44,6 @@ export default function EditMeetingPage() {
       const [meetingResult, groupsResult] = await Promise.all([
         getMeetingByIdAction(meetingId),
         getFriendGroupsForUserAction(appUser.id),
-        // No need to fetch allUsers here if only CreateMeetingForm uses it internally or via MeetingCard
       ]);
 
       if (groupsResult.success && groupsResult.groups) {
@@ -73,13 +70,8 @@ export default function EditMeetingPage() {
             setFriendsForForm([]);
         }
         
-        console.log("모임 수정 권한 검사 시작 - Edit Page");
-        console.log("Current User ID (appUser.id):", appUser.id, typeof appUser.id);
-        console.log("Meeting Creator ID (fetchedMeeting.creatorId):", fetchedMeeting.creatorId, typeof fetchedMeeting.creatorId);
         const isAdmin = appUser.role === 'admin';
         const isCreator = fetchedMeeting.creatorId === appUser.id;
-        console.log("Is Admin:", isAdmin);
-        console.log("Is Creator:", isCreator);
 
         if (isAdmin || isCreator) {
           setHasEditPermission(true);
@@ -101,7 +93,7 @@ export default function EditMeetingPage() {
     } finally {
       setIsLoadingPageData(false);
     }
-  }, [meetingId, appUser?.id, toast]); // appUser.id is the key dependency
+  }, [meetingId, appUser?.id, toast]);
 
   useEffect(() => {
     if (authLoading) {
@@ -117,7 +109,6 @@ export default function EditMeetingPage() {
     if (!meetingId) {
       toast({ title: "오류", description: "모임 ID가 유효하지 않습니다.", variant: "destructive" });
       setIsLoadingPageData(false);
-      // router.push('/meetings'); // Optional: redirect
       return;
     }
     fetchPageData();
@@ -173,7 +164,7 @@ export default function EditMeetingPage() {
     );
   }
   
-  if (!appUser?.id) { // Should not happen if authLoading is false and appUser is still null
+  if (!appUser?.id) {
      return (
       <div className="flex justify-center items-center min-h-[calc(100vh-150px)]">
         <Loader2 className="h-8 w-8 animate-spin mr-2" />
