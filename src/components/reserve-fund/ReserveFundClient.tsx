@@ -38,6 +38,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { useAuth } from '@/contexts/AuthContext';
 
+const MAX_RESERVE_FUND_TRANSACTION = 10;
 type DisplayFriendGroup = FriendGroup & { isOwned: boolean };
 
 const balanceUpdateSchema = z.object({
@@ -109,14 +110,14 @@ export function ReserveFundClient() {
     }
     setIsLoadingFundDetails(true);
     Promise.all([
-      getReserveFundBalance(selectedGroup.id), // 수정된 함수 호출
-      getLoggedReserveFundTransactionsByGroup(selectedGroup.id, 20)
+      getReserveFundBalance(selectedGroup.id), 
+      getLoggedReserveFundTransactionsByGroup(selectedGroup.id, MAX_RESERVE_FUND_TRANSACTION)
     ]).then(([balanceResult, transactionsResult]) => {
       setCurrentBalance(balanceResult === null ? 0 : balanceResult);
       form.reset({ newBalance: balanceResult === null ? 0 : balanceResult, description: '수동 잔액 조정'});
       setTransactions(transactionsResult || []);
-    }).catch(() => {
-      toast({ title: '오류', description: `${selectedGroup.name} 그룹의 회비 정보를 가져오는데 실패했습니다.`, variant: 'destructive'});
+    }).catch((error) => {
+      toast({ title: '오류', description: `${selectedGroup.name} 그룹의 회비 정보를 가져오는데 실패했습니다. (${error?.message || error})`, variant: 'destructive'});
       setCurrentBalance(0);
       setTransactions([]);
       form.reset({ newBalance: 0, description: '수동 잔액 조정'});
@@ -161,7 +162,6 @@ export function ReserveFundClient() {
     return isNaN(num) ? String(value) : num.toLocaleString();
   };
 
-  const isAdmin = appUser?.role === 'admin';
   const canSetBalance = appUser?.role === 'admin' || (appUser?.role === 'user' && selectedGroup?.isOwned === true);
 
   const handleGroupSelect = (groupId: string) => {

@@ -3,6 +3,7 @@ import { createFriendGroupAction } from '@/lib/actions';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Loader2 } from 'lucide-react';
+import { toast } from '@/hooks/use-toast';
 
 interface FriendGroupFormProps {
   userId: string;
@@ -22,8 +23,13 @@ export default function FriendGroupForm({ userId, onCreated }: FriendGroupFormPr
     if (res.success) {
       setName('');
       onCreated?.();
+    } else {
+      toast({
+        title: '그룹 생성 실패',
+        description: res.error || '알 수 없는 오류가 발생했습니다.',
+        variant: 'destructive',
+      });
     }
-    // TODO: 실패 시 에러 메시지 표시 (toast 사용 등)
   };
 
   return (

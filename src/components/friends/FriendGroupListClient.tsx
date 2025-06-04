@@ -107,6 +107,8 @@ export default function FriendGroupListClient() {
 
   const handleDeleteGroup = async (groupId: string) => {
     if (!appUser?.id) return;
+    const confirmed = window.confirm('정말로 이 그룹을 삭제하시겠습니까? 그룹 내 모든 친구 정보는 삭제되지 않으며, 그룹만 삭제됩니다.');
+    if (!confirmed) return;
     setIsSubmitting(true);
     try {
       const res = await deleteFriendGroupAction(groupId, appUser.id);
@@ -168,10 +170,8 @@ export default function FriendGroupListClient() {
       toast({ title: "오류", description: "필수 정보가 누락되었습니다.", variant: "destructive" });
       return;
     }
-
     const confirmed = window.confirm(`'${friendName}' 친구를 이 그룹에서 정말 삭제하시겠습니까? 친구 정보는 다른 그룹에 남아있을 수 있습니다.`);
     if (!confirmed) return;
-
     setIsDeletingFriend(friendId);
     try {
       const result = await deleteFriendAction({
@@ -179,7 +179,6 @@ export default function FriendGroupListClient() {
         groupId: selectedGroupId,
         currentUserId: appUser.id,
       });
-
       if (result.success) {
         toast({ title: "성공", description: `'${friendName}' 친구를 그룹에서 삭제했습니다.` });
         setFriendsInSelectedGroup(prev => prev.filter(f => f.id !== friendId));

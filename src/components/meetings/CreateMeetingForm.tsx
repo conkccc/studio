@@ -524,7 +524,7 @@ export function CreateMeetingForm({
                 id="temporaryMeetingSwitch"
                 checked={!!field.value}
                 onCheckedChange={field.onChange}
-                disabled={isFormDisabled}
+                disabled={isFormDisabled || isEditMode}
               />
             )}
           />

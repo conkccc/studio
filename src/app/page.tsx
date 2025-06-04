@@ -10,7 +10,7 @@ import { getReserveFundBalance } from '@/lib/data-store';
 import { getMeetingsForUserAction } from '@/lib/actions';
 import type { Meeting } from '@/lib/types';
 
-const MAX_RECENT_MEETINGS_DISPLAY = 3;
+const MAX_RECENT_MEETINGS_DISPLAY = 1;
 
 export default function DashboardPage() {
   const { appUser, isAdmin, userRole, loading: authLoading } = useAuth();
@@ -158,12 +158,12 @@ export default function DashboardPage() {
 
               {isAdmin && reserveBalance !== null && (
                  <div>
-                  <h3 className="font-semibold mb-1 text-lg">특정 그룹 회비 잔액 (예시)</h3>
+                  <h3 className="font-semibold mb-1 text-lg">회비 잔액</h3>
                   <p className="text-2xl font-bold text-primary">
                      {isLoadingDashboardData ? "잔액 로딩 중..." : `₩${reserveBalance.toLocaleString()}`}
                   </p>
                    <Button asChild variant="secondary" size="sm" className="mt-2">
-                    <Link href="/reserve-fund">전체 회비 내역 보기</Link>
+                    <Link href="/reserve-fund">내역 보기</Link>
                   </Button>
                 </div>
               )}
