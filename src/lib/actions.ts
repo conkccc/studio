@@ -87,6 +87,28 @@ export async function createFriendAction(payload: { name: string; description?: 
   }
 }
 
+export async function getExpensesByMeetingIdAction(meetingId: string) {
+  try {
+    const expenses = await dbGetExpensesByMeetingId(meetingId);
+    return { success: true, expenses };
+  } catch (error) {
+    console.error(`getExpensesByMeetingIdAction Error for meetingId ${meetingId}:`, error);
+    const errorMessage = error instanceof Error ? error.message : '모임의 지출 내역을 가져오는 중 오류가 발생했습니다.';
+    return { success: false, error: errorMessage, expenses: [] };
+  }
+}
+
+export async function getAllFriendsAction() { // Renamed from getFriendsAction for clarity
+  try {
+    const friends = await (await import('./data-store')).getFriends(); // Assuming getFriends exists in data-store
+    return { success: true, friends };
+  } catch (error) {
+    console.error('getAllFriendsAction Error:', error);
+    const errorMessage = error instanceof Error ? error.message : '모든 친구 목록을 가져오는데 실패했습니다.';
+    return { success: false, error: errorMessage, friends: [] };
+  }
+}
+
 export async function getAllUsersAction() {
   try {
     const users = await dbGetUsers(); // Use imported getUsers (aliased as dbGetUsers or directly)

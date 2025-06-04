@@ -1,125 +1,80 @@
-'use client';
+// Make this a Server Component
+// 'use client'; // Remove this
 
-import { use, useEffect, useState } from 'react';
-import { getMeetingById, getExpensesByMeetingId, getFriends } from '@/lib/data-store';
+// import { use, useEffect, useState } from 'react'; // Remove client-side hooks
+import {
+  getMeetingByIdAction,
+  getAllUsersAction,
+  getExpensesByMeetingIdAction,
+  getAllFriendsAction
+} from '@/lib/actions'; // Adjusted imports
 import { MeetingDetailsClient } from '@/components/meetings/MeetingDetailsClient';
 import { Button } from '@/components/ui/button';
-import Link from 'next/link';
-import { useRouter } from 'next/navigation';
-import type { Meeting, Expense, Friend } from '@/lib/types';
-import { useAuth } from '@/contexts/AuthContext';
+import Link from 'next/link'; // Keep for UI elements like buttons if needed, or move to client component
+// import { useRouter } from 'next/navigation'; // Remove if not used for navigation in server component
+import type { Meeting, Expense, Friend, User } from '@/lib/types'; // Keep types
+// import { useAuth } from '@/contexts/AuthContext'; // Remove client-side auth hook
 
-export default function MeetingDetailPage({ params }: { params: Promise<{ meetingId: string }> }) {
-  const { currentUser, userRole, loading: authLoading } = useAuth();
-  // Next.js 14: params는 Promise이므로 use()로 언래핑
-  const { meetingId } = use(params);
+import { notFound } from 'next/navigation'; // For handling not found cases
 
-  const [meeting, setMeeting] = useState<Meeting | null | undefined>(undefined);
-  const [expenses, setExpenses] = useState<Expense[]>([]);
-  const [allFriends, setAllFriends] = useState<Friend[]>([]);
-  const [dataLoading, setDataLoading] = useState(true);
-  const router = useRouter();
+export default async function MeetingDetailPage({ params }: { params: { meetingId: string } }) {
+  const meetingId = params.meetingId;
 
-  useEffect(() => {
-    if (authLoading && process.env.NEXT_PUBLIC_DEV_MODE_SKIP_AUTH !== "true") {
-      setDataLoading(true);
-      return;
-    }
-    if (!meetingId) {
-        setMeeting(null);
-        setDataLoading(false);
-        return;
-    }
+  // Fetch data in parallel
+  const [meetingResult, usersResult, expensesResult, friendsResult] = await Promise.all([
+    getMeetingByIdAction(meetingId),
+    getAllUsersAction(),
+    getExpensesByMeetingIdAction(meetingId),
+    getAllFriendsAction()
+  ]);
 
-    const canFetchPublicData = process.env.NEXT_PUBLIC_DEV_MODE_SKIP_AUTH === "true" || !authLoading;
-    const canFetchUserData = currentUser && (userRole === 'admin' || userRole === 'user');
-
-    if (!canFetchPublicData && !canFetchUserData) {
-      setDataLoading(false);
-      setMeeting(undefined); // Or null to indicate no access or data
-      return;
-    }
-
-    const fetchData = async () => {
-      setDataLoading(true);
-      try {
-        const fetchedMeeting = await getMeetingById(meetingId);
-        if (!fetchedMeeting) {
-          setMeeting(null);
-          setDataLoading(false);
-          return;
-        }
-        setMeeting(fetchedMeeting);
-
-        // Fetch expenses and friends regardless of user role for public viewing capability
-        // Firestore rules should be the primary gatekeeper for sensitive data.
-        const [fetchedExpenses, fetchedFriends] = await Promise.all([
-          getExpensesByMeetingId(meetingId),
-          getFriends(), 
-        ]);
-        setExpenses(fetchedExpenses);
-        setAllFriends(fetchedFriends);
-
-      } catch (error) {
-        console.error("Failed to fetch meeting details:", error);
-        setMeeting(null);
-      } finally {
-        setDataLoading(false);
-      }
-    };
-    fetchData();
-  }, [meetingId, authLoading, currentUser, userRole]);
-
-
-  if ((authLoading && process.env.NEXT_PUBLIC_DEV_MODE_SKIP_AUTH !== "true") || dataLoading) {
-    return (
-      <div className="flex justify-center items-center min-h-[calc(100vh-150px)]">
-        <p className="text-xl text-muted-foreground">모임 상세 정보 로딩 중...</p>
-      </div>
-    );
+  if (!meetingResult.success || !meetingResult.meeting) {
+    notFound(); // Or return a custom "Not Found" component/page
   }
+
+  const meeting = meetingResult.meeting;
+  const allUsers = usersResult.success ? usersResult.users : [];
+  const initialExpenses = expensesResult.success ? expensesResult.expenses : [];
+  const allFriends = friendsResult.success ? friendsResult.friends : [];
   
-  // Redirect to login if user is authenticated but has no role (and not in dev mode skipping auth)
-  if (!authLoading && userRole === 'none' && currentUser && process.env.NEXT_PUBLIC_DEV_MODE_SKIP_AUTH !== "true") {
-    router.push('/login');
-  }
-  
-  if (meeting === null) {
-    return (
-      <div className="container mx-auto py-8 text-center">
-        <h1 className="text-2xl font-bold mb-4">모임을 찾을 수 없습니다.</h1>
-        <p className="text-muted-foreground mb-6">요청하신 모임이 존재하지 않거나 삭제되었을 수 있습니다.</p>
-        <Button asChild>
-          <Link href="/meetings">모임 목록으로 돌아가기</Link>
-        </Button>
-      </div>
-    );
-  }
-  
-  if (!meeting && !dataLoading) { 
-    return <div className="text-center py-10">모임 정보를 불러올 수 없습니다.</div>;
-  }
+  // Auth context is not directly available in Server Components in the same way.
+  // If MeetingDetailsClient needs appUser for its internal logic (e.g. "is this user the creator?"),
+  // we might need to pass appUser.id or relevant parts of appUser from a server session if available,
+  // or MeetingDetailsClient continues to use its own useAuth hook.
+  // For "만든이" display, allUsers is now the primary source.
 
   return (
     <div className="space-y-6">
-      {meeting && (
-        <MeetingDetailsClient
-          initialMeeting={meeting}
-          initialExpenses={expenses}
-          allFriends={allFriends}
-        />
-      )}
+      <MeetingDetailsClient
+        initialMeeting={meeting} // Pass the fetched meeting
+        initialExpenses={initialExpenses} // Pass fetched expenses
+        allFriends={allFriends} // Pass fetched friends
+        allUsers={allUsers} // Pass allUsers
+      />
 
-      {/* Ensure the button container is explicitly displayed and visible */}
-      <div className="flex justify-center gap-4 mt-8" style={{ display: 'flex', visibility: 'visible' }}>
-        {meeting && meeting.locationLink && (
-          <Button asChild>
-            <a href={meeting.locationLink} target="_blank" rel="noopener noreferrer">
-              외부 지도 보기
-            </a>
-          </Button>
-        )}
-      </div>
+      {/* Button for external link can remain here or be part of MeetingDetailsClient */}
+      {meeting.locationName && (meeting.locationCoordinates || meeting.locationLink) && (
+         <div className="flex justify-center gap-4 mt-8">
+            {meeting.locationLink && (
+            <Button asChild>
+                <a href={meeting.locationLink} target="_blank" rel="noopener noreferrer">
+                외부 지도 (제공됨)
+                </a>
+            </Button>
+            )}
+            {!meeting.locationLink && meeting.locationName && (
+                 <Button asChild variant="outline">
+                    <a
+                        href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(meeting.locationName)}${meeting.locationCoordinates ? `&ll=${meeting.locationCoordinates.lat},${meeting.locationCoordinates.lng}` : ''}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                    >
+                        Google Maps에서 검색
+                    </a>
+                </Button>
+            )}
+         </div>
+      )}
     </div>
   );
 }
