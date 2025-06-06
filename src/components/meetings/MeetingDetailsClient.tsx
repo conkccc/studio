@@ -636,6 +636,25 @@ export function MeetingDetailsClient({
                             <Button type="button" variant="outline" size="icon" onClick={handleCopyShareLink}>
                               <Copy className="h-4 w-4" />
                             </Button>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="icon"
+                              onClick={() => {
+                                if (navigator.share) {
+                                  navigator.share({
+                                    title: '모임 공유 링크',
+                                    text: '모임 정산 내역을 공유합니다.',
+                                    url: currentShareLink,
+                                  }).catch(() => {});
+                                } else {
+                                  toast({ title: '공유 불가', description: '이 브라우저에서는 웹 공유 기능을 지원하지 않습니다.', variant: 'destructive' });
+                                }
+                              }}
+                              aria-label="공유"
+                            >
+                              <Share2 className="h-4 w-4" />
+                            </Button>
                           </div>
                           {meeting.shareExpiryDate && (
                             <p className="text-xs text-muted-foreground">
