@@ -314,14 +314,21 @@ export function MeetingDetailsClient({
     setIsShareSettingsSaving(false);
   };
 
+  const handleCopyToClipboard = (copyText: string, descText: string) => {
+    navigator.clipboard.writeText(copyText)
+      .then(() => toast({ title: "성공", description: `${descText}가 복사되었습니다.` }))
+      .catch(() => toast({ title: "오류", description: '${descText} 복사에 실패했습니다.', variant: "destructive" }));
+  };
+
   const handleCopyShareLink = () => {
-    if (currentShareLink) {
-      navigator.clipboard.writeText(currentShareLink)
-        .then(() => toast({ title: "성공", description: "공유 링크가 클립보드에 복사되었습니다." }))
-        .catch(() => toast({ title: "오류", description: "링크 복사에 실패했습니다.", variant: "destructive" }));
-    }
+    if (currentShareLink)
+      handleCopyToClipboard(currentShareLink, "공유 링크");
   };
   
+  const handleCopyLocationName = () => {
+    if (meeting.locationName)
+      handleCopyToClipboard(meeting.locationName, "장소");
+  };
 
   return (
     <div className="space-y-6">
@@ -443,8 +450,15 @@ export function MeetingDetailsClient({
             <div className="flex items-start gap-2">
               <MapPin className="h-5 w-5 mt-0.5 text-primary flex-shrink-0" />
               <div>
-                <span className="font-medium">장소:</span>
-                <p className="text-muted-foreground">{meeting.locationName}</p>
+                <div className="flex items-center space-x-2">
+                  <span className="font-medium">장소:</span>
+                  <p className="text-muted-foreground">
+                    {meeting.locationName}
+                  </p>
+                  <Button type="button" variant="outline" size="icon" onClick={handleCopyLocationName}>
+                    <Copy className="h-4 w-4" />
+                  </Button>
+                </div>
                 {meeting.locationCoordinates && (
                   <div className="flex gap-2 mt-2">
                     <Button
