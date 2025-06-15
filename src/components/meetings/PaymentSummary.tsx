@@ -1,7 +1,7 @@
 'use client';
 
 import type { Expense, Friend, Meeting } from '@/lib/types';
-import React, { useMemo, useCallback } from 'react';
+import React, { useMemo, useCallback, useState, useEffect } from 'react';
 import { Card, CardHeader, CardDescription, CardContent, CardFooter } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -16,7 +16,25 @@ interface PaymentSummaryProps {
 }
 
 export function PaymentSummary({ meeting, expenses, participants, allFriends }: PaymentSummaryProps) {
-  
+  const [isMobile, setIsMobile] = useState(false);
+
+  useEffect(() => {
+    const handleResize = () => {
+      setIsMobile(window.innerWidth < 768); // Tailwind CSS 'md' breakpoint 기준
+    };
+
+    if (typeof window !== 'undefined') {
+      handleResize();
+      window.addEventListener('resize', handleResize);
+    }
+
+    return () => {
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('resize', handleResize);
+      }
+    };
+  }, []); // 컴포넌트 마운트 시 한 번만 실행
+
   const effectiveParticipants = useMemo<Friend[]>(() => {
     if (meeting.isTemporary && Array.isArray(meeting.temporaryParticipants) && meeting.temporaryParticipants.length > 0) {
       return meeting.temporaryParticipants.map((p, idx) => ({
@@ -73,7 +91,6 @@ export function PaymentSummary({ meeting, expenses, participants, allFriends }: 
       };
     }
 
-    // 소비 타입 분류 및 총액 계산
     let totalSpentAllParticipants = 0;
     let totalSpentExcludedParticipants = 0;
 
@@ -97,7 +114,7 @@ export function PaymentSummary({ meeting, expenses, participants, allFriends }: 
     
     // 각 Expense별 개인이 부담해야 할 금액 계산
     const individualExpenseContributions: Record<string, number> = {};
-    effectiveParticipants.forEach(p => (individualExpenseContributions[p.id] = 0));
+    effectiveParticipants.forEach(p => (individualExpenseContributions[p.id] = 0)); 
 
     expenses.forEach(expense => {
       if (expense.splitType === 'equally') {
@@ -337,7 +354,206 @@ export function PaymentSummary({ meeting, expenses, participants, allFriends }: 
               </CardDescription>
               {meeting.isTemporary && Array.isArray(meeting.temporaryParticipants) && meeting.temporaryParticipants.length > 0 ? (
                 <div className="mb-4">
-                  <div className="overflow-x-auto">
+                  {/* 임시 모임 데스크톱 테이블 뷰 */}
+                  {isMobile ? (
+                    // 임시 모임 모바일 뷰
+                    <div className="border rounded-md divide-y divide-gray-200">
+                      {effectiveParticipants.map(p => {
+                        const personDetails = settlementSuggestions.people.find(sp => sp.friendId === p.id);
+                        if (!personDetails) return null;
+
+                        const totalPaid = personDetails.totalPaid;
+                        const shouldPay = personDetails.shouldPay;
+                        const finalAmount = personDetails.finalAmount;
+
+                        return (
+                          <div key={p.id} className="p-4">
+                            <div className="font-semibold text-lg flex items-center">
+                              <UserCircle className="h-5 w-5 mr-2 opacity-70" />
+                              {getFriendName(p.id)}
+                            </div>
+                            <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm mt-2">
+                              <div><span className="text-muted-foreground">총 지출액:</span> {totalPaid > 0 ? totalPaid.toLocaleString(undefined, { maximumFractionDigits: 0 }) + '원' : '-'}</div>
+                              <div><span className="text-muted-foreground">본인부담액:</span> {shouldPay > 0 ? shouldPay.toLocaleString(undefined, { maximumFractionDigits: 0 }) + '원' : '-'}</div>
+                              <div className="col-span-2">
+                                <span className="text-muted-foreground">최종 정산액:</span>{' '}
+                                <span className={`font-semibold ${finalAmount > 0.01 ? 'text-green-600' : finalAmount < -0.01 ? 'text-red-600' : 'text-muted-foreground'}`}>
+                                  {Math.abs(finalAmount) < 0.01 ? '-' : `${finalAmount > 0 ? '+' : ''}${finalAmount.toLocaleString(undefined, { maximumFractionDigits: 0 })}원`}
+                                </span>
+                              </div>
+                              <div className="col-span-2 flex items-center">
+                                <span className="text-muted-foreground">상태:</span>{' '}
+                                {finalAmount > 0.01 ? (
+                                  <Badge className="inline-flex items-center text-xs text-green-700 bg-green-100 px-2 py-0.5 rounded-full ml-1">
+                                    <TrendingUp className="h-3 w-3 mr-1" /> 받을 돈
+                                  </Badge>
+                                ) : finalAmount < -0.01 ? (
+                                  <Badge className="inline-flex items-center text-xs text-red-700 bg-red-100 px-2 py-0.5 rounded-full ml-1">
+                                    <TrendingDown className="h-3 w-3 mr-1" /> 내야할 돈
+                                  </Badge>
+                                ) : (
+                                  <Badge variant="secondary" className="text-xs text-muted-foreground ml-1">정산 완료</Badge>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    // 임시 모임 데스크톱 테이블 뷰
+                    <div className="overflow-x-auto">
+                      <ScrollArea className="pr-3 mt-2 min-w-[600px]">
+                        <Table>
+                          <TableHeader>
+                            <TableRow>
+                              <TableHead>참여자</TableHead>
+                              <TableHead className="text-right">총 지출액</TableHead>
+                              <TableHead className="text-right">본인부담액</TableHead>
+                              <TableHead className="text-right">최종 정산액</TableHead>
+                              <TableHead className="text-right">상태</TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {effectiveParticipants.map((p) => {
+                              const personDetails = settlementSuggestions.people.find(sp => sp.friendId === p.id);
+                              if (!personDetails) return null;
+
+                              const totalPaid = personDetails.totalPaid;
+                              const shouldPay = personDetails.shouldPay;
+                              const finalAmount = personDetails.finalAmount;
+
+                              return (
+                                <TableRow key={p.id}>
+                                  <TableCell className="font-medium flex items-center">
+                                    <UserCircle className="h-4 w-4 mr-2 opacity-70" />
+                                    {getFriendName(p.id)}
+                                  </TableCell>
+                                  <TableCell className="text-right">{totalPaid > 0 ? totalPaid.toLocaleString(undefined, { maximumFractionDigits: 0 }) + '원' : '-'}</TableCell>
+                                  <TableCell className="text-right">{shouldPay > 0 ? shouldPay.toLocaleString(undefined, { maximumFractionDigits: 0 }) + '원' : '-'}</TableCell>
+                                  <TableCell className="text-right font-semibold">{Math.abs(finalAmount) < 0.01 ? '-' : `${finalAmount > 0 ? '+' : ''}${finalAmount.toLocaleString(undefined, { maximumFractionDigits: 0 })}원`}</TableCell>
+                                  <TableCell className="text-right">
+                                    {finalAmount > 0.01 ? (
+                                      <span className="inline-flex items-center text-xs text-green-700 bg-green-100 px-2 py-0.5 rounded-full">
+                                        <TrendingUp className="h-3 w-3 mr-1" /> 받을 돈
+                                      </span>
+                                    ) : finalAmount < -0.01 ? (
+                                      <span className="inline-flex items-center text-xs text-red-700 bg-red-100 px-2 py-0.5 rounded-full">
+                                        <TrendingDown className="h-3 w-3 mr-1" /> 내야할 돈
+                                      </span>
+                                    ) : (
+                                      <span className="text-xs text-muted-foreground">정산 완료</span>
+                                    )}
+                                  </TableCell>
+                                </TableRow>
+                              );
+                            })}
+                          </TableBody>
+                        </Table>
+                      </ScrollArea>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                // 일반 모임 뷰
+                <div className="overflow-x-auto">
+                  {isMobile ? (
+                    // 일반 모임 모바일 뷰
+                    <div className="border rounded-md divide-y divide-gray-200">
+                      {payingParticipants.map(p => {
+                        const personDetails = settlementSuggestions.people.find(sp => sp.friendId === p.id);
+                        if (!personDetails) return null;
+
+                        const totalPaid = personDetails.totalPaid;
+                        const shouldPay = personDetails.shouldPay;
+                        const finalAmount = personDetails.finalAmount;
+
+                        return (
+                          <div key={p.id} className="p-4">
+                            <div className="font-semibold text-lg flex items-center">
+                              <UserCircle className="h-5 w-5 mr-2 opacity-70" />
+                              {getFriendName(p.id)}
+                              {perPersonCostDetails.fundUsed > 0.01 && perPersonCostDetails.fundNonApplicableIds.includes(p.id) && (
+                                <Badge variant="outline" className="ml-2 text-xs">회비 미적용</Badge>
+                              )}
+                            </div>
+                            <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm mt-2">
+                              <div><span className="text-muted-foreground">총 지출액:</span> {totalPaid.toLocaleString(undefined, { maximumFractionDigits: 0 })}원</div>
+                              <div><span className="text-muted-foreground">본인부담액:</span> {shouldPay.toLocaleString(undefined, { maximumFractionDigits: 0 })}원</div>
+                              <div className="col-span-2">
+                                <span className="text-muted-foreground">최종 정산액:</span>{' '}
+                                <span className={`font-semibold ${finalAmount > 0.01 ? 'text-green-600' : finalAmount < -0.01 ? 'text-red-600' : 'text-muted-foreground'}`}> 
+                                  {Math.abs(finalAmount) < 0.01 ? '-' : `${finalAmount > 0 ? '+' : ''}${finalAmount.toLocaleString(undefined, { maximumFractionDigits: 0 })}원`}
+                                </span>
+                              </div>
+                              <div className="col-span-2 flex items-center">
+                                <span className="text-muted-foreground">상태:</span>{' '}
+                                {finalAmount > 0.01 ? (
+                                  <Badge className="inline-flex items-center text-xs text-green-700 bg-green-100 px-2 py-0.5 rounded-full ml-1">
+                                    <TrendingUp className="h-3 w-3 mr-1" /> 받을 돈
+                                  </Badge>
+                                ) : finalAmount < -0.01 ? (
+                                  <Badge className="inline-flex items-center text-xs text-red-700 bg-red-100 px-2 py-0.5 rounded-full ml-1">
+                                    <TrendingDown className="h-3 w-3 mr-1" /> 내야할 돈
+                                  </Badge>
+                                ) : (
+                                  <Badge variant="secondary" className="text-xs text-muted-foreground ml-1">정산 완료</Badge>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+
+                      {nonPayingParticipants.length > 0 && (
+                        <div className="py-2 text-center text-muted-foreground bg-gray-50 dark:bg-gray-800">
+                          지출 내역이 없는 참여자
+                        </div>
+                      )}
+                      {nonPayingParticipants
+                        .map(p => {
+                          const personDetails = settlementSuggestions.people.find(sp => sp.friendId === p.id);
+                          return personDetails ? { participant: p, details: personDetails } : null; 
+                        })
+                        .filter(item => item !== null) 
+                        .map(({ participant: p, details: personDetails }) => (
+                          <div key={p.id} className="p-4 opacity-70">
+                            <div className="font-semibold text-lg flex items-center">
+                              <UserCircle className="h-5 w-5 mr-2 opacity-70" />
+                              {getFriendName(p.id)}
+                              {perPersonCostDetails.fundUsed > 0.01 && perPersonCostDetails.fundNonApplicableIds.includes(p.id) && (
+                                <Badge variant="outline" className="ml-2 text-xs">회비 미적용</Badge>
+                              )}
+                            </div>
+                            <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm mt-2">
+                              <div><span className="text-muted-foreground">총 지출액:</span> -</div>
+                              <div><span className="text-muted-foreground">본인부담액:</span> {personDetails.shouldPay.toLocaleString(undefined, { maximumFractionDigits: 0 })}원</div>
+                              <div className="col-span-2">
+                                <span className="text-muted-foreground">최종 정산액:</span>{' '}
+                                <span className={`font-semibold ${personDetails.finalAmount > 0.01 ? 'text-green-600' : personDetails.finalAmount < -0.01 ? 'text-red-600' : 'text-muted-foreground'}`}>
+                                  {Math.abs(personDetails.finalAmount) < 0.01 ? '-' : `${personDetails.finalAmount > 0 ? '+' : ''}${personDetails.finalAmount.toLocaleString(undefined, { maximumFractionDigits: 0 })}원`}
+                                </span>
+                              </div>
+                              <div className="col-span-2 flex items-center">
+                                <span className="text-muted-foreground">상태:</span>{' '}
+                                {personDetails.finalAmount > 0.01 ? (
+                                  <Badge className="inline-flex items-center text-xs text-green-700 bg-green-100 px-2 py-0.5 rounded-full ml-1">
+                                    <TrendingUp className="h-3 w-3 mr-1" /> 받을 돈
+                                  </Badge>
+                                ) : personDetails.finalAmount < -0.01 ? (
+                                  <Badge className="inline-flex items-center text-xs text-red-700 bg-red-100 px-2 py-0.5 rounded-full ml-1">
+                                    <TrendingDown className="h-3 w-3 mr-1" /> 내야할 돈
+                                  </Badge>
+                                ) : (
+                                  <Badge variant="secondary" className="text-xs text-muted-foreground ml-1">정산 완료</Badge>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                    </div>
+                  ) : (
+                    // 일반 모임 데스크톱 테이블 뷰
                     <ScrollArea className="pr-3 mt-2 min-w-[600px]">
                       <Table>
                         <TableHeader>
@@ -350,8 +566,8 @@ export function PaymentSummary({ meeting, expenses, participants, allFriends }: 
                           </TableRow>
                         </TableHeader>
                         <TableBody>
-                          {/* 임시 모임의 경우, 모든 유효 참여자를 기준으로 표시 */}
-                          {effectiveParticipants.map((p) => {
+                          {/* 지출이 있는 참여자들 먼저 표시 */}
+                          {payingParticipants.map(p => {
                             const personDetails = settlementSuggestions.people.find(sp => sp.friendId === p.id);
                             if (!personDetails) return null;
 
@@ -364,10 +580,19 @@ export function PaymentSummary({ meeting, expenses, participants, allFriends }: 
                                 <TableCell className="font-medium flex items-center">
                                   <UserCircle className="h-4 w-4 mr-2 opacity-70" />
                                   {getFriendName(p.id)}
+                                  {perPersonCostDetails.fundUsed > 0.01 && perPersonCostDetails.fundNonApplicableIds.includes(p.id) && (
+                                    <Badge variant="outline" className="ml-2 text-xs">회비 미적용</Badge>
+                                  )}
                                 </TableCell>
-                                <TableCell className="text-right">{totalPaid > 0 ? totalPaid.toLocaleString(undefined, { maximumFractionDigits: 0 }) + '원' : '-'}</TableCell>
-                                <TableCell className="text-right">{shouldPay > 0 ? shouldPay.toLocaleString(undefined, { maximumFractionDigits: 0 }) + '원' : '-'}</TableCell>
-                                <TableCell className="text-right font-semibold">{Math.abs(finalAmount) < 0.01 ? '-' : `${finalAmount > 0 ? '+' : ''}${finalAmount.toLocaleString(undefined, { maximumFractionDigits: 0 })}원`}</TableCell>
+                                <TableCell className="text-right">
+                                  {totalPaid.toLocaleString(undefined, { maximumFractionDigits: 0 })}원
+                                </TableCell>
+                                <TableCell className="text-right">
+                                  {shouldPay.toLocaleString(undefined, { maximumFractionDigits: 0 })}원
+                                </TableCell>
+                                <TableCell className={`text-right font-semibold ${finalAmount > 0.01 ? 'text-green-600' : finalAmount < -0.01 ? 'text-red-600' : 'text-muted-foreground'}`}> 
+                                  {Math.abs(finalAmount) < 0.01 ? '-' : `${finalAmount > 0 ? '+' : ''}${finalAmount.toLocaleString(undefined, { maximumFractionDigits: 0 })}원`}
+                                </TableCell>
                                 <TableCell className="text-right">
                                   {finalAmount > 0.01 ? (
                                     <span className="inline-flex items-center text-xs text-green-700 bg-green-100 px-2 py-0.5 rounded-full">
@@ -384,89 +609,28 @@ export function PaymentSummary({ meeting, expenses, participants, allFriends }: 
                               </TableRow>
                             );
                           })}
+
+                          {/* 지출 내역이 없는 참여자들을 구분하여 표시 */}
+                          {nonPayingParticipants.length > 0 && (
+                            <TableRow>
+                              <TableCell colSpan={5} className="py-2 text-center text-muted-foreground bg-gray-50 dark:bg-gray-800">
+                                지출 내역이 없는 참여자
+                              </TableCell>
+                            </TableRow>
+                          )}
+                          {nonPayingParticipants
+                            .map(p => {
+                              const personDetails = settlementSuggestions.people.find(sp => sp.friendId === p.id);
+                              return personDetails ? { participant: p, details: personDetails } : null; 
+                            })
+                            .filter(item => item !== null) 
+                            .map(({ participant: p, details: personDetails }) => (
+                              <TableRow key={p.id} className="opacity-70"><TableCell className="font-medium flex items-center"><UserCircle className="h-4 w-4 mr-2 opacity-70" />{getFriendName(p.id)}{perPersonCostDetails.fundUsed > 0.01 && perPersonCostDetails.fundNonApplicableIds.includes(p.id) && (<Badge variant="outline" className="ml-2 text-xs">회비 미적용</Badge>)}</TableCell><TableCell className="text-right">-</TableCell><TableCell className="text-right">{personDetails.shouldPay.toLocaleString(undefined, { maximumFractionDigits: 0 })}원</TableCell><TableCell className={`text-right font-semibold ${personDetails.finalAmount > 0.01 ? 'text-green-600' : personDetails.finalAmount < -0.01 ? 'text-red-600' : 'text-muted-foreground'}`}>{Math.abs(personDetails.finalAmount) < 0.01 ? '-' : `${personDetails.finalAmount > 0 ? '+' : ''}${personDetails.finalAmount.toLocaleString(undefined, { maximumFractionDigits: 0 })}원`}</TableCell><TableCell className="text-right">{personDetails.finalAmount > 0.01 ? (<span className="inline-flex items-center text-xs text-green-700 bg-green-100 px-2 py-0.5 rounded-full"><TrendingUp className="h-3 w-3 mr-1" /> 받을 돈</span>) : personDetails.finalAmount < -0.01 ? (<span className="inline-flex items-center text-xs text-red-700 bg-red-100 px-2 py-0.5 rounded-full"><TrendingDown className="h-3 w-3 mr-1" /> 내야할 돈</span>) : (<span className="text-xs text-muted-foreground">정산 완료</span>)}</TableCell></TableRow>
+                            ))}
                         </TableBody>
                       </Table>
                     </ScrollArea>
-                  </div>
-                </div>
-              ) : (
-                <div className="overflow-x-auto">
-                  <ScrollArea className="pr-3 mt-2 min-w-[600px]">
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>참여자</TableHead>
-                          <TableHead className="text-right">총 지출액</TableHead>
-                          <TableHead className="text-right">본인부담액</TableHead>
-                          <TableHead className="text-right">최종 정산액</TableHead>
-                          <TableHead className="text-right">상태</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {/* 지출이 있는 참여자들 먼저 표시 */}
-                        {payingParticipants.map(p => {
-                          const personDetails = settlementSuggestions.people.find(sp => sp.friendId === p.id);
-                          if (!personDetails) return null;
-
-                          const totalPaid = personDetails.totalPaid;
-                          const shouldPay = personDetails.shouldPay;
-                          const finalAmount = personDetails.finalAmount;
-
-                          return (
-                            <TableRow key={p.id}>
-                              <TableCell className="font-medium flex items-center">
-                                <UserCircle className="h-4 w-4 mr-2 opacity-70" />
-                                {getFriendName(p.id)}
-                                {perPersonCostDetails.fundUsed > 0.01 && perPersonCostDetails.fundNonApplicableIds.includes(p.id) && (
-                                  <Badge variant="outline" className="ml-2 text-xs">회비 미적용</Badge>
-                                )}
-                              </TableCell>
-                              <TableCell className="text-right">
-                                {totalPaid.toLocaleString(undefined, { maximumFractionDigits: 0 })}원
-                              </TableCell>
-                              <TableCell className="text-right">
-                                {shouldPay.toLocaleString(undefined, { maximumFractionDigits: 0 })}원
-                              </TableCell>
-                              <TableCell className={`text-right font-semibold ${finalAmount > 0.01 ? 'text-green-600' : finalAmount < -0.01 ? 'text-red-600' : 'text-muted-foreground'}`}> 
-                                {Math.abs(finalAmount) < 0.01 ? '-' : `${finalAmount > 0 ? '+' : ''}${finalAmount.toLocaleString(undefined, { maximumFractionDigits: 0 })}원`}
-                              </TableCell>
-                              <TableCell className="text-right">
-                                {finalAmount > 0.01 ? (
-                                  <span className="inline-flex items-center text-xs text-green-700 bg-green-100 px-2 py-0.5 rounded-full">
-                                    <TrendingUp className="h-3 w-3 mr-1" /> 받을 돈
-                                  </span>
-                                ) : finalAmount < -0.01 ? (
-                                  <span className="inline-flex items-center text-xs text-red-700 bg-red-100 px-2 py-0.5 rounded-full">
-                                    <TrendingDown className="h-3 w-3 mr-1" /> 내야할 돈
-                                  </span>
-                                ) : (
-                                  <span className="text-xs text-muted-foreground">정산 완료</span>
-                                )}
-                              </TableCell>
-                            </TableRow>
-                          );
-                        })}
-
-                        {/* 지출 내역이 없는 참여자들을 구분하여 표시 */}
-                        {nonPayingParticipants.length > 0 && (
-                          <TableRow>
-                            <TableCell colSpan={5} className="py-2 text-center text-muted-foreground bg-gray-50 dark:bg-gray-800">
-                              지출 내역이 없는 참여자
-                            </TableCell>
-                          </TableRow>
-                        )}
-                        {nonPayingParticipants
-                          .map(p => {
-                            const personDetails = settlementSuggestions.people.find(sp => sp.friendId === p.id);
-                            return personDetails ? { participant: p, details: personDetails } : null; 
-                          })
-                          .filter(item => item !== null) 
-                          .map(({ participant: p, details: personDetails }) => (
-                            <TableRow key={p.id} className="opacity-70"><TableCell className="font-medium flex items-center"><UserCircle className="h-4 w-4 mr-2 opacity-70" />{getFriendName(p.id)}{perPersonCostDetails.fundUsed > 0.01 && perPersonCostDetails.fundNonApplicableIds.includes(p.id) && (<Badge variant="outline" className="ml-2 text-xs">회비 미적용</Badge>)}</TableCell><TableCell className="text-right">-</TableCell><TableCell className="text-right">{personDetails.shouldPay.toLocaleString(undefined, { maximumFractionDigits: 0 })}원</TableCell><TableCell className={`text-right font-semibold ${personDetails.finalAmount > 0.01 ? 'text-green-600' : personDetails.finalAmount < -0.01 ? 'text-red-600' : 'text-muted-foreground'}`}>{Math.abs(personDetails.finalAmount) < 0.01 ? '-' : `${personDetails.finalAmount > 0 ? '+' : ''}${personDetails.finalAmount.toLocaleString(undefined, { maximumFractionDigits: 0 })}원`}</TableCell><TableCell className="text-right">{personDetails.finalAmount > 0.01 ? (<span className="inline-flex items-center text-xs text-green-700 bg-green-100 px-2 py-0.5 rounded-full"><TrendingUp className="h-3 w-3 mr-1" /> 받을 돈</span>) : personDetails.finalAmount < -0.01 ? (<span className="inline-flex items-center text-xs text-red-700 bg-red-100 px-2 py-0.5 rounded-full"><TrendingDown className="h-3 w-3 mr-1" /> 내야할 돈</span>) : (<span className="text-xs text-muted-foreground">정산 완료</span>)}</TableCell></TableRow>
-                          ))}
-                      </TableBody>
-                    </Table>
-                  </ScrollArea>
+                  )}
                 </div>
               )}
             </div>
@@ -480,43 +644,68 @@ export function PaymentSummary({ meeting, expenses, participants, allFriends }: 
                 <CardDescription>
                   개인 간 필요한 최종 송금 내역입니다.<br />
                 </CardDescription>
-                <div className="overflow-x-auto">
-                  <ScrollArea className="pr-3 mt-2 min-w-[600px]">
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>보내는 사람</TableHead>
-                          <TableHead>받는 사람</TableHead>
-                          <TableHead className="text-right">금액</TableHead>
-                          <TableHead className="text-right">비고</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {meeting.useReserveFund && perPersonCostDetails.fundUsed > 0.01 &&
-                        settlementSuggestions.fundPayouts.map((debt, index) => (
-                          <TableRow key={`fundPayout-${index}`}>
-                            <TableCell className="text-muted-foreground">N빵친구 회비</TableCell>
-                            <TableCell>{getFriendName(debt.to)}</TableCell>
-                            <TableCell className="text-right font-medium">
-                              {debt.amount.toLocaleString(undefined, { maximumFractionDigits: 0 })}원
-                            </TableCell>
-                            <TableCell className="text-right text-xs text-primary">회비 지원</TableCell>
+                {isMobile ? (
+                  // 모바일 송금 제안 뷰
+                  <div className="border rounded-md divide-y divide-gray-200">
+                    {meeting.useReserveFund && perPersonCostDetails.fundUsed > 0.01 &&
+                    settlementSuggestions.fundPayouts.map((debt, index) => (
+                      <div key={`fundPayout-${index}`} className="p-4">
+                        <div className="text-muted-foreground mb-1">N빵친구 회비 → {getFriendName(debt.to)}</div>
+                        <div className="font-medium flex items-center">
+                          {debt.amount.toLocaleString(undefined, { maximumFractionDigits: 0 })}원
+                          <Badge className="ml-2 text-xs text-primary bg-primary/10">회비 지원</Badge>
+                        </div>
+                      </div>
+                    ))}
+                    {settlementSuggestions.suggestions.map((debt, index) => (
+                      <div key={`suggestion-${index}`} className="p-4">
+                        <div className="mb-1">{getFriendName(debt.from)} → {getFriendName(debt.to)}</div>
+                        <div className="font-medium">
+                          {debt.amount.toLocaleString(undefined, { maximumFractionDigits: 0 })}원
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  // 데스크톱 송금 제안 테이블 뷰
+                  <div className="overflow-x-auto">
+                    <ScrollArea className="pr-3 mt-2 min-w-[600px]">
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>보내는 사람</TableHead>
+                            <TableHead>받는 사람</TableHead>
+                            <TableHead className="text-right">금액</TableHead>
+                            <TableHead className="text-right">비고</TableHead>
                           </TableRow>
-                        ))}
-                        {settlementSuggestions.suggestions.map((debt, index) => (
-                          <TableRow key={`suggestion-${index}`}>
-                            <TableCell>{getFriendName(debt.from)}</TableCell>
-                            <TableCell>{getFriendName(debt.to)}</TableCell>
-                            <TableCell className="text-right font-medium">
-                              {debt.amount.toLocaleString(undefined, { maximumFractionDigits: 0 })}원
-                            </TableCell>
-                            <TableCell className="text-right text-xs text-muted-foreground"></TableCell>
-                          </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  </ScrollArea>
-                </div>
+                        </TableHeader>
+                        <TableBody>
+                          {meeting.useReserveFund && perPersonCostDetails.fundUsed > 0.01 &&
+                          settlementSuggestions.fundPayouts.map((debt, index) => (
+                            <TableRow key={`fundPayout-${index}`}>
+                              <TableCell className="text-muted-foreground">N빵친구 회비</TableCell>
+                              <TableCell>{getFriendName(debt.to)}</TableCell>
+                              <TableCell className="text-right font-medium">
+                                {debt.amount.toLocaleString(undefined, { maximumFractionDigits: 0 })}원
+                              </TableCell>
+                              <TableCell className="text-right text-xs text-primary">회비 지원</TableCell>
+                            </TableRow>
+                          ))}
+                          {settlementSuggestions.suggestions.map((debt, index) => (
+                            <TableRow key={`suggestion-${index}`}>
+                              <TableCell>{getFriendName(debt.from)}</TableCell>
+                              <TableCell>{getFriendName(debt.to)}</TableCell>
+                              <TableCell className="text-right font-medium">
+                                {debt.amount.toLocaleString(undefined, { maximumFractionDigits: 0 })}원
+                              </TableCell>
+                              <TableCell className="text-right text-xs text-muted-foreground"></TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </ScrollArea>
+                  </div>
+                )}
               </div>
             )}
 
