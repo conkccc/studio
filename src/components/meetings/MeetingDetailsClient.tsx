@@ -16,7 +16,6 @@ import {
   PiggyBank, CheckCircle2, AlertCircle, Info, Settings, Link2, Copy, Share2, ArrowLeft
 } from 'lucide-react';
 import { AddExpenseDialog } from './AddExpenseDialog';
-import { EditExpenseDialog } from './EditExpenseDialog';
 import { ExpenseItem } from './ExpenseItem';
 import { PaymentSummary } from './PaymentSummary';
 import {
@@ -707,6 +706,7 @@ export function MeetingDetailsClient({
                   <AddExpenseDialog
                     meetingId={meeting.id}
                     participants={displayParticipants}
+                    roomCreatorName={creatorName}
                     onExpenseAdded={handleExpenseAdded}
                     triggerButton={
                       <Button variant="outline" size="sm" disabled={isDeleting || isFinalizing || (meeting.isSettled && !isAdmin) || isReadOnlyUser}>

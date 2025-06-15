@@ -64,23 +64,28 @@ type ExpenseFormData = z.infer<typeof expenseSchema>;
 interface AddExpenseDialogProps {
   meetingId: string;
   participants: Friend[]; 
+  roomCreatorName: string,
   onExpenseAdded: (expense: Expense) => void;
   triggerButton?: React.ReactNode;
 }
 
-export function AddExpenseDialog({ meetingId, participants, onExpenseAdded, triggerButton }: AddExpenseDialogProps) {
+export function AddExpenseDialog({ meetingId, participants, roomCreatorName, onExpenseAdded, triggerButton }: AddExpenseDialogProps) {
   const [open, setOpen] = useState(false);
   const [isPending, startTransition] = useTransition();
   const { toast } = useToast();
   const [payerSearchOpen, setPayerSearchOpen] = useState(false);
-  const { currentUser } = useAuth();
+
+  var roomCreatorId = '';
+  const foundCreator = participants.find(p => roomCreatorName && roomCreatorName.includes(p.name));
+  if (foundCreator)
+    roomCreatorId = foundCreator.id;
 
   const form = useForm<ExpenseFormData>({
     resolver: zodResolver(expenseSchema),
     defaultValues: {
       description: '',
       totalAmount: 0,
-      paidById: participants.length > 0 ? participants[0].id : '',
+      paidById: roomCreatorId || (participants.length > 0 ? participants[0].id : ''), 
       splitType: 'equally',
       splitAmongIds: participants.map(p => p.id),
       customSplits: participants.map(p => ({ friendId: p.id, amount: 0 })),
@@ -92,17 +97,20 @@ export function AddExpenseDialog({ meetingId, participants, onExpenseAdded, trig
 
   React.useEffect(() => {
     if (open) {
+        const defaultPayerId = roomCreatorId && participants.some(p => p.id === roomCreatorId)
+            ? roomCreatorId
+            : (participants.length > 0 ? participants[0].id : '');
+
         form.reset({
             description: '',
             totalAmount: 0,
-            paidById: participants.length > 0 ? participants[0].id : '',
+            paidById: defaultPayerId,
             splitType: 'equally',
             splitAmongIds: participants.map(p => p.id),
             customSplits: participants.map(p => ({ friendId: p.id, amount: 0 })),
         });
     }
-  }, [open, participants, form]);
-
+  }, [open, participants, form, roomCreatorName]);
 
   const onSubmit = (data: ExpenseFormData) => {
     startTransition(async () => {
@@ -115,7 +123,7 @@ export function AddExpenseDialog({ meetingId, participants, onExpenseAdded, trig
         ...(data.splitType === 'equally' && { splitAmongIds: data.splitAmongIds }),
         ...(data.splitType === 'custom' && { customSplits: data.customSplits }),
       };
-      const result = await createExpenseAction(payload, currentUser?.uid || null);
+      const result = await createExpenseAction(payload, roomCreatorName || null);
       if (result.success && result.expense) {
         toast({ title: '성공', description: '새로운 지출 항목이 추가되었습니다.' });
         onExpenseAdded(result.expense);

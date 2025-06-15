@@ -1,7 +1,7 @@
 'use client';
 
 import type { Expense, Friend, Meeting } from '@/lib/types';
-import React, { useMemo } from 'react';
+import React, { useMemo, useCallback } from 'react';
 import { Card, CardHeader, CardDescription, CardContent, CardFooter } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -13,17 +13,6 @@ interface PaymentSummaryProps {
   expenses: Expense[];
   participants: Friend[];
   allFriends: Friend[];
-}
-
-interface FundPayoutToPayer {
-  to: string;
-  amount: number;
-}
-
-interface SettlementSuggestion {
-  from: string;
-  to: string;
-  amount: number;
 }
 
 export function PaymentSummary({ meeting, expenses, participants, allFriends }: PaymentSummaryProps) {
@@ -41,11 +30,19 @@ export function PaymentSummary({ meeting, expenses, participants, allFriends }: 
     return participants;
   }, [meeting, participants]);
 
-  const participantIdsInMeeting = useMemo(() => new Set(effectiveParticipants.map(p => p.id)), [effectiveParticipants]);
+  const isExpenseAllParticipantsShared = useCallback((expense: Expense, allCurrentParticipantIds: string[]): boolean => {
+    if (expense.splitType === 'equally' && expense.splitAmongIds) {
+      const splitAmongSet = new Set(expense.splitAmongIds);
+      return allCurrentParticipantIds.length > 0 && allCurrentParticipantIds.every(id => splitAmongSet.has(id));
+    }
+    return false;
+  }, []);
 
   const perPersonCostDetails = useMemo<{
     totalSpent: number;
-    perPersonCost: number;
+    totalSpentAllParticipants: number;
+    totalSpentExcludedParticipants: number;
+    perPersonCost: number; // '모든 참여자의 분배'에 대한 1인당 균등 부담액 (적용 가능한 경우)
     fundUsed: number;
     fundLeft: number;
     perPersonCostWithFund: Record<string, number>;
@@ -53,13 +50,17 @@ export function PaymentSummary({ meeting, expenses, participants, allFriends }: 
     fundNonApplicableIds: string[];
     fundDescription: string;
     perFundApplicableCost: number;
+    individualExpenseContributions: Record<string, number>; // 각 참여자가 각 Expense에 대해 부담해야 할 금액 (정확한 본인부담액)
   }>(() => {
     const totalSpent = expenses.reduce((sum, e) => sum + e.totalAmount, 0);
     const participantIds = effectiveParticipants.map(p => p.id);
     const numParticipants = participantIds.length;
+
     if (numParticipants === 0) {
       return {
         totalSpent,
+        totalSpentAllParticipants: 0,
+        totalSpentExcludedParticipants: 0,
         perPersonCost: 0,
         fundUsed: 0,
         fundLeft: 0,
@@ -67,10 +68,23 @@ export function PaymentSummary({ meeting, expenses, participants, allFriends }: 
         fundApplicableIds: [],
         fundNonApplicableIds: participantIds,
         fundDescription: '참여자가 없습니다.',
-        perFundApplicableCost: 0
+        perFundApplicableCost: 0,
+        individualExpenseContributions: {},
       };
     }
 
+    // 소비 타입 분류 및 총액 계산
+    let totalSpentAllParticipants = 0;
+    let totalSpentExcludedParticipants = 0;
+
+    expenses.forEach(expense => {
+      if (isExpenseAllParticipantsShared(expense, participantIds)) {
+        totalSpentAllParticipants += expense.totalAmount;
+      } else {
+        totalSpentExcludedParticipants += expense.totalAmount;
+      }
+    });
+    
     let fundApplicableIds: string[] = participantIds;
     let fundNonApplicableIds: string[] = [];
     if (meeting.useReserveFund && Array.isArray(meeting.nonReserveFundParticipants) && meeting.nonReserveFundParticipants.length > 0) {
@@ -80,45 +94,79 @@ export function PaymentSummary({ meeting, expenses, participants, allFriends }: 
 
     const numFundApplicable = fundApplicableIds.length;
     const numFundNonApplicable = fundNonApplicableIds.length;
-    const perPersonCost = numParticipants > 0 ? totalSpent / numParticipants : 0;
+    
+    // 각 Expense별 개인이 부담해야 할 금액 계산
+    const individualExpenseContributions: Record<string, number> = {};
+    effectiveParticipants.forEach(p => (individualExpenseContributions[p.id] = 0));
+
+    expenses.forEach(expense => {
+      if (expense.splitType === 'equally') {
+        const relevantParticipantsForExpense = expense.splitAmongIds?.filter(id => effectiveParticipants.some(p => p.id === id)) || [];
+        const numRelevant = relevantParticipantsForExpense.length;
+        if (numRelevant > 0) {
+          const amountPerPerson = expense.totalAmount / numRelevant;
+          relevantParticipantsForExpense.forEach(id => {
+            individualExpenseContributions[id] = (individualExpenseContributions[id] || 0) + amountPerPerson;
+          });
+        }
+      } else if (expense.splitType === 'custom' && expense.customSplits) {
+        expense.customSplits.forEach(split => {
+          if (effectiveParticipants.some(p => p.id === split.friendId)) {
+            individualExpenseContributions[split.friendId] = (individualExpenseContributions[split.friendId] || 0) + split.amount;
+          }
+        });
+      }
+    });
+
+    // "모든 참여자의 분배"에 대한 1인당 부담액 (모든 참여자가 분배하는 소비 지출만 있을 경우의 균등 분배액)
+    const perPersonCost = numParticipants > 0 ? totalSpentAllParticipants / numParticipants : 0;
 
     let fundUsed = 0;
     let fundLeft = 0;
-    let perPersonCostWithFund: Record<string, number> = {};
+    let perPersonCostWithFund: Record<string, number> = { ...individualExpenseContributions }; // 개별 부담액으로 초기화
     let fundDescription = '';
-    let perFundApplicableCost = 0;
+    let perFundApplicableCost = 0; // "회비적용 인원 1인당 부담액" (인원 제외가 있는 소비가 없을 때만 균등 분배 의미)
+
     if (meeting.useReserveFund && meeting.partialReserveFundAmount && meeting.partialReserveFundAmount > 0 && numFundApplicable > 0) {
-      const fundApplicableTotal = totalSpent - (numFundNonApplicable * perPersonCost);
-      fundUsed = Math.min(meeting.partialReserveFundAmount, fundApplicableTotal);
-      fundLeft = meeting.partialReserveFundAmount - fundUsed;
-      const fundAppliedLeftCost = fundApplicableTotal - fundUsed;
-      perFundApplicableCost = numFundApplicable > 0 ? fundAppliedLeftCost / numFundApplicable : 0;
-      fundApplicableIds.forEach(id => {
-        perPersonCostWithFund[id] = perFundApplicableCost;
-      });
-      fundNonApplicableIds.forEach(id => {
-        perPersonCostWithFund[id] = perPersonCost;
-      });
-      fundDescription = `회비 적용 인원 ${numFundApplicable}명, 미적용 인원 ${numFundNonApplicable}명, 실제 사용 회비: ${fundUsed.toLocaleString()}원${fundLeft > 0.01 ? `, 미사용 회비: ${fundLeft.toLocaleString()}원` : ''}`;
+        const totalFundApplicableContributions = fundApplicableIds.reduce((sum, id) => sum + (individualExpenseContributions[id] || 0), 0);
+        
+        fundUsed = Math.min(meeting.partialReserveFundAmount, totalFundApplicableContributions);
+        fundLeft = meeting.partialReserveFundAmount - fundUsed;
+        
+        const fundRemainingCost = totalFundApplicableContributions - fundUsed;
+        perFundApplicableCost = numFundApplicable > 0 ? fundRemainingCost / numFundApplicable : 0;
+        
+        fundApplicableIds.forEach(id => {
+            perPersonCostWithFund[id] = perFundApplicableCost; // 회비 적용 인원은 회비 적용 후 남은 비용을 균등 분배
+        });
+        
+        fundNonApplicableIds.forEach(id => {
+            perPersonCostWithFund[id] = individualExpenseContributions[id] || 0; // 회비 미적용 인원은 원래 계산된 부담액 지불
+        });
+
+        fundDescription = `회비 적용 인원 ${numFundApplicable}명, 미적용 인원 ${numFundNonApplicable}명, 실제 사용 회비: ${fundUsed.toLocaleString()}원${fundLeft > 0.01 ? `, 미사용 회비: ${fundLeft.toLocaleString()}원` : ''}`;
     } else {
-      participantIds.forEach(id => {
-        perPersonCostWithFund[id] = perPersonCost;
-      });
-      fundDescription = '회비 미적용';
+        participantIds.forEach(id => {
+            perPersonCostWithFund[id] = individualExpenseContributions[id] || 0;
+        });
+        fundDescription = '회비 미적용';
     }
 
     return {
       totalSpent,
-      perPersonCost,
+      totalSpentAllParticipants,
+      totalSpentExcludedParticipants,
+      perPersonCost: perPersonCost, // '모든 참여자의 분배'에 대한 1인당 부담액
       fundUsed,
       fundLeft,
       perPersonCostWithFund: perPersonCostWithFund as Record<string, number>,
       fundApplicableIds,
       fundNonApplicableIds,
       fundDescription,
-      perFundApplicableCost
+      perFundApplicableCost, // '모든 참여자의 분배' 중 회비 적용 대상에게 균등 분배되는 금액
+      individualExpenseContributions,
     };
-  }, [expenses, effectiveParticipants, meeting]);
+  }, [expenses, effectiveParticipants, meeting, isExpenseAllParticipantsShared]);
 
   const mappedExpenses = useMemo((): Expense[] => {
     if (meeting.isTemporary && Array.isArray(meeting.temporaryParticipants) && meeting.temporaryParticipants.length > 0) {
@@ -143,9 +191,11 @@ export function PaymentSummary({ meeting, expenses, participants, allFriends }: 
   const settlementSuggestions = useMemo(() => {
     const people = effectiveParticipants.map(p => {
       const totalPaid = mappedExpenses.filter(e => e.paidById === p.id).reduce((sum, e) => sum + e.totalAmount, 0);
+      
       const shouldPay = perPersonCostDetails.perPersonCostWithFund[p.id] || 0;
+      
       const finalAmount = parseFloat((totalPaid - shouldPay).toFixed(2));
-      return { friendId: p.id, finalAmount };
+      return { friendId: p.id, totalPaid, shouldPay, finalAmount };
     });
     const sorted = [...people].sort((a, b) => b.finalAmount - a.finalAmount);
     let fundLeft = perPersonCostDetails.fundUsed;
@@ -177,7 +227,7 @@ export function PaymentSummary({ meeting, expenses, participants, allFriends }: 
       if (Math.abs(send.amount) < 0.01) i++;
       if (Math.abs(recv.amount) < 0.01) j++;
     }
-    return { fundPayouts, suggestions };
+    return { fundPayouts, suggestions, people };
   }, [mappedExpenses, effectiveParticipants, perPersonCostDetails]);
   
   const getFriendName = (friendId: string): string => {
@@ -186,6 +236,17 @@ export function PaymentSummary({ meeting, expenses, participants, allFriends }: 
     if (!friend) return '알 수 없음';
     return friend.name + (friend.description ? ` (${friend.description})` : '');
   };
+
+  const nonPayingParticipants = useMemo(() => {
+    const allPayerIds = new Set(expenses.map(e => e.paidById));
+    return effectiveParticipants.filter(p => !allPayerIds.has(p.id));
+  }, [effectiveParticipants, expenses]);
+
+  const payingParticipants = useMemo(() => {
+    const allPayerIds = new Set(expenses.map(e => e.paidById));
+    return effectiveParticipants.filter(p => allPayerIds.has(p.id));
+  }, [effectiveParticipants, expenses]);
+
 
   if (participants.length === 0 && meeting.isTemporary && Array.isArray(meeting.temporaryParticipants) && meeting.temporaryParticipants.length > 0) {
     return (
@@ -226,12 +287,30 @@ export function PaymentSummary({ meeting, expenses, participants, allFriends }: 
           <div>
             총 지출: {perPersonCostDetails.totalSpent.toLocaleString(undefined, { maximumFractionDigits: 0 })}원
           </div>
-          {participants.length > 0 && (
+          {/* 모든 참여자가 분배하는 소비 총액 및 1인당 부담액 */}
+          {perPersonCostDetails.totalSpentAllParticipants > 0 && (
+            <div>
+              모든 참여자의 분배 총액: {perPersonCostDetails.totalSpentAllParticipants.toLocaleString(undefined, { maximumFractionDigits: 0 })}원
+              {participants.length > 0 && ` (1인당: ${perPersonCostDetails.perPersonCost.toLocaleString(undefined, { maximumFractionDigits: 0 })}원)`}
+            </div>
+          )}
+          
+          {/* 인원 제외가 있는 소비 총액 */}
+          {perPersonCostDetails.totalSpentExcludedParticipants > 0 && (
+            <div>
+              인원 제외가 있는 분배 총액: {perPersonCostDetails.totalSpentExcludedParticipants.toLocaleString(undefined, { maximumFractionDigits: 0 })}원
+            </div>
+          )}
+
+          {/* 인원 제외가 있는 소비 지출이 없을 때만 '참여자 1인당 부담액 (모든 참여자가 분배하는 소비)' 표시 */}
+          {perPersonCostDetails.totalSpentExcludedParticipants === 0 && participants.length > 0 && (
             <div>
               참여자 1인당 부담액 (회비 적용 전): {perPersonCostDetails.perPersonCost.toLocaleString(undefined, { maximumFractionDigits: 0 })}원
             </div>
           )}
-          {perPersonCostDetails.fundUsed > 0.01 && (
+
+          {/* 회비 적용 인원 1인당 부담액 (인원 제외가 있는 소비가 없을 때만 유효한 균등 분배 금액을 표시) */}
+          {perPersonCostDetails.fundUsed > 0.01 && perPersonCostDetails.totalSpentExcludedParticipants === 0 && (
             <div>
                 회비적용 인원 1인당 부담액: {perPersonCostDetails.perFundApplicableCost.toLocaleString(undefined, { maximumFractionDigits: 0 })}원
             </div>
@@ -271,18 +350,23 @@ export function PaymentSummary({ meeting, expenses, participants, allFriends }: 
                           </TableRow>
                         </TableHeader>
                         <TableBody>
-                          {effectiveParticipants.map((p, idx) => {
-                            const totalPaid = mappedExpenses.filter(e => e.paidById === p.id).reduce((sum, e) => sum + e.totalAmount, 0);
-                            const shouldPay = perPersonCostDetails.perPersonCostWithFund[p.id] || 0;
-                            const finalAmount = parseFloat((totalPaid - shouldPay).toFixed(2));
+                          {/* 임시 모임의 경우, 모든 유효 참여자를 기준으로 표시 */}
+                          {effectiveParticipants.map((p) => {
+                            const personDetails = settlementSuggestions.people.find(sp => sp.friendId === p.id);
+                            if (!personDetails) return null;
+
+                            const totalPaid = personDetails.totalPaid;
+                            const shouldPay = personDetails.shouldPay;
+                            const finalAmount = personDetails.finalAmount;
+
                             return (
                               <TableRow key={p.id}>
                                 <TableCell className="font-medium flex items-center">
                                   <UserCircle className="h-4 w-4 mr-2 opacity-70" />
-                                  {p.name}
+                                  {getFriendName(p.id)}
                                 </TableCell>
-                                <TableCell className="text-right">{totalPaid ? totalPaid.toLocaleString(undefined, { maximumFractionDigits: 0 }) + '원' : '-'}</TableCell>
-                                <TableCell className="text-right">{shouldPay ? shouldPay.toLocaleString(undefined, { maximumFractionDigits: 0 }) + '원' : '-'}</TableCell>
+                                <TableCell className="text-right">{totalPaid > 0 ? totalPaid.toLocaleString(undefined, { maximumFractionDigits: 0 }) + '원' : '-'}</TableCell>
+                                <TableCell className="text-right">{shouldPay > 0 ? shouldPay.toLocaleString(undefined, { maximumFractionDigits: 0 }) + '원' : '-'}</TableCell>
                                 <TableCell className="text-right font-semibold">{Math.abs(finalAmount) < 0.01 ? '-' : `${finalAmount > 0 ? '+' : ''}${finalAmount.toLocaleString(undefined, { maximumFractionDigits: 0 })}원`}</TableCell>
                                 <TableCell className="text-right">
                                   {finalAmount > 0.01 ? (
@@ -319,10 +403,15 @@ export function PaymentSummary({ meeting, expenses, participants, allFriends }: 
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {participants.map(p => {
-                          const totalPaid = mappedExpenses.filter(e => e.paidById === p.id).reduce((sum, e) => sum + e.totalAmount, 0);
-                          const shouldPay = perPersonCostDetails.perPersonCostWithFund[p.id] || 0;
-                          const finalAmount = parseFloat((totalPaid - shouldPay).toFixed(2));
+                        {/* 지출이 있는 참여자들 먼저 표시 */}
+                        {payingParticipants.map(p => {
+                          const personDetails = settlementSuggestions.people.find(sp => sp.friendId === p.id);
+                          if (!personDetails) return null;
+
+                          const totalPaid = personDetails.totalPaid;
+                          const shouldPay = personDetails.shouldPay;
+                          const finalAmount = personDetails.finalAmount;
+
                           return (
                             <TableRow key={p.id}>
                               <TableCell className="font-medium flex items-center">
@@ -357,6 +446,24 @@ export function PaymentSummary({ meeting, expenses, participants, allFriends }: 
                             </TableRow>
                           );
                         })}
+
+                        {/* 지출 내역이 없는 참여자들을 구분하여 표시 */}
+                        {nonPayingParticipants.length > 0 && (
+                          <TableRow>
+                            <TableCell colSpan={5} className="py-2 text-center text-muted-foreground bg-gray-50 dark:bg-gray-800">
+                              지출 내역이 없는 참여자
+                            </TableCell>
+                          </TableRow>
+                        )}
+                        {nonPayingParticipants
+                          .map(p => {
+                            const personDetails = settlementSuggestions.people.find(sp => sp.friendId === p.id);
+                            return personDetails ? { participant: p, details: personDetails } : null; 
+                          })
+                          .filter(item => item !== null) 
+                          .map(({ participant: p, details: personDetails }) => (
+                            <TableRow key={p.id} className="opacity-70"><TableCell className="font-medium flex items-center"><UserCircle className="h-4 w-4 mr-2 opacity-70" />{getFriendName(p.id)}{perPersonCostDetails.fundUsed > 0.01 && perPersonCostDetails.fundNonApplicableIds.includes(p.id) && (<Badge variant="outline" className="ml-2 text-xs">회비 미적용</Badge>)}</TableCell><TableCell className="text-right">-</TableCell><TableCell className="text-right">{personDetails.shouldPay.toLocaleString(undefined, { maximumFractionDigits: 0 })}원</TableCell><TableCell className={`text-right font-semibold ${personDetails.finalAmount > 0.01 ? 'text-green-600' : personDetails.finalAmount < -0.01 ? 'text-red-600' : 'text-muted-foreground'}`}>{Math.abs(personDetails.finalAmount) < 0.01 ? '-' : `${personDetails.finalAmount > 0 ? '+' : ''}${personDetails.finalAmount.toLocaleString(undefined, { maximumFractionDigits: 0 })}원`}</TableCell><TableCell className="text-right">{personDetails.finalAmount > 0.01 ? (<span className="inline-flex items-center text-xs text-green-700 bg-green-100 px-2 py-0.5 rounded-full"><TrendingUp className="h-3 w-3 mr-1" /> 받을 돈</span>) : personDetails.finalAmount < -0.01 ? (<span className="inline-flex items-center text-xs text-red-700 bg-red-100 px-2 py-0.5 rounded-full"><TrendingDown className="h-3 w-3 mr-1" /> 내야할 돈</span>) : (<span className="text-xs text-muted-foreground">정산 완료</span>)}</TableCell></TableRow>
+                          ))}
                       </TableBody>
                     </Table>
                   </ScrollArea>
