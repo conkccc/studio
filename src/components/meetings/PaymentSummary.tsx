@@ -20,7 +20,7 @@ export function PaymentSummary({ meeting, expenses, participants, allFriends }: 
 
   useEffect(() => {
     const handleResize = () => {
-      setIsMobile(window.innerWidth < 768); // Tailwind CSS 'md' breakpoint 기준
+      setIsMobile(window.innerWidth < 640);
     };
 
     if (typeof window !== 'undefined') {
