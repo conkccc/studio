@@ -199,7 +199,7 @@ export function MeetingDetailsClient({
   const displayParticipants = useMemo(() => {
     if (meeting.isTemporary) {
       return meeting.temporaryParticipants?.map((p, index) => ({
-        id: `temp_${index}_${p.name}`,
+        id: p.name,
         name: p.name,
         description: '',
         groupId: meeting.groupId,
@@ -730,6 +730,7 @@ export function MeetingDetailsClient({
                         participants={displayParticipants}
                         onExpenseUpdated={handleExpenseUpdated}
                         onExpenseDeleted={handleExpenseDeleted}
+                        isCreator={isCreator}
                         isMeetingSettled={meeting.isSettled || false}
                         isTemporaryMeeting={meeting.isTemporary}
                       />

@@ -16,7 +16,7 @@ import { format } from 'date-fns';
 import { ko } from 'date-fns/locale';
 import type { Friend, Meeting, FriendGroup } from '@/lib/types';
 import { createMeetingAction, updateMeetingAction } from '@/lib/actions';
-import { useToast } from '@/hooks/use-toast';
+import { toast, useToast } from '@/hooks/use-toast';
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { Switch } from '@/components/ui/switch';
 import { Checkbox } from "@/components/ui/checkbox";
@@ -198,6 +198,87 @@ function LocationSearchInput({ form, isPending, isMapsLoaded, mapsLoadError, onL
   );
 }
 
+interface SelectDateProps {
+  isEditMode: boolean;
+  isPending: boolean;
+  initialData?: Meeting;
+  timeValue?: Date;
+  checkStartTimeValue?: Date;
+  varName: string;
+  titleNode: React.ReactNode;
+  openState: boolean;
+  openStateFunc: (state: boolean) => void;
+  onDateChanged: (date: Date | undefined) => void;
+}
+function SelectDate(props: SelectDateProps) {
+  return (
+    <div>
+        <Label htmlFor={props.varName} className={cn((props.isEditMode && props.initialData?.isSettled) && "text-muted-foreground")}>{props.titleNode}</Label>
+        <Popover open={props.openState} onOpenChange={props.openStateFunc}>
+          <PopoverTrigger asChild>
+            <Button
+              variant="outline"
+              className={cn(
+                'w-full justify-start text-left font-normal',
+                !props.timeValue && 'text-muted-foreground',
+                (props.isEditMode && props.initialData?.isSettled) && "bg-muted/50 cursor-not-allowed"
+              )}
+              disabled={props.isPending || (props.isEditMode && props.initialData?.isSettled)}
+            >
+              <CalendarIcon className="mr-2 h-4 w-4" />
+              {
+                (() => {
+                  const val = props.timeValue;
+                  return val instanceof Date && !isNaN(val.getTime())
+                    ? format(val, 'PPP HH:mm', { locale: ko })
+                    : <span>날짜 및 시간 선택</span>;
+                })()
+              }
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent className="w-auto p-0">
+            <Calendar
+              mode="single"
+              selected={props.timeValue}
+              onSelect={(date) => {
+                if (date) {
+                  const currentTime = props.timeValue || props.checkStartTimeValue || (() => { const t = new Date(); t.setHours(11, 0, 0, 0); return t; })();
+                  const newDateTime = new Date(date);
+                  newDateTime.setHours(currentTime.getHours(), currentTime.getMinutes(), 0, 0);
+                  props.onDateChanged(newDateTime);
+                } else if (props.checkStartTimeValue) {
+                  props.onDateChanged(undefined);
+                }
+              }}
+              initialFocus
+              disabled={props.isPending || (props.isEditMode && props.initialData?.isSettled)}
+              fromDate={props.checkStartTimeValue ? new Date(props.checkStartTimeValue) : undefined}
+            />
+            <div className="p-3 border-t border-border space-y-2">
+              <Label htmlFor="startTime">시간</Label>
+              <Input
+                type="time"
+                id="startTime"
+                defaultValue={props.timeValue ? format(props.timeValue, "HH:mm") : (props.checkStartTimeValue ? format(props.checkStartTimeValue, "HH:mm") : "11:00")}
+                onChange={(e) => {
+                  const newTime = e.target.value;
+                  const currentDateTime = props.timeValue || new Date();
+                  const [hours, minutes] = newTime.split(':').map(Number);
+                  const newDate = new Date(currentDateTime);
+                  newDate.setHours(hours, minutes, 0, 0);
+                  props.onDateChanged(newDate);
+                }}
+                className="w-full"
+                disabled={props.isPending || (props.isEditMode && props.initialData?.isSettled)}
+              />
+              <Button size="sm" onClick={() => props.openStateFunc(false)} className="w-full" type="button" disabled={(props.isEditMode && props.initialData?.isSettled)}>확인</Button>
+            </div>
+          </PopoverContent>
+        </Popover>
+      </div>
+  );
+}
+
 
 export function CreateMeetingForm({
   friends,
@@ -217,6 +298,7 @@ export function CreateMeetingForm({
   const [endDateOpen, setEndDateOpen] = useState(false);
 
   const [temporaryParticipants, setTemporaryParticipants] = useState<{ name: string }[]>([]);
+  const [addedTempParticipantsOnEdit, setAddedTempParticipantsOnEdit] = useState<{ name: string }[]>([]);
   const [currentTempParticipantName, setCurrentTempParticipantName] = useState('');
   const [tempMeetingFeeType, setTempMeetingFeeType] = useState<'total' | 'perPerson'>('total');
   const [tempMeetingTotalFee, setTempMeetingTotalFee] = useState<number | undefined>(undefined);
@@ -251,7 +333,7 @@ export function CreateMeetingForm({
       feePerPerson: initialData.feePerPerson,
     } : {
       name: '',
-      dateTime: new Date(),
+      dateTime: (() => { const t = new Date(); t.setHours(11, 0, 0, 0); return t; })(),
       endTime: undefined,
       locationName: '',
       locationCoordinates: undefined,
@@ -272,7 +354,7 @@ export function CreateMeetingForm({
   const watchedLocationCoordinates = useWatch({ control: form.control, name: 'locationCoordinates' });
   const watchLocationName = useWatch({ control: form.control, name: 'locationName' });
   const watchedIsTemporary = useWatch({ control: form.control, name: 'isTemporary' });
-  const dateTimeValue = useWatch({ control: form.control, name: 'dateTime' });
+  const startTimeValue = useWatch({ control: form.control, name: 'dateTime' });
   const endTimeValue = useWatch({ control: form.control, name: 'endTime' });
   const watchPartialReserveFundAmount = useWatch({ control: form.control, name: 'partialReserveFundAmount' });
   const watchNonReserveFundParticipants = useWatch({ control: form.control, name: 'nonReserveFundParticipants' });
@@ -504,10 +586,58 @@ export function CreateMeetingForm({
     }
   };
 
+  const isAddedTempParticipantsOnEdit = (addedName: string) => {
+    return addedTempParticipantsOnEdit.some(p => p.name === addedName);
+  };
+
+  const handleAddTemporaryParticipant = (name: string) => {
+    const participant = name.trim();
+    if (participant !== '') {
+      if (temporaryParticipants.filter(p => p.name === participant).length > 0) {
+        toast({title: "알림", description: "이미 추가된 참여자입니다.", variant: "default"});
+        return;
+      }
+      const newList = [...temporaryParticipants, { name: participant }];
+      setTemporaryParticipants(newList);
+      form.setValue('temporaryParticipants', newList, { shouldValidate: true });
+      setCurrentTempParticipantName('');
+
+      setAddedTempParticipantsOnEdit([...addedTempParticipantsOnEdit, { name: participant }]);
+    }
+  };
+
+  const handleRemoveTemporaryParticipant = (name: string) => {
+    const newList = temporaryParticipants.filter(p => p.name != name);
+    setTemporaryParticipants(newList);
+    form.setValue('temporaryParticipants', newList, { shouldValidate: true });
+
+    setAddedTempParticipantsOnEdit(addedTempParticipantsOnEdit.filter(p => p.name != name));
+  };
+
   const isFormDisabled = useMemo(() => isPending || (isEditMode && initialData?.isSettled), [isPending, isEditMode, initialData]);
 
   return (
-    <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
+    <form
+      onSubmit={form.handleSubmit(
+        onSubmit,
+        (formErrors) => {
+          const firstKey = Object.keys(formErrors)[0];
+          const firstError = Object.values(formErrors)[0];
+          if (firstError) {
+            const msg = 
+              typeof firstError.message === 'string'
+                ? firstError.message
+                : '입력값을 확인해주세요.';
+            toast({
+              title: '입력 오류',
+              description: `${firstKey}: ${msg}`,
+              variant: 'destructive',
+            });
+          }
+        }
+      )}
+      className="space-y-6"
+    >
       <div>
         <Label htmlFor="name" className={cn((isEditMode && initialData?.isSettled) && "text-muted-foreground")}>모임 이름 <span className="text-destructive">*</span></Label>
         <Input id="name" {...form.register('name')} disabled={isPending || (isEditMode && initialData?.isSettled)} />
@@ -533,7 +663,7 @@ export function CreateMeetingForm({
         {form.formState.errors.isTemporary && <p className="text-sm text-destructive mt-1">{form.formState.errors.isTemporary.message}</p>}
       </div>
 
-      {!watchedIsTemporary && groups && groups.length > 0 && typeof onGroupChange === 'function' && (
+      {!watchedIsTemporary && typeof onGroupChange === 'function' && (
         <div className="mt-2 mb-4">
           <label className="block mb-1 font-medium">친구 그룹 선택 {!initialData?.groupId && <span className="text-destructive">*</span>}</label>
           <Popover open={groupPopoverOpen} onOpenChange={setGroupPopoverOpen}>
@@ -581,127 +711,34 @@ export function CreateMeetingForm({
       )}
 
       <div>
-        <Label htmlFor="dateTime" className={cn((isEditMode && initialData?.isSettled) && "text-muted-foreground")}>시작 날짜 및 시간 <span className="text-destructive">*</span></Label>
-        <Popover open={startDateOpen} onOpenChange={setStartDateOpen}>
-          <PopoverTrigger asChild>
-            <Button
-              variant="outline"
-              className={cn(
-                'w-full justify-start text-left font-normal',
-                !dateTimeValue && 'text-muted-foreground',
-                (isEditMode && initialData?.isSettled) && "bg-muted/50 cursor-not-allowed"
-              )}
-              disabled={isPending || (isEditMode && initialData?.isSettled)}
-            >
-              <CalendarIcon className="mr-2 h-4 w-4" />
-              {dateTimeValue instanceof Date && !isNaN(dateTimeValue.getTime())
-                ? format(dateTimeValue, 'PPP HH:mm', { locale: ko })
-                : <span>날짜 및 시간 선택</span>}
-            </Button>
-          </PopoverTrigger>
-          <PopoverContent className="w-auto p-0">
-            <Calendar
-              mode="single"
-              selected={dateTimeValue}
-              onSelect={(date) => {
-                if (date) {
-                  const currentTime = dateTimeValue || new Date();
-                  const newDateTime = new Date(date);
-                  newDateTime.setHours(currentTime.getHours(), currentTime.getMinutes(), 0, 0);
-                  form.setValue('dateTime', newDateTime, { shouldValidate: true });
-                }
-              }}
-              initialFocus
-              disabled={isPending || (isEditMode && initialData?.isSettled)}
-            />
-            <div className="p-3 border-t border-border space-y-2">
-              <Label htmlFor="startTime">시작 시간</Label>
-              <Input
-                type="time"
-                id="startTime"
-                defaultValue={dateTimeValue ? format(dateTimeValue, "HH:mm") : "12:00"}
-                onChange={(e) => {
-                  const newTime = e.target.value;
-                  const currentDateTime = dateTimeValue || new Date();
-                  const [hours, minutes] = newTime.split(':').map(Number);
-                  const newDate = new Date(currentDateTime);
-                  newDate.setHours(hours, minutes, 0, 0);
-                  form.setValue('dateTime', newDate, { shouldValidate: true });
-                }}
-                className="w-full"
-                disabled={isPending || (isEditMode && initialData?.isSettled)}
-              />
-              <Button size="sm" onClick={() => setStartDateOpen(false)} className="w-full" type="button" disabled={(isEditMode && initialData?.isSettled)}>확인</Button>
-            </div>
-          </PopoverContent>
-        </Popover>
+        <SelectDate
+          isEditMode={isEditMode}
+          isPending={isPending}
+          initialData={initialData}
+          timeValue={startTimeValue}
+          varName='dateTime'
+          titleNode={<>시작 날짜 및 시간 <span className="text-destructive">*</span></>}
+          openState={startDateOpen}
+          openStateFunc={setStartDateOpen}
+          onDateChanged={date => form.setValue('dateTime', date!, { shouldValidate: true })}
+        />
         {form.formState.errors.dateTime && <p className="text-sm text-destructive mt-1">{form.formState.errors.dateTime.message}</p>}
       </div>
 
       <div>
-        <Label htmlFor="endTime" className={cn((isEditMode && initialData?.isSettled) && "text-muted-foreground")}>종료 날짜 및 시간 (선택)</Label>
-        <Popover open={endDateOpen} onOpenChange={setEndDateOpen}>
-          <PopoverTrigger asChild>
-            <Button
-              variant="outline"
-              className={cn(
-                'w-full justify-start text-left font-normal',
-                !endTimeValue && 'text-muted-foreground',
-                (isEditMode && initialData?.isSettled) && "bg-muted/50 cursor-not-allowed"
-              )}
-              disabled={isPending || (isEditMode && initialData?.isSettled)}
-            >
-              <CalendarIcon className="mr-2 h-4 w-4" />
-              {
-                (() => {
-                  const val = endTimeValue;
-                  return val instanceof Date && !isNaN(val.getTime())
-                    ? format(val, 'PPP HH:mm', { locale: ko })
-                    : <span>날짜 및 시간 선택</span>;
-                })()
-              }
-            </Button>
-          </PopoverTrigger>
-          <PopoverContent className="w-auto p-0">
-            <Calendar
-              mode="single"
-              selected={endTimeValue}
-              onSelect={(date) => {
-                if (date) {
-                  const currentTime = endTimeValue || dateTimeValue || new Date();
-                  const newDateTime = new Date(date);
-                  newDateTime.setHours(currentTime.getHours(), currentTime.getMinutes(), 0, 0);
-                  form.setValue('endTime', newDateTime, { shouldValidate: true });
-                } else {
-                  form.setValue('endTime', undefined, { shouldValidate: true });
-                }
-              }}
-              initialFocus
-              disabled={isPending || (isEditMode && initialData?.isSettled)}
-              fromDate={dateTimeValue ? new Date(dateTimeValue) : undefined}
-            />
-            <div className="p-3 border-t border-border space-y-2">
-              <Label htmlFor="endTimeInput">종료 시간</Label>
-              <Input
-                type="time"
-                id="endTimeInput"
-                defaultValue={endTimeValue ? format(endTimeValue, "HH:mm") : (dateTimeValue ? format(dateTimeValue, "HH:mm") : "12:00")}
-                onChange={(e) => {
-                  const newTime = e.target.value;
-                  const baseDate = form.watch('endTime') || form.watch('dateTime') || new Date();
-                  const [hours, minutes] = newTime.split(':').map(Number);
-                  const newDate = new Date(baseDate);
-                  newDate.setHours(hours, minutes, 0, 0);
-                  form.setValue('endTime', newDate, { shouldValidate: true });
-                }}
-                className="w-full"
-                disabled={isPending || (isEditMode && initialData?.isSettled)}
-              />
-              <Button size="sm" onClick={() => setEndDateOpen(false)} className="w-full" type="button" disabled={(isEditMode && initialData?.isSettled)}>확인</Button>
-            </div>
-          </PopoverContent>
-        </Popover>
-        {form.formState.errors.endTime && <p className="text-sm text-destructive mt-1">{form.formState.errors.endTime.message}</p>}
+        <SelectDate
+          isEditMode={isEditMode}
+          isPending={isPending}
+          initialData={initialData}
+          timeValue={endTimeValue}
+          checkStartTimeValue={startTimeValue}
+          varName='endTime'
+          titleNode='종료 날짜 및 시간 (선택)'
+          openState={endDateOpen}
+          openStateFunc={setEndDateOpen}
+          onDateChanged={date => form.setValue('endTime', date, { shouldValidate: true })}
+        />
+        {form.formState.errors.dateTime && <p className="text-sm text-destructive mt-1">{form.formState.errors.dateTime.message}</p>}
       </div>
 
       <div className="space-y-2">
@@ -931,13 +968,8 @@ export function CreateMeetingForm({
                 <Button
                   type="button"
                   variant="outline"
-                  onClick={() => {
-                    if (currentTempParticipantName.trim() !== '') {
-                      setTemporaryParticipants([...temporaryParticipants, { name: currentTempParticipantName.trim() }]);
-                      setCurrentTempParticipantName('');
-                    }
-                  }}
-                  disabled={isPending || (isEditMode && initialData?.isSettled)}
+                  onClick={() => handleAddTemporaryParticipant(currentTempParticipantName)}
+                  disabled={isPending || initialData?.isSettled}
                 >
                   추가
                 </Button>
@@ -951,10 +983,8 @@ export function CreateMeetingForm({
                       type="button"
                       variant="ghost"
                       size="sm"
-                      onClick={() => {
-                        setTemporaryParticipants(temporaryParticipants.filter((_, i) => i !== index));
-                      }}
-                      disabled={isPending || (isEditMode && initialData?.isSettled)}
+                      onClick={() => handleRemoveTemporaryParticipant(p.name)}
+                      disabled={isPending || initialData?.isSettled || (isEditMode && isAddedTempParticipantsOnEdit(p.name) != true)}
                     >
                       삭제
                     </Button>

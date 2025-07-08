@@ -38,7 +38,7 @@ export function PaymentSummary({ meeting, expenses, participants, allFriends }: 
   const effectiveParticipants = useMemo<Friend[]>(() => {
     if (meeting.isTemporary && Array.isArray(meeting.temporaryParticipants) && meeting.temporaryParticipants.length > 0) {
       return meeting.temporaryParticipants.map((p, idx) => ({
-        id: `temp_${idx}_${p.name}`, 
+        id: p.name, 
         name: p.name,
         description: '', 
         groupId: meeting.groupId || 'temp_group', 

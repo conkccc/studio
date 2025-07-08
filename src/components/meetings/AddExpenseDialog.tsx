@@ -74,6 +74,7 @@ export function AddExpenseDialog({ meetingId, participants, roomCreatorName, onE
   const [isPending, startTransition] = useTransition();
   const { toast } = useToast();
   const [payerSearchOpen, setPayerSearchOpen] = useState(false);
+  const { currentUser } = useAuth();
 
   var roomCreatorId = '';
   const foundCreator = participants.find(p => roomCreatorName && roomCreatorName.includes(p.name));
@@ -123,7 +124,7 @@ export function AddExpenseDialog({ meetingId, participants, roomCreatorName, onE
         ...(data.splitType === 'equally' && { splitAmongIds: data.splitAmongIds }),
         ...(data.splitType === 'custom' && { customSplits: data.customSplits }),
       };
-      const result = await createExpenseAction(payload, roomCreatorName || null);
+      const result = await createExpenseAction(payload, currentUser?.uid || null);
       if (result.success && result.expense) {
         toast({ title: '성공', description: '새로운 지출 항목이 추가되었습니다.' });
         onExpenseAdded(result.expense);

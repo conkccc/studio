@@ -370,7 +370,6 @@ export const addMeeting = async (
   }
 
   if (dataToStore.isTemporary) {
-    dataToStore.participantIds = meetingPayloadFromAction.temporaryParticipants || [];
     dataToStore.useReserveFund = false;
     const fieldsToRemoveForTemp = ['partialReserveFundAmount', 'nonReserveFundParticipants'];
     fieldsToRemoveForTemp.forEach(f => delete dataToStore[f]);

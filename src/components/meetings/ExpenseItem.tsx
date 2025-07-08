@@ -6,7 +6,7 @@ import { Timestamp } from 'firebase/firestore';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/hooks/use-toast';
 import { deleteExpenseAction } from '@/lib/actions';
-import { UserCircle, Users, Edit3, Trash2, Loader2 } from 'lucide-react';
+import { UserCircle, Users, Edit3, Trash2, Loader2, PlaySquare } from 'lucide-react';
 import { format, isValid } from 'date-fns';
 import { ko } from 'date-fns/locale';
 import {
@@ -31,6 +31,7 @@ interface ExpenseItemProps {
   participants: Friend[]; // 현재 모임에 참여한 친구 목록 (분배 대상 등)
   onExpenseUpdated: (updatedExpense: Expense) => void;
   onExpenseDeleted: (deletedExpenseId: string) => void;
+  isCreator: boolean;
   isMeetingSettled: boolean;
   isTemporaryMeeting?: boolean;
 }
@@ -42,15 +43,19 @@ export function ExpenseItem({
   participants,
   onExpenseUpdated, 
   onExpenseDeleted,
+  isCreator,
   isMeetingSettled,
   isTemporaryMeeting,
 }: ExpenseItemProps) {
   const { currentUser, isAdmin } = useAuth();
-
-  const payer = allFriends.find(f => f.id === expense.paidById);
-
   const { toast } = useToast();
-  const [isTransitioning, startTransition] = useTransition(); // isDeleting, isEditPending 대신 사용
+  const [isTransitioning, startTransition] = useTransition();
+
+  const payer = isTemporaryMeeting
+    ? participants.find(p => p.id === expense.paidById)
+    : allFriends.find(f => f.id === expense.paidById);
+
+  const canModify = isAdmin || isCreator;
 
   const getSplitDetails = (): string => {
     if (expense.splitType === 'equally') {
@@ -95,7 +100,6 @@ export function ExpenseItem({
           if (isTemporaryMeeting) {
             friend = participants.find(p => p.id === customSplit.friendId);
           }
-          // Fallback for non-temp or if not found for temp
           if (!friend) {
             friend = allFriends.find(f => f.id === customSplit.friendId);
           }
@@ -119,8 +123,7 @@ export function ExpenseItem({
       toast({ title: '오류', description: '정산이 완료된 모임의 지출은 관리자만 삭제할 수 있습니다.', variant: 'destructive' });
       return;
     }
-    // 그 외의 경우, 관리자만 삭제 가능 (canManage 제거 후 isAdmin으로 통일)
-    if (!isAdmin) {
+    if (!canModify) {
       toast({ title: '권한 없음', description: '이 지출 항목을 삭제할 권한이 없습니다.', variant: 'destructive' });
       return;
     }
@@ -159,25 +162,24 @@ export function ExpenseItem({
           <span>분배: {getSplitDetails()}</span>
         </div>
       </div>
-      {(isAdmin) && (
+      {(canModify) && (
         <div className="mt-3 flex justify-end space-x-2">
           <EditExpenseDialog 
             expenseToEdit={expense}
             meetingId={meetingId}
-            participants={participants} // EditExpenseDialog에는 모임 참여자 목록 전달
-            // allFriends={allFriends} // EditExpenseDialogProps에서 allFriends가 제거되었으므로 이 prop 전달 제거
+            participants={participants}
             onExpenseUpdated={onExpenseUpdated}
-            canManage={isAdmin} // 수정 권한은 관리자에게만 부여 (또는 추가 로직)
+            canManage={canModify}
             isMeetingSettled={isMeetingSettled}
             triggerButton={
-              <Button variant="ghost" size="sm" className="text-xs" disabled={isTransitioning || (isMeetingSettled && !isAdmin)}>
+              <Button variant="ghost" size="sm" className="text-xs" disabled={isTransitioning || (isMeetingSettled && !canModify)}>
                 <Edit3 className="mr-1 h-3 w-3" /> 수정
               </Button>
             }
           />
           <AlertDialog>
             <AlertDialogTrigger asChild>
-              <Button variant="ghost" size="sm" className="text-xs text-destructive hover:text-destructive" disabled={isTransitioning || (isMeetingSettled && !isAdmin)}>
+              <Button variant="ghost" size="sm" className="text-xs text-destructive hover:text-destructive" disabled={isTransitioning || (isMeetingSettled && !canModify)}>
                 <Trash2 className="mr-1 h-3 w-3" /> 삭제
               </Button>
             </AlertDialogTrigger>

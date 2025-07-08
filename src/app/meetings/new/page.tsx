@@ -20,8 +20,6 @@ export default function NewMeetingPage() {
   const [isLoadingInitialData, setIsLoadingInitialData] = useState(true);
   const [isLoadingParticipants, setIsLoadingParticipants] = useState(false);
 
-  const [isTemporaryMeeting, setIsTemporaryMeeting] = useState(false);
-
   useEffect(() => {
     if (authLoading || !appUser?.id) {
       setIsLoadingInitialData(false);
@@ -33,11 +31,7 @@ export default function NewMeetingPage() {
       try {
         const groupResponse = await getFriendGroupsForUserAction(appUser.id);
         if (groupResponse.success && groupResponse.groups) {
-          if (appUser.role === 'admin') {
-            setAllOwnedGroups(groupResponse.groups);
-          } else {
-            setAllOwnedGroups(groupResponse.groups.filter(g => g.ownerUserId === appUser.id));
-          }
+          setAllOwnedGroups(groupResponse.groups);
         } else {
           setAllOwnedGroups([]);
           toast({ title: "오류", description: groupResponse.error || "모임 생성을 위한 그룹 목록을 가져오지 못했습니다.", variant: "destructive"});

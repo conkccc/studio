@@ -369,21 +369,19 @@ export async function createMeetingAction(
     type AddMeetingPayload = Parameters<typeof dbAddMeeting>[0];
 
     let meetingDataToSave: AddMeetingPayload = {
-      ...meetingDataToSaveBase, // 기본 및 필수 값 포함 (creatorId 등)
-      // isTemporary 값에 따라 필드 조정이 아래에서 이루어집니다.
+      ...meetingDataToSaveBase, 
     };
 
     if (meetingDataToSave.isTemporary) {
+      delete meetingDataToSave.participantIds;
+      delete meetingDataToSave.useReserveFund;
+      delete meetingDataToSave.partialReserveFundAmount;
+      delete meetingDataToSave.nonReserveFundParticipants;
+      
       meetingDataToSave.temporaryParticipants = temporaryParticipants || [];
       if (totalFee !== undefined) meetingDataToSave.totalFee = totalFee;
       if (feePerPerson !== undefined) meetingDataToSave.feePerPerson = feePerPerson;
-
-      meetingDataToSave.participantIds = [];
-      meetingDataToSave.useReserveFund = false;
-      delete (meetingDataToSave as Partial<AddMeetingPayload>).partialReserveFundAmount;
-      delete (meetingDataToSave as Partial<AddMeetingPayload>).nonReserveFundParticipants;
     } else {
-      // 일반 모임
       if (meetingDataToSave.useReserveFund) {
         meetingDataToSave.partialReserveFundAmount = (typeof partialReserveFundAmount === 'number' && !isNaN(partialReserveFundAmount))
           ? partialReserveFundAmount
@@ -485,11 +483,15 @@ export async function updateMeetingAction(
     if (payload.hasOwnProperty('locationName')) {
       meetingDataToUpdate.locationName = locationName || '';
       if (!payload.hasOwnProperty('locationCoordinates') && !meetingDataToUpdate.locationName) {
-        meetingDataToUpdate.locationCoordinates = undefined;
+        delete meetingDataToUpdate.locationCoordinates;
+        //meetingDataToUpdate.locationCoordinates = undefined;
       }
     }
     if (payload.hasOwnProperty('locationCoordinates')) {
+      if (locationCoordinates)
         meetingDataToUpdate.locationCoordinates = locationCoordinates;
+      else
+        delete meetingDataToUpdate.locationCoordinates;
     }
 
     if (meetingToUpdate.isTemporary) {
