@@ -44,6 +44,7 @@ const navItems: NavItem[] = [
   { href: '/friends', label: '친구 목록', icon: UsersRound, allowedRoles: ['admin', 'user', 'viewer'] },
   { href: '/meetings', label: '모임 목록', icon: CalendarCheck, allowedRoles: ['admin', 'user', 'viewer'] },
   { href: '/reserve-fund/group', label: '회비 관리', icon: PiggyBank, allowedRoles: ['admin', 'user', 'viewer'] },
+  { href: '/meeting-prep', label: '모임 준비', icon: CalendarCheck, allowedRoles: ['admin', 'user'] },
   { href: '/users', label: '사용자 관리', icon: Briefcase, allowedRoles: ['admin'] },
 ];
 

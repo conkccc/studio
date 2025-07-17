@@ -69,6 +69,33 @@ export type Meeting = {
   expenses?: Expense[]; // Added to track expenses within a meeting
 };
 
+export type MeetingPrep = {
+  id: string;
+  title: string;
+  memo?: string;
+  creatorId: string; // User ID
+  friendGroupId: string; // The ID of the friend group this prep is for
+  participantFriendIds: string[]; // IDs of friends participating in this meeting prep
+  participantFriends?: Friend[]; // Populated client-side or in actions
+  selectedMonths: string[]; // e.g., "2025-07", "2025-08"
+  createdAt: Date;
+  isDeleted?: boolean; // for soft delete
+  shareToken?: string | null; // for public sharing
+  shareExpiryDate?: Date | null; // for public sharing
+};
+
+export type ParticipantAvailability = {
+  id: string; // Unique ID for each submission (e.g., meetingPrepId_selectedFriendId)
+  meetingPrepId: string;
+  selectedFriendId: string; // The ID of the friend who is submitting their availability
+  password?: string; // For modification, no encryption
+  storedDates: string[]; // Either availableDates or unavailableDates
+  storedAsAvailable: boolean; // True if storedDates are available dates, false if unavailable dates
+  submittedAt: Date;
+  availableDates?: string[]; // Reconstructed from storedDates for client-side use
+  unavailableDates?: string[]; // Reconstructed from storedDates for client-side use
+};
+
 export type ReserveFundTransaction = {
   id: string;
   type: "meeting_deduction" | "balance_update";

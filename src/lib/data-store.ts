@@ -1,4 +1,4 @@
-import type { User, Friend, Meeting, Expense, ReserveFundTransaction, FriendGroup } from './types';
+import type { User, Friend, Meeting, Expense, ReserveFundTransaction, FriendGroup, MeetingPrep, ParticipantAvailability } from './types';
 import {
   collection,
   doc,
@@ -45,11 +45,13 @@ export const EXPENSES_SUBCOLLECTION = 'expenses';
 export const RESERVE_FUND_CONFIG_COLLECTION = 'reserveFundConfig';
 export const RESERVE_FUND_BALANCE_DOC_ID = 'balance';
 export const RESERVE_FUND_TRANSACTIONS_COLLECTION = 'reserveFundTransactions';
+export const MEETING_PREPS_COLLECTION = 'meetingPreps';
+export const PARTICIPANT_AVAILABILITIES_SUBCOLLECTION = 'participantAvailabilities';
 
 // Firestore Timestamps를 JS Date 객체로 변환하는 헬퍼 함수
 const convertTimestampsToDates = (data: DocumentData): DocumentData => {
   const processedData: Record<string, any> = { ...data };
-  const dateFields: string[] = ['createdAt', 'dateTime', 'endTime', 'date', 'shareExpiryDate'];
+  const dateFields: string[] = ['createdAt', 'dateTime', 'endTime', 'date', 'shareExpiryDate', 'submittedAt'];
 
   for (const field of dateFields) {
     if (processedData.hasOwnProperty(field) && processedData[field] instanceof Timestamp) {
@@ -191,6 +193,41 @@ export const getFriendsByGroup = async (groupId: string): Promise<Friend[]> => {
     console.error('getFriendsByGroup 오류:', err);
     throw err; // 오류를 다시 throw하여 호출 측에서 처리할 수 있도록 함
   }
+};
+
+export const dbGetFriendById = async (friendId: string): Promise<Friend | undefined> => {
+  if (!friendId) return undefined;
+  const friendDocRef = doc(db, FRIENDS_COLLECTION, friendId);
+  const snapshot = await getDoc(friendDocRef);
+  return dataFromSnapshot<Friend>(snapshot);
+};
+
+export const dbGetFriendsByUserFriendGroupIds = async (friendGroupIds: string[]): Promise<Friend[]> => {
+  if (!friendGroupIds || friendGroupIds.length === 0) return [];
+
+  const friendsCollectionRef = collection(db, FRIENDS_COLLECTION);
+  const allFriends: Friend[] = [];
+  const friendIdsProcessed = new Set<string>();
+
+  const MAX_IN_QUERIES = 30;
+  const chunks = [];
+  for (let i = 0; i < friendGroupIds.length; i += MAX_IN_QUERIES) {
+    chunks.push(friendGroupIds.slice(i, i + MAX_IN_QUERIES));
+  }
+
+  for (const chunk of chunks) {
+    if (chunk.length > 0) {
+      const q = query(friendsCollectionRef, where('groupId', 'in', chunk));
+      const snapshot = await getDocs(q);
+      arrayFromSnapshot<Friend>(snapshot).forEach(friend => {
+        if (!friendIdsProcessed.has(friend.id)) {
+          allFriends.push(friend);
+          friendIdsProcessed.add(friend.id);
+        }
+      });
+    }
+  }
+  return allFriends.sort((a, b) => a.name.localeCompare(b.name));
 };
 
 // --- 모임 관련 함수 ---
@@ -744,4 +781,169 @@ export const dbGetAllFriendGroups = async (): Promise<FriendGroup[]> => {
   const q = query(groupsCollectionRef, orderBy('name', 'asc')); // 이름순으로 정렬
   const snapshot = await getDocs(q);
   return arrayFromSnapshot<FriendGroup>(snapshot);
+};
+
+// --- 모임 준비 관련 함수 ---
+export const dbAddMeetingPrep = async (meetingPrepData: Omit<MeetingPrep, 'id' | 'createdAt' | 'isDeleted'>): Promise<MeetingPrep> => {
+  const newMeetingPrepData = {
+    ...meetingPrepData,
+    createdAt: new Date(),
+    isDeleted: false,
+  };
+  const meetingPrepsCollectionRef = collection(db, MEETING_PREPS_COLLECTION);
+  const docRef = await addDoc(meetingPrepsCollectionRef, {
+    ...newMeetingPrepData,
+    createdAt: Timestamp.fromDate(newMeetingPrepData.createdAt),
+  });
+  return { ...newMeetingPrepData, id: docRef.id };
+};
+
+export const dbGetMeetingPrepById = async (id: string): Promise<MeetingPrep | undefined> => {
+  if (!id) return undefined;
+  const meetingPrepDocRef = doc(db, MEETING_PREPS_COLLECTION, id);
+  const snapshot = await getDoc(meetingPrepDocRef);
+  return dataFromSnapshot<MeetingPrep>(snapshot);
+};
+
+export const dbGetMeetingPrepsByUser = async (userId: string, friendGroupIds: string[]): Promise<MeetingPrep[]> => {
+  const meetingPrepsCollectionRef = collection(db, MEETING_PREPS_COLLECTION);
+  const qConstraints: QueryConstraint[] = [where('isDeleted', '==', false)];
+
+  // User is creator or a participant
+  const creatorQuery = query(meetingPrepsCollectionRef, where('creatorId', '==', userId), ...qConstraints);
+  const creatorSnapshot = await getDocs(creatorQuery);
+  const createdMeetingPreps = arrayFromSnapshot<MeetingPrep>(creatorSnapshot);
+
+  let participantMeetingPreps: MeetingPrep[] = [];
+  if (friendGroupIds && friendGroupIds.length > 0) {
+    const friendsInUserGroups = await dbGetFriendsByUserFriendGroupIds(friendGroupIds);
+    const friendIds = friendsInUserGroups.map(f => f.id);
+
+    if (friendIds.length > 0) {
+      const MAX_IN_QUERIES = 30;
+      const chunks = [];
+      for (let i = 0; i < friendIds.length; i += MAX_IN_QUERIES) {
+        chunks.push(friendIds.slice(i, i + MAX_IN_QUERIES));
+      }
+      for (const chunk of chunks) {
+        if (chunk.length > 0) {
+          const participantQuery = query(meetingPrepsCollectionRef, where('participantFriendIds', 'array-contains-any', chunk), ...qConstraints);
+          const participantSnapshot = await getDocs(participantQuery);
+          participantMeetingPreps = participantMeetingPreps.concat(arrayFromSnapshot<MeetingPrep>(participantSnapshot));
+        }
+      }
+    }
+  }
+
+  const combinedMeetingPreps = [...createdMeetingPreps, ...participantMeetingPreps];
+  const uniqueMeetingPreps = Array.from(new Map(combinedMeetingPreps.map(item => [item['id'], item])).values());
+
+  return uniqueMeetingPreps.sort((a, b) => (b.createdAt?.getTime() || 0) - (a.createdAt?.getTime() || 0));
+};
+
+export const dbGetAllMeetingPreps = async (): Promise<MeetingPrep[]> => {
+  const meetingPrepsCollectionRef = collection(db, MEETING_PREPS_COLLECTION);
+  const q = query(meetingPrepsCollectionRef, where('isDeleted', '==', false), orderBy('createdAt', 'desc'));
+  const snapshot = await getDocs(q);
+  return arrayFromSnapshot<MeetingPrep>(snapshot);
+};
+
+export const dbUpdateMeetingPrep = async (id: string, updates: Partial<Omit<MeetingPrep, 'id' | 'createdAt'>>): Promise<MeetingPrep | null> => {
+  const meetingPrepDocRef = doc(db, MEETING_PREPS_COLLECTION, id);
+  const updateData: DocumentData = { ...updates };
+
+  if (updates.hasOwnProperty('shareExpiryDate')) {
+    updateData.shareExpiryDate = updates.shareExpiryDate ? Timestamp.fromDate(new Date(updates.shareExpiryDate)) : null;
+  }
+  if (updates.hasOwnProperty('shareToken')) {
+    updateData.shareToken = updates.shareToken === undefined ? null : updates.shareToken;
+  }
+
+  await updateDoc(meetingPrepDocRef, updateData);
+  const updatedSnapshot = await getDoc(meetingPrepDocRef);
+  return dataFromSnapshot<MeetingPrep>(updatedSnapshot) || null;
+};
+
+export const dbDeleteMeetingPrep = async (id: string): Promise<void> => {
+  const meetingPrepDocRef = doc(db, MEETING_PREPS_COLLECTION, id);
+  
+  // Hard delete the document itself
+  await deleteDoc(meetingPrepDocRef);
+
+  // Also, delete all participant availabilities for this meeting prep
+  const availabilitiesCollectionRef = collection(db, MEETING_PREPS_COLLECTION, id, PARTICIPANT_AVAILABILITIES_SUBCOLLECTION);
+  const snapshot = await getDocs(availabilitiesCollectionRef);
+  const batch = writeBatch(db);
+  snapshot.docs.forEach(doc => batch.delete(doc.ref));
+  await batch.commit();
+};
+
+export const dbGetMeetingPrepByShareToken = async (token: string): Promise<MeetingPrep | undefined> => {
+  if (!token) return undefined;
+  const meetingPrepsCollectionRef = collection(db, MEETING_PREPS_COLLECTION);
+  const q = query(meetingPrepsCollectionRef, where('shareToken', '==', token), where('isDeleted', '==', false));
+  const snapshot = await getDocs(q);
+
+  if (snapshot.empty) return undefined;
+
+  const meetingPrepDoc = snapshot.docs[0];
+  const meetingPrep = dataFromSnapshot<MeetingPrep>(meetingPrepDoc);
+
+  if (meetingPrep && meetingPrep.shareExpiryDate) {
+    if (meetingPrep.shareExpiryDate < new Date()) {
+      return undefined; // 토큰 만료
+    }
+  }
+  return meetingPrep;
+};
+
+// --- 참석 가능 여부 관련 함수 ---
+export const dbAddParticipantAvailability = async (availabilityData: Omit<ParticipantAvailability, 'id' | 'submittedAt'>): Promise<ParticipantAvailability> => {
+  const newAvailabilityData = {
+    ...availabilityData,
+    submittedAt: new Date(),
+  };
+  const availabilitiesCollectionRef = collection(db, MEETING_PREPS_COLLECTION, availabilityData.meetingPrepId, PARTICIPANT_AVAILABILITIES_SUBCOLLECTION);
+  const docRef = await addDoc(availabilitiesCollectionRef, {
+    ...newAvailabilityData,
+    submittedAt: Timestamp.fromDate(newAvailabilityData.submittedAt),
+    ...(newAvailabilityData.password && { password: newAvailabilityData.password }), // Add password if present
+  });
+  return { ...newAvailabilityData, id: docRef.id };
+};
+
+export const dbGetParticipantAvailability = async (meetingPrepId: string, selectedFriendId: string): Promise<ParticipantAvailability | undefined> => {
+  if (!meetingPrepId || !selectedFriendId) return undefined;
+  const availabilitiesCollectionRef = collection(db, MEETING_PREPS_COLLECTION, meetingPrepId, PARTICIPANT_AVAILABILITIES_SUBCOLLECTION);
+  const q = query(availabilitiesCollectionRef, where('selectedFriendId', '==', selectedFriendId));
+  const snapshot = await getDocs(q);
+  if (snapshot.empty) return undefined;
+  return dataFromSnapshot<ParticipantAvailability>(snapshot.docs[0]);
+};
+
+export const dbUpdateParticipantAvailability = async (meetingPrepId: string, selectedFriendId: string, updates: Partial<Omit<ParticipantAvailability, 'id' | 'submittedAt' | 'meetingPrepId' | 'selectedFriendId'>>): Promise<ParticipantAvailability | null> => {
+  if (!meetingPrepId || !selectedFriendId) return null;
+  const availabilitiesCollectionRef = collection(db, MEETING_PREPS_COLLECTION, meetingPrepId, PARTICIPANT_AVAILABILITIES_SUBCOLLECTION);
+  const q = query(availabilitiesCollectionRef, where('selectedFriendId', '==', selectedFriendId));
+  const snapshot = await getDocs(q);
+  if (snapshot.empty) return null;
+
+  const docRef = snapshot.docs[0].ref;
+  const updateData: DocumentData = { ...updates };
+
+  if (updates.hasOwnProperty('password')) {
+    updateData.password = updates.password;
+  }
+
+  await updateDoc(docRef, updateData);
+  const updatedSnapshot = await getDoc(docRef);
+  return dataFromSnapshot<ParticipantAvailability>(updatedSnapshot) || null;
+};
+
+export const dbGetAllParticipantAvailabilities = async (meetingPrepId: string): Promise<ParticipantAvailability[]> => {
+  if (!meetingPrepId) return [];
+  const availabilitiesCollectionRef = collection(db, MEETING_PREPS_COLLECTION, meetingPrepId, PARTICIPANT_AVAILABILITIES_SUBCOLLECTION);
+  const q = query(availabilitiesCollectionRef, orderBy('submittedAt', 'asc'));
+  const snapshot = await getDocs(q);
+  return arrayFromSnapshot<ParticipantAvailability>(snapshot);
 };
