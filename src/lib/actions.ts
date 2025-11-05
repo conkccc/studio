@@ -1198,10 +1198,18 @@ export async function submitParticipantAvailabilityAction(
       }
       const user = userResult.user;
 
-      // Check if the selectedFriendId belongs to a group assigned to the user
+      // Check if the selectedFriendId belongs to a group assigned to the user (unless user is admin)
       const friend = await dbGetFriendById(selectedFriendId);
-      if (!friend || !user.friendGroupIds?.includes(friend.groupId)) {
+      if (!friend) {
+        return { success: false, error: "친구를 찾을 수 없습니다." };
+      }
+      // Admins can submit availability for any friend, regardless of group assignment
+      if (user.role !== 'admin' && !user.friendGroupIds?.includes(friend.groupId)) {
         return { success: false, error: "선택된 친구에 대한 참석 가능 여부를 제출할 권한이 없습니다." };
+      }
+      // Require password for logged-in users as well
+      if (!password) {
+        return { success: false, error: "수정을 위해 비밀번호를 입력해주세요." };
       }
     } else { // Public submission via share link
       if (!meetingPrep.shareToken || !meetingPrep.shareExpiryDate || meetingPrep.shareExpiryDate < new Date()) {
@@ -1239,16 +1247,13 @@ export async function submitParticipantAvailabilityAction(
     const existingAvailability = await dbGetParticipantAvailability(meetingPrepId, selectedFriendId);
 
     if (existingAvailability) {
-      // If existing, and it's a public submission (not logged in user)
-      if (!currentUserId) {
-        // If existing availability has no password, or provided password matches existing one
-        if (existingAvailability.password === undefined || existingAvailability.password === null || existingAvailability.password === password) {
-          // Proceed with update. The `dataToStore` already contains the new password if provided.
-        } else {
-          return { success: false, error: "비밀번호가 일치하지 않습니다." };
-        }
+      // Check password when updating existing availability
+      // If existing availability has no password, allow update with any password (first time setting password)
+      // Otherwise, password must match
+      if (existingAvailability.password !== undefined && existingAvailability.password !== null && existingAvailability.password !== password) {
+        return { success: false, error: "비밀번호가 일치하지 않습니다." };
       }
-      // If currentUserId is present, no password check is needed, proceed with update.
+      // Proceed with update. The `dataToStore` already contains the new password if provided.
       const updatedAvailability = await dbUpdateParticipantAvailability(meetingPrepId, selectedFriendId, dataToStore);
       revalidatePath(`/meeting-prep/${meetingPrepId}`);
       if (meetingPrep.shareToken) {

@@ -229,7 +229,7 @@ export function MeetingPrepDetailsClient({ meetingPrepId, shareToken }: MeetingP
       toast({ title: "친구 선택 필요", description: "날짜를 제출할 친구를 선택해주세요.", variant: "destructive" });
       return;
     }
-    if (!password && isPublicShare) {
+    if (!password) {
       toast({ title: "비밀번호 입력 필요", description: "수정을 위해 비밀번호를 입력해주세요.", variant: "destructive" });
       return;
     }
@@ -253,7 +253,7 @@ export function MeetingPrepDetailsClient({ meetingPrepId, shareToken }: MeetingP
       const result = await submitParticipantAvailabilityAction({
         meetingPrepId,
         selectedFriendId,
-        password: isPublicShare ? password : undefined,
+        password: password,
         availableDates,
         unavailableDates,
       }, currentUser?.uid);
@@ -588,8 +588,7 @@ export function MeetingPrepDetailsClient({ meetingPrepId, shareToken }: MeetingP
         <CardHeader>
           <CardTitle>참석 가능 날짜 입력</CardTitle>
           <CardDescription>
-            본인의 이름을 선택하고 참석 가능한 날짜를 표시해주세요.
-            {isPublicShare && " (수정 시 사용할 비밀번호를 입력해주세요)"}
+            본인의 이름을 선택하고 참석 가능한 날짜를 표시해주세요. 수정 시 사용할 비밀번호를 입력해주세요.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -609,7 +608,7 @@ export function MeetingPrepDetailsClient({ meetingPrepId, shareToken }: MeetingP
                 </SelectContent>
               </Select>
             </div>
-            {(isPublicShare || (selectedFriendId && allAvailabilities.find(a => a.selectedFriendId === selectedFriendId))) && (
+            {selectedFriendId && (
               <div>
                 <Label htmlFor="password">수정용 비밀번호 (숫자)</Label>
                 <Input
@@ -619,6 +618,7 @@ export function MeetingPrepDetailsClient({ meetingPrepId, shareToken }: MeetingP
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   disabled={isSubmitting}
+                  required
                 />
               </div>
             )}

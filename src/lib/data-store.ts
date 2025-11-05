@@ -904,11 +904,20 @@ export const dbAddParticipantAvailability = async (availabilityData: Omit<Partic
     submittedAt: new Date(),
   };
   const availabilitiesCollectionRef = collection(db, MEETING_PREPS_COLLECTION, availabilityData.meetingPrepId, PARTICIPANT_AVAILABILITIES_SUBCOLLECTION);
-  const docRef = await addDoc(availabilitiesCollectionRef, {
-    ...newAvailabilityData,
+  
+  // Prepare data for Firestore, excluding undefined password
+  const { password, ...dataWithoutPassword } = newAvailabilityData;
+  const firestoreData: DocumentData = {
+    ...dataWithoutPassword,
     submittedAt: Timestamp.fromDate(newAvailabilityData.submittedAt),
-    ...(newAvailabilityData.password && { password: newAvailabilityData.password }), // Add password if present
-  });
+  };
+  
+  // Only include password if it's defined
+  if (password !== undefined && password !== null) {
+    firestoreData.password = password;
+  }
+  
+  const docRef = await addDoc(availabilitiesCollectionRef, firestoreData);
   return { ...newAvailabilityData, id: docRef.id };
 };
 
@@ -929,10 +938,15 @@ export const dbUpdateParticipantAvailability = async (meetingPrepId: string, sel
   if (snapshot.empty) return null;
 
   const docRef = snapshot.docs[0].ref;
-  const updateData: DocumentData = { ...updates };
+  
+  // Prepare update data, excluding undefined password
+  const { password, ...updatesWithoutPassword } = updates;
+  const updateData: DocumentData = { ...updatesWithoutPassword };
 
-  if (updates.hasOwnProperty('password')) {
-    updateData.password = updates.password;
+  // Only include password if it's defined (undefined means don't update password field)
+  // For logged-in users, password is typically undefined and should not be updated
+  if (updates.hasOwnProperty('password') && password !== undefined && password !== null) {
+    updateData.password = password;
   }
 
   await updateDoc(docRef, updateData);
