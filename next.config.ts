@@ -1,6 +1,7 @@
-import type {NextConfig} from 'next';
+import type { NextConfig } from 'next';
 
 const nextConfig: NextConfig = {
+  //allowedDevOrigins: ['127.0.0.1', 'localhost'],
   typescript: {
     // 빌드 시 타입스크립트 오류를 무시하지 않도록 설정 (기본값)
   },
