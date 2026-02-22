@@ -1,14 +1,18 @@
 // 서버 전용 Firebase Admin SDK 초기화
 import { initializeApp, getApps, cert, AppOptions } from 'firebase-admin/app';
 import { getFirestore as getAdminFirestore } from 'firebase-admin/firestore';
+import fs from 'fs';
 
 let adminApp;
-if (!getApps().length) {
+const existingApps = getApps();
+
+if (existingApps.length) {
+  adminApp = existingApps[0];
+} else {
   let credential;
   if (process.env.FIREBASE_SERVICE_ACCOUNT) {
     credential = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
   } else if (process.env.GOOGLE_APPLICATION_CREDENTIALS) {
-    const fs = require('fs');
     credential = JSON.parse(fs.readFileSync(process.env.GOOGLE_APPLICATION_CREDENTIALS, 'utf8'));
   }
 
@@ -28,4 +32,4 @@ if (!getApps().length) {
   // adminApp이 초기화되지 않았으면 adminDb도 정상적으로 작동하지 않을 것임.
 }
 
-export const adminDb = adminApp ? getAdminFirestore() : undefined;
+export const adminDb = adminApp ? getAdminFirestore(adminApp) : undefined;

@@ -24,6 +24,7 @@ import {
   DocumentSnapshot,
   FieldPath,
   QueryConstraint, // QueryConstraint import
+  WriteBatch,
 } from 'firebase/firestore';
 import { db } from './firebase';
 
@@ -31,6 +32,7 @@ import { db } from './firebase';
 let adminDb: import('firebase-admin/firestore').Firestore | undefined = undefined;
 if (typeof window === 'undefined') {
   // 서버에서만 동적 import
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
   adminDb = require('./firebase-admin').adminDb;
 }
 
@@ -50,16 +52,20 @@ export const PARTICIPANT_AVAILABILITIES_SUBCOLLECTION = 'participantAvailabiliti
 
 // Firestore Timestamps를 JS Date 객체로 변환하는 헬퍼 함수
 const convertTimestampsToDates = (data: DocumentData): DocumentData => {
-  const processedData: Record<string, any> = { ...data };
+  const processedData: Record<string, unknown> = { ...data };
   const dateFields: string[] = ['createdAt', 'dateTime', 'endTime', 'date', 'shareExpiryDate', 'submittedAt'];
 
   for (const field of dateFields) {
-    if (processedData.hasOwnProperty(field) && processedData[field] instanceof Timestamp) {
-      processedData[field] = (processedData[field] as Timestamp).toDate();
-    } else if (processedData.hasOwnProperty(field) && processedData[field] === null) {
+    if (!Object.prototype.hasOwnProperty.call(processedData, field)) {
+      continue;
+    }
+    const value = processedData[field];
+    if (value instanceof Timestamp) {
+      processedData[field] = value.toDate();
+    } else if (value === null) {
       processedData[field] = null;
-    } else if (processedData.hasOwnProperty(field) && typeof processedData[field] === 'string') {
-      const parsedDate = new Date(processedData[field]);
+    } else if (typeof value === 'string') {
+      const parsedDate = new Date(value);
       if (!isNaN(parsedDate.getTime())) {
         processedData[field] = parsedDate;
       }
@@ -209,7 +215,7 @@ export const dbGetFriendsByUserFriendGroupIds = async (friendGroupIds: string[])
   const allFriends: Friend[] = [];
   const friendIdsProcessed = new Set<string>();
 
-  const MAX_IN_QUERIES = 30;
+  const MAX_IN_QUERIES = 10;
   const chunks = [];
   for (let i = 0; i < friendGroupIds.length; i += MAX_IN_QUERIES) {
     chunks.push(friendGroupIds.slice(i, i + MAX_IN_QUERIES));
@@ -254,25 +260,44 @@ export const getMeetings = async ({
 }: GetMeetingsParams = {}): Promise<GetMeetingsResult> => {
   const meetingsCollectionRef = collection(db, MEETINGS_COLLECTION);
 
-  let yearFilterForAvailableYears: QueryConstraint[] = [];
-  if (year) {
-    const startOfYear = Timestamp.fromDate(new Date(year, 0, 1));
-    const endOfYear = Timestamp.fromDate(new Date(year + 1, 0, 1));
-    yearFilterForAvailableYears.push(where('dateTime', '>=', startOfYear));
-    yearFilterForAvailableYears.push(where('dateTime', '<', endOfYear));
-  }
-  const availableYearsQuery = query(meetingsCollectionRef, ...yearFilterForAvailableYears);
-  const availableYearsSnap = await getDocs(availableYearsQuery);
   const yearsSet = new Set<number>();
-  availableYearsSnap.docs.forEach(docSnap => {
-    const m = dataFromSnapshot<Meeting>(docSnap);
-    if (m && m.dateTime && m.dateTime instanceof Date && !isNaN(m.dateTime.getTime())) {
-      yearsSet.add(m.dateTime.getFullYear());
+  const addYearsFromSnapshot = (snapshot: QuerySnapshot) => {
+    arrayFromSnapshot<Meeting>(snapshot).forEach((m) => {
+      if (m?.dateTime instanceof Date && !isNaN(m.dateTime.getTime())) {
+        yearsSet.add(m.dateTime.getFullYear());
+      }
+    });
+  };
+
+  if (userId || (userFriendGroupIds && userFriendGroupIds.length > 0)) {
+    if (userId) {
+      const userMeetingsSnapshot = await getDocs(query(meetingsCollectionRef, where('creatorId', '==', userId)));
+      addYearsFromSnapshot(userMeetingsSnapshot);
     }
-  });
+    if (userFriendGroupIds && userFriendGroupIds.length > 0) {
+      const validGroupIds = userFriendGroupIds.filter(id => typeof id === 'string' && id.length > 0);
+      if (validGroupIds.length > 0) {
+        const MAX_IN_QUERIES = 10;
+        const chunks = [];
+        for (let i = 0; i < validGroupIds.length; i += MAX_IN_QUERIES) {
+          chunks.push(validGroupIds.slice(i, i + MAX_IN_QUERIES));
+        }
+        for (const chunk of chunks) {
+          if (chunk.length > 0) {
+            const groupMeetingsSnapshot = await getDocs(query(meetingsCollectionRef, where('groupId', 'in', chunk)));
+            addYearsFromSnapshot(groupMeetingsSnapshot);
+          }
+        }
+      }
+    }
+  } else {
+    const availableYearsSnap = await getDocs(meetingsCollectionRef);
+    addYearsFromSnapshot(availableYearsSnap);
+  }
+
   const availableYears = Array.from(yearsSet).sort((a, b) => b - a);
 
-  let dateConstraints: QueryConstraint[] = [];
+  const dateConstraints: QueryConstraint[] = [];
   if (year) {
     const startOfYear = Timestamp.fromDate(new Date(year, 0, 1));
     const endOfYear = Timestamp.fromDate(new Date(year + 1, 0, 1));
@@ -298,7 +323,7 @@ export const getMeetings = async ({
     if (userFriendGroupIds && userFriendGroupIds.length > 0) {
       const validGroupIds = userFriendGroupIds.filter(id => typeof id === 'string' && id.length > 0);
       if (validGroupIds.length > 0) {
-        const MAX_IN_QUERIES = 30;
+        const MAX_IN_QUERIES = 10;
         const chunks = [];
         for (let i = 0; i < validGroupIds.length; i += MAX_IN_QUERIES) {
           chunks.push(validGroupIds.slice(i, i + MAX_IN_QUERIES));
@@ -320,7 +345,7 @@ export const getMeetings = async ({
     fetchedMeetings.sort((a, b) => (b.dateTime?.getTime() || 0) - (a.dateTime?.getTime() || 0));
 
   } else {
-    let qConstraints: QueryConstraint[] = [orderBy('dateTime', 'desc'), ...dateConstraints];
+    const qConstraints: QueryConstraint[] = [orderBy('dateTime', 'desc'), ...dateConstraints];
     let finalQuery = query(meetingsCollectionRef, ...qConstraints);
 
     const countQueryForPagination = query(meetingsCollectionRef, ...dateConstraints);
@@ -329,8 +354,8 @@ export const getMeetings = async ({
 
     if (limitParam && page > 1) {
       const docsToSkip = (page - 1) * limitParam;
-      let skipperQueryConstraints: QueryConstraint[] = [orderBy('dateTime', 'desc'), ...dateConstraints, firestoreLimit(docsToSkip)];
-      let skipperQuery = query(meetingsCollectionRef, ...skipperQueryConstraints);
+      const skipperQueryConstraints: QueryConstraint[] = [orderBy('dateTime', 'desc'), ...dateConstraints, firestoreLimit(docsToSkip)];
+      const skipperQuery = query(meetingsCollectionRef, ...skipperQueryConstraints);
 
       const skipperSnapshot = await getDocs(skipperQuery);
       if (skipperSnapshot.docs.length > 0 && skipperSnapshot.docs.length === docsToSkip) {
@@ -437,27 +462,27 @@ export const updateMeeting = async (id: string, updates: Partial<Omit<Meeting, '
   if (updates.dateTime) {
     updateData.dateTime = Timestamp.fromDate(new Date(updates.dateTime));
   }
-  if (updates.hasOwnProperty('endTime')) {
+  if (Object.prototype.hasOwnProperty.call(updates, 'endTime')) {
     updateData.endTime = updates.endTime ? Timestamp.fromDate(new Date(updates.endTime)) : null;
   }
-  if (updates.hasOwnProperty('partialReserveFundAmount')) {
+  if (Object.prototype.hasOwnProperty.call(updates, 'partialReserveFundAmount')) {
     if (updates.partialReserveFundAmount === undefined) {
       updateData.partialReserveFundAmount = deleteField();
     } else {
       updateData.partialReserveFundAmount = Number(updates.partialReserveFundAmount);
     }
   }
-  if (updates.hasOwnProperty('shareExpiryDate')) {
+  if (Object.prototype.hasOwnProperty.call(updates, 'shareExpiryDate')) {
     updateData.shareExpiryDate = updates.shareExpiryDate ? Timestamp.fromDate(new Date(updates.shareExpiryDate)) : null;
   }
-  if (updates.hasOwnProperty('shareToken')) {
+  if (Object.prototype.hasOwnProperty.call(updates, 'shareToken')) {
     updateData.shareToken = updates.shareToken === undefined ? null : updates.shareToken;
   }
-  if (updates.hasOwnProperty('isShareEnabled') && updates.isShareEnabled === false) {
+  if (Object.prototype.hasOwnProperty.call(updates, 'isShareEnabled') && updates.isShareEnabled === false) {
     updateData.shareToken = null;
     updateData.shareExpiryDate = null;
   }
-  if (updates.hasOwnProperty('memo')) {
+  if (Object.prototype.hasOwnProperty.call(updates, 'memo')) {
     if (updates.memo === undefined) {
       updateData.memo = deleteField();
     } else {
@@ -610,7 +635,7 @@ export const dbSetReserveFundBalance = async (groupId: string, newBalance: numbe
   await batch.commit();
 };
 
-export const dbRecordMeetingDeduction = async (groupId: string, meetingId: string, meetingName: string, amountDeducted: number, date: Date, batch?: any): Promise<void> => {
+export const dbRecordMeetingDeduction = async (groupId: string, meetingId: string, meetingName: string, amountDeducted: number, date: Date, batch?: WriteBatch): Promise<void> => {
   if (amountDeducted <= 0.001) return; // 매우 작은 금액은 무시 (부동소수점 오차 방지)
 
   const useExistingBatch = !!batch;
@@ -644,7 +669,7 @@ export const dbRecordMeetingDeduction = async (groupId: string, meetingId: strin
   }
 };
 
-export const dbRevertMeetingDeduction = async (meetingId: string, batch?: any): Promise<void> => {
+export const dbRevertMeetingDeduction = async (meetingId: string, batch?: WriteBatch): Promise<void> => {
   const useExistingBatch = !!batch;
   const currentBatch = useExistingBatch ? batch : writeBatch(db);
   const transactionsCollectionRef = collection(db, RESERVE_FUND_TRANSACTIONS_COLLECTION);
@@ -697,7 +722,7 @@ export const getFriendGroupsByUser = async (userId: string): Promise<FriendGroup
   const user = await getUserById(userId);
 
   const groupsCollectionRef = collection(db, 'friendGroups');
-  let allGroups: FriendGroup[] = [];
+  const allGroups: FriendGroup[] = [];
   const groupIdsProcessed = new Set<string>(); // 중복 처리를 위한 Set
 
   // 사용자가 소유한 그룹 조회
@@ -714,7 +739,7 @@ export const getFriendGroupsByUser = async (userId: string): Promise<FriendGroup
   const friendGroupIdsFromUser = user?.friendGroupIds?.filter(id => typeof id === 'string' && id.length > 0);
 
   if (friendGroupIdsFromUser && friendGroupIdsFromUser.length > 0) {
-    const MAX_IN_QUERIES = 30; // Firestore 'in' 쿼리의 최대 항목 수 (최근 30개로 변경됨)
+    const MAX_IN_QUERIES = 10; // Firestore 'in' 쿼리 최대 항목 수
     const idChunks = [];
     for (let i = 0; i < friendGroupIdsFromUser.length; i += MAX_IN_QUERIES) {
       idChunks.push(friendGroupIdsFromUser.slice(i, i + MAX_IN_QUERIES));
@@ -760,9 +785,49 @@ export const updateFriendGroup = async (id: string, updates: Partial<Omit<Friend
 
 export const deleteFriendGroup = async (id: string): Promise<void> => {
   const groupDocRef = doc(db, 'friendGroups', id);
-  await deleteDoc(groupDocRef);
-  // TODO: 이 그룹을 참조하는 사용자의 friendGroupIds 필드도 정리해야 할 수 있음 (선택적)
-  // TODO: 이 그룹에 속한 친구들의 groupId 필드도 정리해야 할 수 있음 (선택적)
+  const usersCollectionRef = collection(db, USERS_COLLECTION);
+  const friendsCollectionRef = collection(db, FRIENDS_COLLECTION);
+
+  const [usersSnapshot, friendsSnapshot] = await Promise.all([
+    getDocs(query(usersCollectionRef, where('friendGroupIds', 'array-contains', id))),
+    getDocs(query(friendsCollectionRef, where('groupId', '==', id))),
+  ]);
+
+  const userRefs = usersSnapshot.docs.map((docSnap) => docSnap.ref);
+  const friendRefs = friendsSnapshot.docs.map((docSnap) => docSnap.ref);
+
+  let batch = writeBatch(db);
+  let operationCount = 0;
+  const MAX_BATCH_OPS = 450;
+
+  const commitIfNeeded = async () => {
+    if (operationCount === 0) {
+      return;
+    }
+    await batch.commit();
+    batch = writeBatch(db);
+    operationCount = 0;
+  };
+
+  for (const userRef of userRefs) {
+    batch.update(userRef, { friendGroupIds: arrayRemove(id) });
+    operationCount += 1;
+    if (operationCount >= MAX_BATCH_OPS) {
+      await commitIfNeeded();
+    }
+  }
+
+  for (const friendRef of friendRefs) {
+    batch.update(friendRef, { groupId: '' });
+    operationCount += 1;
+    if (operationCount >= MAX_BATCH_OPS) {
+      await commitIfNeeded();
+    }
+  }
+
+  batch.delete(groupDocRef);
+  operationCount += 1;
+  await commitIfNeeded();
 };
 
 // --- 그룹별 회비 로그 조회 함수 ---
@@ -820,7 +885,7 @@ export const dbGetMeetingPrepsByUser = async (userId: string, friendGroupIds: st
     const friendIds = friendsInUserGroups.map(f => f.id);
 
     if (friendIds.length > 0) {
-      const MAX_IN_QUERIES = 30;
+      const MAX_IN_QUERIES = 10;
       const chunks = [];
       for (let i = 0; i < friendIds.length; i += MAX_IN_QUERIES) {
         chunks.push(friendIds.slice(i, i + MAX_IN_QUERIES));
@@ -852,10 +917,10 @@ export const dbUpdateMeetingPrep = async (id: string, updates: Partial<Omit<Meet
   const meetingPrepDocRef = doc(db, MEETING_PREPS_COLLECTION, id);
   const updateData: DocumentData = { ...updates };
 
-  if (updates.hasOwnProperty('shareExpiryDate')) {
+  if (Object.prototype.hasOwnProperty.call(updates, 'shareExpiryDate')) {
     updateData.shareExpiryDate = updates.shareExpiryDate ? Timestamp.fromDate(new Date(updates.shareExpiryDate)) : null;
   }
-  if (updates.hasOwnProperty('shareToken')) {
+  if (Object.prototype.hasOwnProperty.call(updates, 'shareToken')) {
     updateData.shareToken = updates.shareToken === undefined ? null : updates.shareToken;
   }
 
@@ -945,7 +1010,7 @@ export const dbUpdateParticipantAvailability = async (meetingPrepId: string, sel
 
   // Only include password if it's defined (undefined means don't update password field)
   // For logged-in users, password is typically undefined and should not be updated
-  if (updates.hasOwnProperty('password') && password !== undefined && password !== null) {
+  if (Object.prototype.hasOwnProperty.call(updates, 'password') && password !== undefined && password !== null) {
     updateData.password = password;
   }
 

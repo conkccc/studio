@@ -1,5 +1,3 @@
-import type { Timestamp } from 'firebase/firestore';
-
 export type User = {
   id: string; // Firebase UID
   name?: string | null;

@@ -9,14 +9,14 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { CalendarIcon, Check, ChevronsUpDown, Loader2, MapPinIcon, Eye, ExternalLink, Search } from 'lucide-react';
+import { CalendarIcon, Check, ChevronsUpDown, Loader2, MapPinIcon, Eye, ExternalLink } from 'lucide-react';
 import { Calendar } from '@/components/ui/calendar';
 import { cn } from '@/lib/utils';
 import { format } from 'date-fns';
 import { ko } from 'date-fns/locale';
 import type { Friend, Meeting, FriendGroup } from '@/lib/types';
 import { createMeetingAction, updateMeetingAction } from '@/lib/actions';
-import { toast, useToast } from '@/hooks/use-toast';
+import { useToast } from '@/hooks/use-toast';
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { Switch } from '@/components/ui/switch';
 import { Checkbox } from "@/components/ui/checkbox";
@@ -446,7 +446,6 @@ export function CreateMeetingForm({
         markerInstanceRef.current.map = null;
       }
     };
-  // eslint-disable-next-line react-hooks/exhaustive-deps 
   }, [isMapsLoaded, mapsLoadError, watchedLocationCoordinates, watchLocationName, showMap]);
 
   useEffect(() => {
@@ -470,12 +469,6 @@ export function CreateMeetingForm({
     }
   }, [isEditMode, initialData]);
 
-  const formatNumberInput = (value: number | string | undefined): string => {
-    if (value === undefined || value === '' || value === null) return '';
-    const num = parseFloat(String(value).replace(/,/g, ''));
-    return isNaN(num) ? '' : num.toLocaleString();
-  };
-
   const [reserveFundInput, setReserveFundInput] = useState<string>(
     initialData && initialData.partialReserveFundAmount !== undefined && initialData.partialReserveFundAmount !== null
       ? Number(initialData.partialReserveFundAmount).toLocaleString()
@@ -491,6 +484,16 @@ export function CreateMeetingForm({
   }, [watchPartialReserveFundAmount]);
 
   const onSubmit = (data: MeetingFormData) => {
+    const resolvedGroupId = currentMeetingGroupId || (initialData?.groupId ?? '');
+    if (!data.isTemporary && (!resolvedGroupId || !resolvedGroupId.trim())) {
+      toast({
+        title: '그룹 선택 필요',
+        description: '일반 모임은 반드시 친구 그룹을 선택해야 합니다.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
     startTransition(async () => {
       type PayloadType = Omit<Meeting, 'id' | 'createdAt' | 'isSettled' | 'isShareEnabled' | 'shareToken' | 'shareExpiryDate'> & { creatorId: string };
       let payloadForDb: PayloadType;
@@ -503,7 +506,7 @@ export function CreateMeetingForm({
           locationName: data.locationName || '',
           locationCoordinates: data.locationCoordinates || undefined,
           creatorId: currentUserId,
-          groupId: currentMeetingGroupId || (initialData?.groupId ?? ''),
+          groupId: resolvedGroupId,
           memo: data.memo || undefined,
           isTemporary: true,
           temporaryParticipants: data.temporaryParticipants || [],
@@ -530,7 +533,7 @@ export function CreateMeetingForm({
               : undefined,
           nonReserveFundParticipants: data.nonReserveFundParticipants || [],
           memo: data.memo || undefined,
-          groupId: currentMeetingGroupId || (initialData?.groupId ?? ''),
+          groupId: resolvedGroupId,
           isTemporary: false,
           temporaryParticipants: undefined,
           totalFee: undefined,

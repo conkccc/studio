@@ -76,10 +76,8 @@ export function AddExpenseDialog({ meetingId, participants, roomCreatorName, onE
   const [payerSearchOpen, setPayerSearchOpen] = useState(false);
   const { currentUser } = useAuth();
 
-  var roomCreatorId = '';
   const foundCreator = participants.find(p => roomCreatorName && roomCreatorName.includes(p.name));
-  if (foundCreator)
-    roomCreatorId = foundCreator.id;
+  const roomCreatorId = foundCreator ? foundCreator.id : '';
 
   const form = useForm<ExpenseFormData>({
     resolver: zodResolver(expenseSchema),
@@ -95,6 +93,12 @@ export function AddExpenseDialog({ meetingId, participants, roomCreatorName, onE
   
   const watchSplitType = form.watch('splitType');
   const watchTotalAmount = form.watch('totalAmount');
+  const customSplitsError = form.formState.errors.customSplits;
+  const customSplitsMessage =
+    customSplitsError?.message ||
+    (customSplitsError && typeof customSplitsError === 'object' && 'root' in customSplitsError
+      ? (customSplitsError as { root?: { message?: string } }).root?.message
+      : undefined);
 
   React.useEffect(() => {
     if (open) {
@@ -323,7 +327,7 @@ export function AddExpenseDialog({ meetingId, participants, roomCreatorName, onE
                       </div>
                     ))}
                   </div>
-                   {form.formState.errors.customSplits && <p className="text-sm text-destructive mt-1">{form.formState.errors.customSplits.message || (form.formState.errors.customSplits as any).root?.message}</p>}
+                   {customSplitsMessage && <p className="text-sm text-destructive mt-1">{customSplitsMessage}</p>}
                   <p className="text-xs text-muted-foreground mt-1 text-right">
                     총액: {formatNumber((form.watch('customSplits') || []).reduce((sum, s) => sum + (Number(s.amount) || 0), 0))} / {formatNumber(watchTotalAmount || 0)}
                   </p>

@@ -12,7 +12,7 @@ import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/com
 import { useAuth } from '@/contexts/AuthContext';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
-import type { Meeting, Friend, FriendGroup, User } from '@/lib/types';
+import type { Meeting, Friend, FriendGroup } from '@/lib/types';
 import { useParams, useRouter } from 'next/navigation';
 import { useToast } from '@/hooks/use-toast';
 import { Loader2 } from 'lucide-react';
@@ -82,7 +82,7 @@ export default function EditMeetingPage() {
         setMeetingToEdit(null);
         setHasEditPermission(false);
       }
-    } catch (error) {
+    } catch {
       toast({ title: "오류", description: "페이지 데이터 조회 중 예외가 발생했습니다.", variant: "destructive" });
       setMeetingToEdit(null);
       setHasEditPermission(false);

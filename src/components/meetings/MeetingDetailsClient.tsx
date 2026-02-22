@@ -2,18 +2,18 @@
 
 import type { Meeting, Expense, Friend } from '@/lib/types';
 import { Timestamp } from 'firebase/firestore';
-import React, { useState, useTransition, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { format, differenceInCalendarDays, isValid, addDays } from 'date-fns';
+import { format, differenceInCalendarDays, isValid } from 'date-fns';
 import { ko } from 'date-fns/locale';
 import { deleteMeetingAction, finalizeMeetingSettlementAction, toggleMeetingShareAction } from '@/lib/actions';
 import { useToast } from '@/hooks/use-toast';
 import {
   CalendarDays, MapPin, Users as UsersIcon, Edit3, Trash2, PlusCircle, Loader2, ExternalLink, Eye,
-  PiggyBank, CheckCircle2, AlertCircle, Info, Settings, Link2, Copy, Share2, ArrowLeft
+  PiggyBank, CheckCircle2, AlertCircle, Info, Copy, Share2, ArrowLeft
 } from 'lucide-react';
 import { AddExpenseDialog } from './AddExpenseDialog';
 import { ExpenseItem } from './ExpenseItem';
@@ -51,6 +51,13 @@ interface MeetingDetailsClientProps {
   isReadOnlyShare?: boolean;
 }
 
+const getExpenseTime = (value: Date | Timestamp | undefined | null) => {
+  if (!value) return 0;
+  if (value instanceof Date) return value.getTime();
+  if (value instanceof Timestamp) return value.toDate().getTime();
+  return 0;
+};
+
 export function MeetingDetailsClient({
   initialMeeting,
   initialExpenses,
@@ -59,7 +66,7 @@ export function MeetingDetailsClient({
   isReadOnlyShare = false,
 }: MeetingDetailsClientProps) {
   const [meeting, setMeeting] = useState<Meeting>(initialMeeting);
-  const [expenses, setExpenses] = useState<Expense[]>(initialExpenses.sort((a, b) => (b.createdAt instanceof Date ? b.createdAt.getTime() : (b.createdAt as any).toDate().getTime()) - (a.createdAt instanceof Date ? a.createdAt.getTime() : (a.createdAt as any).toDate().getTime())));
+  const [expenses, setExpenses] = useState<Expense[]>(initialExpenses.sort((a, b) => getExpenseTime(b.createdAt) - getExpenseTime(a.createdAt)));
   const [isDeleting, setIsDeleting] = useState(false);
   const [isFinalizing, setIsFinalizing] = useState(false);
   const [formattedMeetingDateTime, setFormattedMeetingDateTime] = useState<string | null>(null);
@@ -134,7 +141,7 @@ export function MeetingDetailsClient({
   }, [initialMeeting]);
 
   useEffect(() => {
-    setExpenses(initialExpenses.sort((a, b) => (b.createdAt instanceof Date ? b.createdAt.getTime() : (b.createdAt as any).toDate().getTime()) - (a.createdAt instanceof Date ? a.createdAt.getTime() : (a.createdAt as any).toDate().getTime())));
+    setExpenses(initialExpenses.sort((a, b) => getExpenseTime(b.createdAt) - getExpenseTime(a.createdAt)));
   }, [initialExpenses]);
 
   useEffect(() => {
@@ -161,9 +168,14 @@ export function MeetingDetailsClient({
   }, [meeting?.dateTime, meeting?.endTime]);
 
   useEffect(() => {
-    if (showMap && isMapsLoaded && mapContainerRef.current && window.google?.maps?.Map && window.google?.maps?.marker?.AdvancedMarkerElement) {
+    if (showMap && !meeting.locationCoordinates) {
+      setShowMap(false);
+      return;
+    }
+
+    if (showMap && isMapsLoaded && mapContainerRef.current && meeting.locationCoordinates && window.google?.maps?.Map && window.google?.maps?.marker?.AdvancedMarkerElement) {
       const { AdvancedMarkerElement } = window.google.maps.marker;
-      const currentCoords = meeting.locationCoordinates!;
+      const currentCoords = meeting.locationCoordinates;
 
       mapInstanceRef.current = new window.google.maps.Map(mapContainerRef.current, {
         center: currentCoords,
@@ -198,7 +210,7 @@ export function MeetingDetailsClient({
   // Participants list to be used for display and in dialogs/components
   const displayParticipants = useMemo(() => {
     if (meeting.isTemporary) {
-      return meeting.temporaryParticipants?.map((p, index) => ({
+      return meeting.temporaryParticipants?.map((p) => ({
         id: p.name,
         name: p.name,
         description: '',
@@ -224,7 +236,7 @@ export function MeetingDetailsClient({
   }, [meeting.creatorId, allUsers, appUser]);
 
   const handleExpenseAdded = (newExpense: Expense) => {
-    const newExpenses = [newExpense, ...expenses].sort((a,b) => (b.createdAt instanceof Date ? b.createdAt.getTime() : (b.createdAt as any).toDate().getTime()) - (a.createdAt instanceof Date ? a.createdAt.getTime() : (a.createdAt as any).toDate().getTime()));
+    const newExpenses = [newExpense, ...expenses].sort((a,b) => getExpenseTime(b.createdAt) - getExpenseTime(a.createdAt));
     setExpenses(newExpenses);
     if (meeting.isSettled) {
       setMeeting(prev => ({ ...prev, isSettled: false }));
@@ -232,7 +244,7 @@ export function MeetingDetailsClient({
   };
 
   const handleExpenseUpdated = (updatedExpense: Expense) => {
-    const newExpenses = expenses.map(e => e.id === updatedExpense.id ? updatedExpense : e).sort((a,b) => (b.createdAt instanceof Date ? b.createdAt.getTime() : (b.createdAt as any).toDate().getTime()) - (a.createdAt instanceof Date ? a.createdAt.getTime() : (a.createdAt as any).toDate().getTime()));
+    const newExpenses = expenses.map(e => e.id === updatedExpense.id ? updatedExpense : e).sort((a,b) => getExpenseTime(b.createdAt) - getExpenseTime(a.createdAt));
     setExpenses(newExpenses);
     if (meeting.isSettled) {
       setMeeting(prev => ({ ...prev, isSettled: false }));
@@ -385,8 +397,6 @@ export function MeetingDetailsClient({
                 if (meeting.shareExpiryDate) {
                   if (typeof meeting.shareExpiryDate === 'string') {
                     expiryDate = new Date(meeting.shareExpiryDate);
-                  } else if ((meeting.shareExpiryDate as any)?.toDate && typeof (meeting.shareExpiryDate as any).toDate === 'function') {
-                    expiryDate = (meeting.shareExpiryDate as any).toDate();
                   } else if (meeting.shareExpiryDate instanceof Date) {
                     expiryDate = meeting.shareExpiryDate;
                   }

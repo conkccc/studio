@@ -113,6 +113,12 @@ export function EditExpenseDialog({
 
   const watchSplitType = form.watch('splitType');
   const watchTotalAmount = form.watch('totalAmount');
+  const customSplitsError = form.formState.errors.customSplits;
+  const customSplitsMessage =
+    customSplitsError?.message ||
+    (customSplitsError && typeof customSplitsError === 'object' && 'root' in customSplitsError
+      ? (customSplitsError as { root?: { message?: string } }).root?.message
+      : undefined);
 
   const onSubmit = (data: ExpenseFormData) => {
     startTransition(async () => {
@@ -325,7 +331,7 @@ export function EditExpenseDialog({
                       </div>
                     ))}
                   </div>
-                   {form.formState.errors.customSplits && <p className="text-sm text-destructive mt-1">{form.formState.errors.customSplits.message || (form.formState.errors.customSplits as any).root?.message}</p>}
+                   {customSplitsMessage && <p className="text-sm text-destructive mt-1">{customSplitsMessage}</p>}
                   <p className="text-xs text-muted-foreground mt-1 text-right">
                     총액: {formatNumber((form.watch('customSplits') || []).reduce((sum, s) => sum + (Number(s.amount) || 0), 0))} / {formatNumber(watchTotalAmount || 0)}
                   </p>

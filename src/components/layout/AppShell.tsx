@@ -52,7 +52,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   const { isMobile, setOpenMobile, openMobile } = useSidebar();
-  const { currentUser, appUser, isAdmin, userRole, loading, signOut } = useAuth();
+  const { currentUser, appUser, userRole, loading, signOut } = useAuth();
 
   const sheetTriggerRef = useRef<HTMLButtonElement>(null);
   const sheetContentRef = useRef<HTMLDivElement>(null);

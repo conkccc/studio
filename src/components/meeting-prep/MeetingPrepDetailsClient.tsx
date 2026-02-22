@@ -9,21 +9,19 @@ import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/AuthContext';
 import {
   getMeetingPrepByIdAction,
-  getFriendsByGroupAction,
   submitParticipantAvailabilityAction,
   getAllParticipantAvailabilitiesAction,
   toggleMeetingPrepShareAction,
   deleteMeetingPrepAction,
-  getAllFriendsAction,
 } from '@/lib/actions';
 import type { MeetingPrep, Friend, ParticipantAvailability } from '@/lib/types';
-import { format, getDaysInMonth, startOfMonth, addMonths, isSameDay, parseISO, isBefore, isAfter } from 'date-fns';
+import { format, getDaysInMonth, startOfMonth, isSameDay, isBefore } from 'date-fns';
 import { ko } from 'date-fns/locale';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
-import { Share2, Trash2, Copy } from 'lucide-react';
+import { Trash2, Copy } from 'lucide-react';
 import { Checkbox } from '@/components/ui/checkbox';
 import { MeetingPrepSummaryCalendar } from './MeetingPrepSummaryCalendar';
 import { cn } from '@/lib/utils';
@@ -51,7 +49,6 @@ export function MeetingPrepDetailsClient({ meetingPrepId, shareToken }: MeetingP
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const [dragStart, setDragStart] = useState<Date | null>(null);
-  const [dragEnd, setDragEnd] = useState<Date | null>(null);
   const initialDragSelectionState = React.useRef<boolean | null>(null);
 
   const isCreator = useMemo(() => meetingPrep?.creatorId === currentUser?.uid, [meetingPrep, currentUser]);
@@ -125,45 +122,19 @@ export function MeetingPrepDetailsClient({ meetingPrepId, shareToken }: MeetingP
     });
   };
 
-  const handleSelectDateRange = useCallback((start: Date, end: Date, select: boolean) => {
-    setCurrentAvailability(prev => {
-      const newSet = new Set(prev);
-      const dates = [start, end].sort((a, b) => a.getTime() - b.getTime());
-      let currentDate = dates[0];
-
-      while (currentDate <= dates[1]) {
-        const dateString = format(currentDate, 'yyyy-MM-dd');
-        const isPastDate = isBefore(currentDate, new Date()) && !isSameDay(currentDate, new Date());
-
-        if (!isPastDate) {
-          if (select) {
-            newSet.add(dateString);
-          } else {
-            newSet.delete(dateString);
-          }
-        }
-        currentDate = new Date(currentDate.setDate(currentDate.getDate() + 1));
-      }
-      return newSet;
-    });
-  }, []);
-
   const handleMouseDown = useCallback((date: Date) => {
     if (!selectedFriendId || isSubmitting || (isBefore(date, new Date()) && !isSameDay(date, new Date()))) return;
     setIsDragging(true);
     setDragStart(date);
-    setDragEnd(date);
     initialDragSelectionState.current = currentAvailability.has(format(date, 'yyyy-MM-dd'));
     handleDateToggle(date); // Toggle the initial date immediately
   }, [selectedFriendId, isSubmitting, currentAvailability, handleDateToggle]);
 
   const handleMouseEnter = useCallback((date: Date) => {
     if (!isDragging || !dragStart) return;
-    setDragEnd(date);
-
     const datesToModify: Date[] = [];
     const sortedDates = [dragStart, date].sort((a, b) => a.getTime() - b.getTime());
-    let currentDate = sortedDates[0];
+    const currentDate = sortedDates[0];
 
     while (currentDate <= sortedDates[1]) {
       datesToModify.push(new Date(currentDate)); // Push a new Date object to avoid reference issues
@@ -190,7 +161,6 @@ export function MeetingPrepDetailsClient({ meetingPrepId, shareToken }: MeetingP
   const handleMouseUp = useCallback(() => {
     setIsDragging(false);
     setDragStart(null);
-    setDragEnd(null);
     initialDragSelectionState.current = null;
   }, []);
 

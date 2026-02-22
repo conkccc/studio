@@ -34,7 +34,7 @@ export default function FriendListByGroup({ group, onDeleteGroup, isDeletingThis
     setLoading(false);
   };
 
-  const handleFriendDeleted = async (deletedFriendId: string) => {
+  const handleFriendDeleted = async () => {
     setLoading(true);
     const res = await getFriendsByGroupAction(group.id);
     if (res.success && res.friends) setFriends(res.friends);

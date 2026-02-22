@@ -11,7 +11,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Form, FormControl, FormDescription, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form';
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { Check, ChevronsUpDown, CalendarIcon, Loader2 } from 'lucide-react';
+import { Check, ChevronsUpDown, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useToast } from '@/hooks/use-toast';
 import { createMeetingPrepAction, getFriendGroupsForUserAction, getFriendsByGroupAction } from '@/lib/actions';
@@ -19,7 +19,6 @@ import { useAuth } from '@/contexts/AuthContext';
 import type { FriendGroup, Friend } from '@/lib/types';
 import { useEffect, useTransition } from 'react';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Calendar } from '@/components/ui/calendar';
 import { format, addDays } from 'date-fns';
 import { ko } from 'date-fns/locale';
 
@@ -54,12 +53,8 @@ export function CreateMeetingPrepForm() {
     },
   });
 
-  const watchParticipantFriendIds = form.watch('participantFriendIds');
-  const watchSelectedMonths = form.watch('selectedMonths');
-
   const [selectedFriendGroup, setSelectedFriendGroup] = useState<string | null>(null);
   const [friendsInSelectedGroup, setFriendsInSelectedGroup] = useState<Friend[]>([]);
-  const [participantSearchOpen, setParticipantSearchOpen] = useState(false);
 
   useEffect(() => {
     if (!authLoading && currentUser) {

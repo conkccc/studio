@@ -18,7 +18,6 @@ import {
   dbSetReserveFundBalance,
   dbRecordMeetingDeduction,
   dbRevertMeetingDeduction,
-  getExpenseById as dbGetExpenseById,
   updateUser as dbUpdateUser,
   addFriendGroup as dbAddFriendGroup,
   updateFriendGroup as dbUpdateFriendGroup,
@@ -35,7 +34,6 @@ import {
   dbGetAllMeetingPreps,
   dbUpdateMeetingPrep,
   dbDeleteMeetingPrep,
-  dbGetMeetingPrepByShareToken,
   dbAddParticipantAvailability,
   dbGetParticipantAvailability,
   dbUpdateParticipantAvailability,
@@ -44,7 +42,7 @@ import {
   dbGetFriendsByUserFriendGroupIds,
 } from './data-store';
 import type { Friend, Meeting, Expense, User, FriendGroup, MeetingPrep, ParticipantAvailability } from './types';
-import { Timestamp, arrayRemove as firestoreArrayRemove, arrayUnion as firestoreArrayUnion, deleteField } from 'firebase/firestore';
+import { Timestamp, arrayRemove as firestoreArrayRemove, arrayUnion as firestoreArrayUnion } from 'firebase/firestore';
 import { nanoid } from 'nanoid';
 import { addDays, getDaysInMonth, isSameDay, format } from 'date-fns';
 import { db } from './firebase';
@@ -176,6 +174,32 @@ export async function getAllFriendsAction() {
   } catch (error) {
     console.error('getAllFriendsAction Error:', error);
     const errorMessage = error instanceof Error ? error.message : '모든 친구 목록을 가져오는데 실패했습니다.';
+    return { success: false, error: errorMessage, friends: [] };
+  }
+}
+
+// 사용자 접근 범위 기준 친구 목록 가져오기
+export async function getFriendsForUserAction(requestingUserId: string) {
+  if (!requestingUserId) {
+    return { success: false, error: "User ID is required.", friends: [] };
+  }
+
+  const user = await dbGetUserById(requestingUserId);
+  if (!user) {
+    return { success: false, error: "User not found.", friends: [] };
+  }
+
+  try {
+    if (user.role === 'admin') {
+      const friends = await dbGetFriends();
+      return { success: true, friends };
+    }
+    const friendGroupIds = user.friendGroupIds || [];
+    const friends = await dbGetFriendsByUserFriendGroupIds(friendGroupIds);
+    return { success: true, friends };
+  } catch (error) {
+    console.error('getFriendsForUserAction Error:', error);
+    const errorMessage = error instanceof Error ? error.message : '친구 목록을 가져오는데 실패했습니다.';
     return { success: false, error: errorMessage, friends: [] };
   }
 }
@@ -362,6 +386,10 @@ export async function createMeetingAction(
       useReserveFund,
     } = payload;
 
+    if (!isTemporary && (!groupId || !groupId.trim())) {
+      return { success: false, error: "일반 모임은 친구 그룹을 선택해야 합니다." };
+    }
+
     const meetingDataToSaveBase = {
       name,
       dateTime,
@@ -381,7 +409,7 @@ export async function createMeetingAction(
 
     type AddMeetingPayload = Parameters<typeof dbAddMeeting>[0];
 
-    let meetingDataToSave: AddMeetingPayload = {
+    const meetingDataToSave: AddMeetingPayload = {
       ...meetingDataToSaveBase, 
     };
 
@@ -450,6 +478,10 @@ export async function updateMeetingAction(
       isShareEnabled, shareToken, shareExpiryDate, isSettled
     } = payload;
 
+    if (!meetingToUpdate.isTemporary && Object.prototype.hasOwnProperty.call(payload, 'groupId') && (!groupId || !groupId.trim())) {
+      return { success: false, error: "일반 모임은 친구 그룹을 선택해야 합니다." };
+    }
+
     // 업데이트할 데이터를 담을 객체
     const meetingDataToUpdate: Partial<Omit<Meeting, 'id' | 'createdAt'>> = {};
 
@@ -462,45 +494,45 @@ export async function updateMeetingAction(
       await dbRevertMeetingDeduction(id); // 기존 정산에 따른 회비 차감액이 있다면 되돌림
       meetingDataToUpdate.isSettled = false;
       revalidatePath('/reserve-fund');
-    } else if (payload.hasOwnProperty('isSettled')) {
+    } else if (Object.prototype.hasOwnProperty.call(payload, 'isSettled')) {
       meetingDataToUpdate.isSettled = isSettled;
     }
 
     // 전달된 payload 속성들만 업데이트 객체에 추가
-    if (payload.hasOwnProperty('name')) meetingDataToUpdate.name = name;
-    if (payload.hasOwnProperty('dateTime')) meetingDataToUpdate.dateTime = dateTime;
-    if (payload.hasOwnProperty('groupId')) meetingDataToUpdate.groupId = groupId;
-    if (payload.hasOwnProperty('locationName')) meetingDataToUpdate.locationName = locationName;
-    if (payload.hasOwnProperty('locationCoordinates')) meetingDataToUpdate.locationCoordinates = locationCoordinates;
-    if (payload.hasOwnProperty('participantIds')) meetingDataToUpdate.participantIds = participantIds;
-    if (payload.hasOwnProperty('useReserveFund')) meetingDataToUpdate.useReserveFund = useReserveFund;
-    if (payload.hasOwnProperty('nonReserveFundParticipants')) meetingDataToUpdate.nonReserveFundParticipants = nonReserveFundParticipants;
-    if (payload.hasOwnProperty('partialReserveFundAmount')) meetingDataToUpdate.partialReserveFundAmount = partialReserveFundAmount;
-    if (payload.hasOwnProperty('memo')) meetingDataToUpdate.memo = memo;
-    if (payload.hasOwnProperty('endTime')) meetingDataToUpdate.endTime = endTime;
-    if (payload.hasOwnProperty('totalFee')) meetingDataToUpdate.totalFee = totalFee;
-    if (payload.hasOwnProperty('feePerPerson')) meetingDataToUpdate.feePerPerson = feePerPerson;
-    if (payload.hasOwnProperty('temporaryParticipants')) meetingDataToUpdate.temporaryParticipants = temporaryParticipants;
+    if (Object.prototype.hasOwnProperty.call(payload, 'name')) meetingDataToUpdate.name = name;
+    if (Object.prototype.hasOwnProperty.call(payload, 'dateTime')) meetingDataToUpdate.dateTime = dateTime;
+    if (Object.prototype.hasOwnProperty.call(payload, 'groupId')) meetingDataToUpdate.groupId = groupId;
+    if (Object.prototype.hasOwnProperty.call(payload, 'locationName')) meetingDataToUpdate.locationName = locationName;
+    if (Object.prototype.hasOwnProperty.call(payload, 'locationCoordinates')) meetingDataToUpdate.locationCoordinates = locationCoordinates;
+    if (Object.prototype.hasOwnProperty.call(payload, 'participantIds')) meetingDataToUpdate.participantIds = participantIds;
+    if (Object.prototype.hasOwnProperty.call(payload, 'useReserveFund')) meetingDataToUpdate.useReserveFund = useReserveFund;
+    if (Object.prototype.hasOwnProperty.call(payload, 'nonReserveFundParticipants')) meetingDataToUpdate.nonReserveFundParticipants = nonReserveFundParticipants;
+    if (Object.prototype.hasOwnProperty.call(payload, 'partialReserveFundAmount')) meetingDataToUpdate.partialReserveFundAmount = partialReserveFundAmount;
+    if (Object.prototype.hasOwnProperty.call(payload, 'memo')) meetingDataToUpdate.memo = memo;
+    if (Object.prototype.hasOwnProperty.call(payload, 'endTime')) meetingDataToUpdate.endTime = endTime;
+    if (Object.prototype.hasOwnProperty.call(payload, 'totalFee')) meetingDataToUpdate.totalFee = totalFee;
+    if (Object.prototype.hasOwnProperty.call(payload, 'feePerPerson')) meetingDataToUpdate.feePerPerson = feePerPerson;
+    if (Object.prototype.hasOwnProperty.call(payload, 'temporaryParticipants')) meetingDataToUpdate.temporaryParticipants = temporaryParticipants;
 
-    if (payload.hasOwnProperty('isShareEnabled')) {
+    if (Object.prototype.hasOwnProperty.call(payload, 'isShareEnabled')) {
       meetingDataToUpdate.isShareEnabled = isShareEnabled;
       if (meetingDataToUpdate.isShareEnabled === false) {
         meetingDataToUpdate.shareToken = null;
         meetingDataToUpdate.shareExpiryDate = null;
       } else if (meetingDataToUpdate.isShareEnabled === true) {
-        meetingDataToUpdate.shareToken = payload.hasOwnProperty('shareToken') ? shareToken : meetingToUpdate.shareToken;
-        meetingDataToUpdate.shareExpiryDate = payload.hasOwnProperty('shareExpiryDate') ? shareExpiryDate : meetingToUpdate.shareExpiryDate;
+        meetingDataToUpdate.shareToken = Object.prototype.hasOwnProperty.call(payload, 'shareToken') ? shareToken : meetingToUpdate.shareToken;
+        meetingDataToUpdate.shareExpiryDate = Object.prototype.hasOwnProperty.call(payload, 'shareExpiryDate') ? shareExpiryDate : meetingToUpdate.shareExpiryDate;
       }
     }
 
-    if (payload.hasOwnProperty('locationName')) {
+    if (Object.prototype.hasOwnProperty.call(payload, 'locationName')) {
       meetingDataToUpdate.locationName = locationName || '';
-      if (!payload.hasOwnProperty('locationCoordinates') && !meetingDataToUpdate.locationName) {
+      if (!Object.prototype.hasOwnProperty.call(payload, 'locationCoordinates') && !meetingDataToUpdate.locationName) {
         delete meetingDataToUpdate.locationCoordinates;
         //meetingDataToUpdate.locationCoordinates = undefined;
       }
     }
-    if (payload.hasOwnProperty('locationCoordinates')) {
+    if (Object.prototype.hasOwnProperty.call(payload, 'locationCoordinates')) {
       if (locationCoordinates)
         meetingDataToUpdate.locationCoordinates = locationCoordinates;
       else
@@ -513,22 +545,22 @@ export async function updateMeetingAction(
       delete meetingDataToUpdate.partialReserveFundAmount;
       delete meetingDataToUpdate.nonReserveFundParticipants;
 
-      if (payload.hasOwnProperty('totalFee') && meetingDataToUpdate.totalFee !== undefined) {
+      if (Object.prototype.hasOwnProperty.call(payload, 'totalFee') && meetingDataToUpdate.totalFee !== undefined) {
         meetingDataToUpdate.feePerPerson = undefined;
-      } else if (payload.hasOwnProperty('feePerPerson') && meetingDataToUpdate.feePerPerson !== undefined) {
+      } else if (Object.prototype.hasOwnProperty.call(payload, 'feePerPerson') && meetingDataToUpdate.feePerPerson !== undefined) {
         meetingDataToUpdate.totalFee = undefined;
       }
     } else {
       delete meetingDataToUpdate.temporaryParticipants;
-      if (payload.hasOwnProperty('totalFee')) meetingDataToUpdate.totalFee = undefined;
-      if (payload.hasOwnProperty('feePerPerson')) meetingDataToUpdate.feePerPerson = undefined;
+      if (Object.prototype.hasOwnProperty.call(payload, 'totalFee')) meetingDataToUpdate.totalFee = undefined;
+      if (Object.prototype.hasOwnProperty.call(payload, 'feePerPerson')) meetingDataToUpdate.feePerPerson = undefined;
 
       const willUseReserveFundCurrent = meetingDataToUpdate.useReserveFund !== undefined ? meetingDataToUpdate.useReserveFund : meetingToUpdate.useReserveFund;
 
       if (willUseReserveFundCurrent) {
-        if (meetingDataToUpdate.partialReserveFundAmount === undefined && !payload.hasOwnProperty('partialReserveFundAmount')) {
+        if (meetingDataToUpdate.partialReserveFundAmount === undefined && !Object.prototype.hasOwnProperty.call(payload, 'partialReserveFundAmount')) {
            meetingDataToUpdate.partialReserveFundAmount = meetingToUpdate.partialReserveFundAmount !== undefined ? meetingToUpdate.partialReserveFundAmount : 0;
-        } else if (meetingDataToUpdate.partialReserveFundAmount === undefined && payload.hasOwnProperty('partialReserveFundAmount') && typeof payload.partialReserveFundAmount !== 'number' ){
+        } else if (meetingDataToUpdate.partialReserveFundAmount === undefined && Object.prototype.hasOwnProperty.call(payload, 'partialReserveFundAmount') && typeof payload.partialReserveFundAmount !== 'number' ){
             meetingDataToUpdate.partialReserveFundAmount = 0;
         }
       } else {

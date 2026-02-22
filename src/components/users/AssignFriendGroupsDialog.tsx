@@ -77,7 +77,7 @@ export function AssignFriendGroupsDialog({
       } else {
         toast({ title: '오류', description: result.error || '참조 그룹 업데이트에 실패했습니다.', variant: 'destructive' });
       }
-    } catch (error) {
+    } catch {
       toast({ title: '오류', description: '참조 그룹 업데이트 중 예기치 않은 오류가 발생했습니다.', variant: 'destructive' });
     } finally {
       setIsSubmitting(false);

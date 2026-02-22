@@ -10,7 +10,7 @@ import {
 } from '@/lib/actions';
 import type { FriendGroup, User, Friend } from '@/lib/types';
 import { useToast } from '@/hooks/use-toast';
-import { Loader2, Edit, Trash2, PlusCircle, ChevronDown, ChevronRight, UserPlus } from 'lucide-react';
+import { Loader2, Trash2, PlusCircle, ChevronDown, ChevronRight, UserPlus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useAuth } from '@/contexts/AuthContext';
@@ -73,7 +73,7 @@ export default function FriendGroupListClient() {
         setAllUsers([]);
       }
 
-    } catch (error) {
+    } catch {
       toast({ title: '오류', description: '데이터를 불러오는 중 예기치 않은 오류가 발생했습니다.', variant: 'destructive' });
       setGroups([]);
       setAllUsers([]);
@@ -98,7 +98,7 @@ export default function FriendGroupListClient() {
       } else {
         toast({ title: '오류', description: res.error || '그룹 추가에 실패했습니다.', variant: 'destructive' });
       }
-    } catch (error) {
+    } catch {
        toast({ title: '오류', description: '그룹 추가 중 예기치 않은 오류가 발생했습니다.', variant: 'destructive' });
     } finally {
       setIsSubmitting(false);
@@ -118,7 +118,7 @@ export default function FriendGroupListClient() {
       } else {
         toast({ title: '오류', description: res.error || '그룹 삭제에 실패했습니다.', variant: 'destructive' });
       }
-    } catch (error) {
+    } catch {
       toast({ title: '오류', description: '그룹 삭제 중 예기치 않은 오류가 발생했습니다.', variant: 'destructive' });
     } finally {
       setIsSubmitting(false);
@@ -185,7 +185,7 @@ export default function FriendGroupListClient() {
       } else {
         toast({ title: "오류", description: result.error || "친구 삭제에 실패했습니다.", variant: "destructive" });
       }
-    } catch (error) {
+    } catch {
       toast({ title: "오류", description: "친구 삭제 중 예기치 않은 오류가 발생했습니다.", variant: "destructive" });
     } finally {
       setIsDeletingFriend(null);

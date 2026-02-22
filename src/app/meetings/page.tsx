@@ -2,14 +2,14 @@
 
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
-import { getFriends } from '@/lib/data-store';
+import { getFriendsForUserAction } from '@/lib/actions';
 import { MeetingListClient } from '@/components/meetings/MeetingListClient';
 import { Button } from '@/components/ui/button';
 import { useAuth } from '@/contexts/AuthContext';
 import type { Friend } from '@/lib/types';
 
 export default function MeetingsPage() {
-  const { currentUser, loading: authLoading } = useAuth();
+  const { currentUser, appUser, loading: authLoading } = useAuth();
   const [allFriends, setAllFriends] = useState<Friend[]>([]);
   const [dataLoading, setDataLoading] = useState(true);
 
@@ -18,12 +18,17 @@ export default function MeetingsPage() {
       setDataLoading(true);
       return;
     }
-    if (currentUser) {
+    if (currentUser && appUser?.id) {
       const fetchAllFriends = async () => {
         setDataLoading(true);
         try {
-          const fetchedFriends = await getFriends();
-          setAllFriends(fetchedFriends);
+          const result = await getFriendsForUserAction(appUser.id);
+          if (result.success) {
+            setAllFriends(result.friends || []);
+          } else {
+            console.error("Failed to fetch friends:", result.error);
+            setAllFriends([]);
+          }
         } catch (error) {
           console.error("Failed to fetch friends:", error);
           setAllFriends([]);
@@ -36,7 +41,7 @@ export default function MeetingsPage() {
       setAllFriends([]);
       setDataLoading(false);
     }
-  }, [authLoading, currentUser]);
+  }, [authLoading, currentUser, appUser?.id]);
 
 
   if (authLoading) {

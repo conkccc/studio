@@ -38,7 +38,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
       try {
         if (user) {
           setCurrentUser(user);
-          let appUserData = await dbGetUserById(user.uid);
+          const appUserData = await dbGetUserById(user.uid);
 
           if (appUserData) {
             setAppUser(appUserData);

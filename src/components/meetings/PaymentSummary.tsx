@@ -37,7 +37,7 @@ export function PaymentSummary({ meeting, expenses, participants, allFriends }: 
 
   const effectiveParticipants = useMemo<Friend[]>(() => {
     if (meeting.isTemporary && Array.isArray(meeting.temporaryParticipants) && meeting.temporaryParticipants.length > 0) {
-      return meeting.temporaryParticipants.map((p, idx) => ({
+      return meeting.temporaryParticipants.map((p) => ({
         id: p.name, 
         name: p.name,
         description: '', 
@@ -140,8 +140,8 @@ export function PaymentSummary({ meeting, expenses, participants, allFriends }: 
 
     let fundUsed = 0;
     let fundLeft = 0;
-    let perPersonCostWithFund: Record<string, number> = { ...individualExpenseContributions }; // 개별 부담액으로 초기화
-    let fundDescription = '';
+    const perPersonCostWithFund: Record<string, number> = { ...individualExpenseContributions }; // 개별 부담액으로 초기화
+    let fundDescription: string;
     let perFundApplicableCost = 0; // "회비적용 인원 1인당 부담액" (인원 제외가 있는 소비가 없을 때만 균등 분배 의미)
 
     if (meeting.useReserveFund && meeting.partialReserveFundAmount && meeting.partialReserveFundAmount > 0 && numFundApplicable > 0) {
@@ -188,7 +188,7 @@ export function PaymentSummary({ meeting, expenses, participants, allFriends }: 
   const mappedExpenses = useMemo((): Expense[] => {
     if (meeting.isTemporary && Array.isArray(meeting.temporaryParticipants) && meeting.temporaryParticipants.length > 0) {
       return expenses.map(e => {
-        let newExpense = { ...e };
+        const newExpense = { ...e };
         if (!effectiveParticipants.some(f => f.id === e.paidById)) {
           const found = effectiveParticipants.find(f => f.name === e.paidById);
           if (found) newExpense.paidById = found.id;

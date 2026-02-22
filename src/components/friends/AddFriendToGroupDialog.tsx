@@ -83,7 +83,7 @@ export function AddFriendToGroupDialog({
       } else {
         toast({ title: "오류", description: result.error || "친구 추가에 실패했습니다.", variant: "destructive" });
       }
-    } catch (error) {
+    } catch {
       toast({ title: "오류", description: "친구 추가 중 예외가 발생했습니다.", variant: "destructive" });
     } finally {
       setIsSubmitting(false);

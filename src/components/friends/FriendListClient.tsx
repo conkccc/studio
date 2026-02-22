@@ -27,7 +27,7 @@ interface FriendListClientProps {
   onFriendDeleted?: (friendId: string) => void;
 }
 
-export function FriendListClient({ initialFriends, isReadOnly = false, onFriendAdded, onFriendDeleted }: FriendListClientProps & { isReadOnly?: boolean }) {
+export function FriendListClient({ initialFriends, isReadOnly = false, onFriendDeleted }: FriendListClientProps & { isReadOnly?: boolean }) {
   const [friends, setFriends] = useState<Friend[]>(initialFriends);
   const [editingFriendId, setEditingFriendId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState<{ name: string; description?: string }>({ name: '', description: '' });

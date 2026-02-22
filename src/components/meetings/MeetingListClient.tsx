@@ -41,7 +41,7 @@ export function MeetingListClient({ allFriends }: MeetingListClientProps) {
   const selectedYearParam = searchParams.get('year');
   const currentPageParam = searchParams.get('page');
 
-  const activeYear = useMemo(() => selectedYearParam || new Date().getFullYear().toString(), [selectedYearParam]);
+  const activeYear = useMemo(() => selectedYearParam ?? new Date().getFullYear().toString(), [selectedYearParam]);
   const currentPage = useMemo(() => parseInt(currentPageParam || "1", 10), [currentPageParam]);
 
   const [filterType, setFilterType] = useState<'all' | 'regular' | 'temporary'>('all');
@@ -86,7 +86,7 @@ export function MeetingListClient({ allFriends }: MeetingListClientProps) {
         setAllUsers([]);
       }
 
-    } catch (e) {
+    } catch {
       toast({ title: "오류", description: "데이터 로딩 중 예기치 않은 오류 발생.", variant: "destructive" });
       setMeetings([]);
       setAllUsers([]);

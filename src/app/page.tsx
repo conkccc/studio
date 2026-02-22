@@ -13,7 +13,7 @@ import type { Meeting } from '@/lib/types';
 const MAX_RECENT_MEETINGS_DISPLAY = 1;
 
 export default function DashboardPage() {
-  const { appUser, isAdmin, userRole, loading: authLoading } = useAuth();
+  const { appUser, isAdmin, loading: authLoading } = useAuth();
   const [reserveBalance, setReserveBalance] = useState<number | null>(null);
   const [recentMeetings, setRecentMeetings] = useState<Meeting[]>([]);
   const [isLoadingDashboardData, setIsLoadingDashboardData] = useState(true);

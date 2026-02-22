@@ -1,5 +1,4 @@
 'use client';
-import { useEffect, useState } from 'react';
 import FriendGroupListClient from '@/components/friends/FriendGroupListClient';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
 import { useAuth } from '@/contexts/AuthContext';

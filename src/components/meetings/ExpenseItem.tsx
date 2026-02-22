@@ -1,12 +1,12 @@
 'use client';
 
 import type { Expense, Friend } from '@/lib/types';
-import React, { useState, useTransition } from 'react';
+import React, { useTransition } from 'react';
 import { Timestamp } from 'firebase/firestore';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/hooks/use-toast';
 import { deleteExpenseAction } from '@/lib/actions';
-import { UserCircle, Users, Edit3, Trash2, Loader2, PlaySquare } from 'lucide-react';
+import { UserCircle, Users, Edit3, Trash2, Loader2 } from 'lucide-react';
 import { format, isValid } from 'date-fns';
 import { ko } from 'date-fns/locale';
 import {
@@ -72,20 +72,20 @@ export function ExpenseItem({
         })
         .filter(Boolean) || []) as string[];
 
-      let allMeetingParticipantsInvolved = false;
-      if (isTemporaryMeeting) {
-        const splitAmongIdsSet = new Set(expense.splitAmongIds || []);
-        const participantIdsSet = new Set(participants.map(p => p.id));
-        allMeetingParticipantsInvolved = splitAmongIdsSet.size === participantIdsSet.size &&
-                                       [...splitAmongIdsSet].every(id => participantIdsSet.has(id));
-      } else {
-        const involvedParticipantNames = new Set(involvedNames);
-        const meetingParticipantFullNames = new Set(participants.map(p => p.name + (p.description ? ` (${p.description})` : '')));
-        allMeetingParticipantsInvolved = involvedNames.length === participants.length &&
-                                     participants.length > 0 && 
-                                     [...meetingParticipantFullNames].every(name => involvedParticipantNames.has(name));
-
-      }
+      const allMeetingParticipantsInvolved = isTemporaryMeeting
+        ? (() => {
+            const splitAmongIdsSet = new Set(expense.splitAmongIds || []);
+            const participantIdsSet = new Set(participants.map(p => p.id));
+            return splitAmongIdsSet.size === participantIdsSet.size &&
+              [...splitAmongIdsSet].every(id => participantIdsSet.has(id));
+          })()
+        : (() => {
+            const involvedParticipantNames = new Set(involvedNames);
+            const meetingParticipantFullNames = new Set(participants.map(p => p.name + (p.description ? ` (${p.description})` : '')));
+            return involvedNames.length === participants.length &&
+              participants.length > 0 &&
+              [...meetingParticipantFullNames].every(name => involvedParticipantNames.has(name));
+          })();
 
       if (allMeetingParticipantsInvolved && involvedNames.length > 0) {
         return "모든 참여자";
@@ -112,7 +112,7 @@ export function ExpenseItem({
   };
   
   const formatDate = (dateInput: Date | Timestamp): string => {
-    let date = dateInput instanceof Timestamp ? dateInput.toDate() : new Date(dateInput);
+    const date = dateInput instanceof Timestamp ? dateInput.toDate() : new Date(dateInput);
     if (!isValid(date)) return '날짜 정보 없음';
     return format(date, 'yyyy.MM.dd HH:mm', { locale: ko });
   };
