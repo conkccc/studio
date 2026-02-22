@@ -14,8 +14,6 @@
 - `npm run start`: 빌드 후 프로덕션 서버를 실행합니다.
 - `npm run lint`: Next.js ESLint 체크를 수행합니다.
 - `npm run typecheck`: 타입스크립트 타입 체크만 수행합니다.
-- `npm run genkit:dev`: `src/ai/dev.ts` 기반 Genkit을 실행합니다.
-- `npm run genkit:watch`: Genkit watch 모드로 실행합니다.
 
 ## 코딩 스타일 및 네이밍 규칙
 - 언어는 TypeScript/TSX를 사용합니다.

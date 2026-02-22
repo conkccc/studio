@@ -5,7 +5,7 @@ import type { User as FirebaseUser } from 'firebase/auth';
 import { onAuthStateChanged, signOut as firebaseSignOut } from 'firebase/auth';
 import { auth } from '@/lib/firebase';
 import { useRouter, usePathname } from 'next/navigation';
-import { addUserOnLogin, getUserById as dbGetUserById } from '@/lib/data-store'; // getUserById 별칭 사용
+import { addUserOnLogin, getUserById as dbGetUserById } from '@/lib/data-store/client'; // getUserById 별칭 사용
 import type { User } from '@/lib/types';
 
 interface AuthContextValue {

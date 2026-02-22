@@ -13,3 +13,10 @@ NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID="..."
 NEXT_PUBLIC_GOOGLE_MAPS_API_KEY="..."
 # Google Maps Map ID (for Advanced Markers and other features)
 #NEXT_PUBLIC_GOOGLE_MAPS_MAP_ID="..."
+
+## Data Store Usage
+
+- 서버 코드: `@/lib/data-store`
+- 클라이언트 코드: `@/lib/data-store/client`
+
+세부 내용은 `docs/data-store.md` 참고.

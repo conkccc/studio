@@ -1,9 +1,7 @@
 import type { Metadata, Viewport } from 'next';
 import './globals.css';
 import { AuthProvider } from '@/contexts/AuthContext';
-import { AppShell } from '@/components/layout/AppShell';
 import { Toaster } from "@/components/ui/toaster";
-import { SidebarProvider } from '@/components/ui/sidebar';
 
 export const metadata: Metadata = {
   title: 'N빵친구 - 모임 정산 도우미',
@@ -32,9 +30,7 @@ export default function RootLayout({
     <html lang="ko" className='h-full'>
       <body className="h-full antialiased">
         <AuthProvider>
-          <SidebarProvider>
-            <AppShell>{children}</AppShell>
-          </SidebarProvider>
+          {children}
           <Toaster />
         </AuthProvider>
       </body>
