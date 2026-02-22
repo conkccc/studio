@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useMemo, useEffect, useCallback } from 'react';
+import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import type { Meeting, Friend, FriendGroup, User } from '@/lib/types';
 import { MeetingCard } from './MeetingCard';
 import { useRouter, usePathname, useSearchParams } from 'next/navigation';
@@ -40,6 +40,10 @@ export function MeetingListClient({ allFriends, friendGroups, filtersReady }: Me
   const [isLoading, setIsLoading] = useState(true);
   const [availableYears, setAvailableYears] = useState<number[]>([]);
   const [totalPages, setTotalPages] = useState(0);
+  const inFlightKeyRef = useRef<string | null>(null);
+  const lastCompletedKeyRef = useRef<string | null>(null);
+  const usersInFlightRef = useRef(false);
+  const usersLoadedRef = useRef(false);
 
   const selectedYearParam = searchParams.get('year');
   const currentPageParam = searchParams.get('page');
@@ -105,29 +109,27 @@ export function MeetingListClient({ allFriends, friendGroups, filtersReady }: Me
     }
   }, [activeYear, filterType, selectedGroupId, hydrated]);
 
-  const fetchData = useCallback(async () => {
-    if (authLoading || !currentUser?.uid) {
-      setIsLoading(false);
-      setMeetings([]);
-      setAllUsers([]);
-      setTotalPages(0);
-      setAvailableYears([]);
+  const fetchMeetings = useCallback(async () => {
+    if (authLoading || !currentUser?.uid || !filtersReady || !hydrated || pendingYear) {
       return;
     }
+    const yearToFetch = activeYear === "all" ? undefined : parseInt(activeYear, 10);
+    const requestKey = `${currentUser.uid}|${yearToFetch ?? 'all'}|${currentPage}`;
+    if (inFlightKeyRef.current === requestKey) {
+      return;
+    }
+    if (lastCompletedKeyRef.current === requestKey) {
+      return;
+    }
+    inFlightKeyRef.current = requestKey;
     setIsLoading(true);
     try {
-      const yearToFetch = activeYear === "all" ? undefined : parseInt(activeYear, 10);
-
-      const [meetingsResult, usersResult] = await Promise.all([
-        getMeetingsForUserAction({
-          requestingUserId: currentUser.uid,
-          year: yearToFetch,
-          page: currentPage,
-          limitParam: MEETINGS_PER_PAGE,
-        }),
-        getAllUsersAction()
-      ]);
-
+      const meetingsResult = await getMeetingsForUserAction({
+        requestingUserId: currentUser.uid,
+        year: yearToFetch,
+        page: currentPage,
+        limitParam: MEETINGS_PER_PAGE,
+      });
       if (meetingsResult.success) {
         setMeetings(meetingsResult.meetings || []);
         setTotalPages(Math.ceil((meetingsResult.totalCount || 0) / MEETINGS_PER_PAGE));
@@ -137,27 +139,46 @@ export function MeetingListClient({ allFriends, friendGroups, filtersReady }: Me
         setMeetings([]);
         setTotalPages(0);
       }
+    } catch {
+      toast({ title: "오류", description: "데이터 로딩 중 예기치 않은 오류 발생.", variant: "destructive" });
+      setMeetings([]);
+      setTotalPages(0);
+    } finally {
+      setIsLoading(false);
+      lastCompletedKeyRef.current = requestKey;
+      inFlightKeyRef.current = null;
+    }
+  }, [currentUser, authLoading, activeYear, currentPage, toast, filtersReady, hydrated, pendingYear]);
 
+  const fetchUsers = useCallback(async () => {
+    if (authLoading || !currentUser?.uid || usersLoadedRef.current || usersInFlightRef.current) {
+      return;
+    }
+    usersInFlightRef.current = true;
+    try {
+      const usersResult = await getAllUsersAction();
       if (usersResult.success) {
         setAllUsers(usersResult.users || []);
       } else {
         toast({ title: "오류", description: usersResult.error || "사용자 목록을 불러오는데 실패했습니다.", variant: "destructive" });
         setAllUsers([]);
       }
-
     } catch {
-      toast({ title: "오류", description: "데이터 로딩 중 예기치 않은 오류 발생.", variant: "destructive" });
-      setMeetings([]);
+      toast({ title: "오류", description: "사용자 목록 로딩 중 예기치 않은 오류 발생.", variant: "destructive" });
       setAllUsers([]);
-      setTotalPages(0);
     } finally {
-      setIsLoading(false);
+      usersLoadedRef.current = true;
+      usersInFlightRef.current = false;
     }
-  }, [currentUser, authLoading, activeYear, currentPage, toast]);
+  }, [currentUser, authLoading, toast]);
 
   useEffect(() => {
-    fetchData();
-  }, [fetchData]);
+    fetchMeetings();
+  }, [fetchMeetings]);
+
+  useEffect(() => {
+    fetchUsers();
+  }, [fetchUsers]);
 
   const handlePageChange = (newPage: number) => {
     if (newPage < 1 || newPage > totalPages) return;

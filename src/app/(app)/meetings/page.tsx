@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { getFriendsForUserAction, getFriendGroupsForUserAction } from '@/lib/actions';
 import { MeetingListClient } from '@/features/meetings';
 import { Button } from '@/components/ui/button';
@@ -13,6 +13,8 @@ export default function MeetingsPage() {
   const [allFriends, setAllFriends] = useState<Friend[]>([]);
   const [friendGroups, setFriendGroups] = useState<FriendGroup[]>([]);
   const [dataLoading, setDataLoading] = useState(true);
+  const inFlightRef = useRef(false);
+  const lastFetchedUserIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (authLoading) {
@@ -20,8 +22,11 @@ export default function MeetingsPage() {
       return;
     }
     if (currentUser && appUser?.id) {
+      if (inFlightRef.current) return;
+      if (lastFetchedUserIdRef.current === appUser.id) return;
       const fetchAllFriends = async () => {
         setDataLoading(true);
+        inFlightRef.current = true;
         try {
           const [friendsResult, groupsResult] = await Promise.all([
             getFriendsForUserAction(appUser.id),
@@ -45,6 +50,8 @@ export default function MeetingsPage() {
           setFriendGroups([]);
         } finally {
           setDataLoading(false);
+          inFlightRef.current = false;
+          lastFetchedUserIdRef.current = appUser.id;
         }
       };
       fetchAllFriends();
