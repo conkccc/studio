@@ -702,9 +702,13 @@ export function MeetingDetailsClient({
       )}
 
       <Tabs defaultValue="expenses" className="w-full">
-        <TabsList className="grid w-full grid-cols-2">
-          <TabsTrigger value="expenses">지출 내역</TabsTrigger>
-          <TabsTrigger value="summary">정산 요약</TabsTrigger>
+        <TabsList className="w-full">
+          <TabsTrigger value="expenses" className="flex-1">
+            지출 내역
+          </TabsTrigger>
+          <TabsTrigger value="summary" className="flex-1">
+            정산 요약
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="expenses">
