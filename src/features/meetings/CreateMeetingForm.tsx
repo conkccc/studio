@@ -14,7 +14,7 @@ import { Calendar } from '@/components/ui/calendar';
 import { cn } from '@/lib/utils';
 import { format } from 'date-fns';
 import { ko } from 'date-fns/locale';
-import type { Friend, Meeting, FriendGroup } from '@/lib/types';
+import type { Expense, Friend, Meeting, FriendGroup } from '@/lib/types';
 import { createMeetingAction, updateMeetingAction } from '@/lib/actions';
 import { useToast } from '@/hooks/use-toast';
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
@@ -23,6 +23,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Loader } from '@googlemaps/js-api-loader';
 import usePlacesAutocomplete, { getGeocode, getLatLng } from 'use-places-autocomplete';
+import { calculateReserveFundBreakdown } from '@/lib/reserve-fund-settlement';
 
 const meetingSchemaBase = z.object({
   name: z.string().min(1, '모임 이름을 입력해주세요.').max(100, '모임 이름은 100자 이내여야 합니다.'),
@@ -41,6 +42,8 @@ const meetingSchemaBase = z.object({
     z.number().min(0, '금액은 0 이상이어야 합니다.').optional()
   ),
   nonReserveFundParticipants: z.array(z.string()).optional(),
+  refundReserveFundToNonParticipants: z.boolean().optional(),
+  reserveFundRefundRecipientIds: z.array(z.string()).optional(),
   memo: z.string().max(2000, '메모는 2000자 이내여야 합니다.').optional(),
 });
 
@@ -86,6 +89,7 @@ type MeetingFormData = z.infer<typeof meetingSchema>;
 
 interface MeetingFormProps {
   friends: Friend[];
+  expenses?: Expense[];
   isLoadingFriends?: boolean;
   currentUserId: string;
   isEditMode?: boolean;
@@ -282,6 +286,7 @@ function SelectDate(props: SelectDateProps) {
 
 export function CreateMeetingForm({
   friends,
+  expenses = [],
   isLoadingFriends,
   currentUserId,
   isEditMode = false,
@@ -326,6 +331,8 @@ export function CreateMeetingForm({
       useReserveFund: initialData.useReserveFund || false,
       partialReserveFundAmount: initialData.partialReserveFundAmount === undefined ? undefined : Number(initialData.partialReserveFundAmount),
       nonReserveFundParticipants: initialData.nonReserveFundParticipants || [],
+      refundReserveFundToNonParticipants: initialData.refundReserveFundToNonParticipants || false,
+      reserveFundRefundRecipientIds: initialData.reserveFundRefundRecipientIds || [],
       memo: initialData.memo || '',
       isTemporary: initialData.isTemporary || false,
       temporaryParticipants: initialData.temporaryParticipants || [],
@@ -341,6 +348,8 @@ export function CreateMeetingForm({
       useReserveFund: false,
       partialReserveFundAmount: undefined,
       nonReserveFundParticipants: [],
+      refundReserveFundToNonParticipants: false,
+      reserveFundRefundRecipientIds: [],
       memo: '',
       isTemporary: false,
       temporaryParticipants: [],
@@ -358,10 +367,46 @@ export function CreateMeetingForm({
   const endTimeValue = useWatch({ control: form.control, name: 'endTime' });
   const watchPartialReserveFundAmount = useWatch({ control: form.control, name: 'partialReserveFundAmount' });
   const watchNonReserveFundParticipants = useWatch({ control: form.control, name: 'nonReserveFundParticipants' });
+  const watchRefundReserveFundToNonParticipants = useWatch({ control: form.control, name: 'refundReserveFundToNonParticipants' });
+  const watchReserveFundRefundRecipientIds = useWatch({ control: form.control, name: 'reserveFundRefundRecipientIds' });
 
   const selectedParticipants = useMemo(
     () => friends.filter(friend => watchParticipantIds?.includes(friend.id)),
     [friends, watchParticipantIds]
+  );
+
+  const selectedParticipantIds = useMemo(
+    () => selectedParticipants.map(participant => participant.id),
+    [selectedParticipants]
+  );
+
+  const refundableNonParticipants = useMemo(
+    () => friends.filter(friend => !(watchParticipantIds || []).includes(friend.id)),
+    [friends, watchParticipantIds]
+  );
+
+  const reserveFundPreview = useMemo(
+    () =>
+      calculateReserveFundBreakdown({
+        settings: {
+          useReserveFund: watchUseReserveFund || false,
+          partialReserveFundAmount: watchPartialReserveFundAmount,
+          nonReserveFundParticipants: watchNonReserveFundParticipants || [],
+          refundReserveFundToNonParticipants: watchRefundReserveFundToNonParticipants || false,
+          reserveFundRefundRecipientIds: watchReserveFundRefundRecipientIds || [],
+        },
+        expenses,
+        participantIds: selectedParticipantIds,
+      }),
+    [
+      expenses,
+      watchNonReserveFundParticipants,
+      watchPartialReserveFundAmount,
+      watchRefundReserveFundToNonParticipants,
+      watchReserveFundRefundRecipientIds,
+      watchUseReserveFund,
+      selectedParticipantIds,
+    ]
   );
 
   useEffect(() => {
@@ -483,6 +528,36 @@ export function CreateMeetingForm({
     }
   }, [watchPartialReserveFundAmount]);
 
+  useEffect(() => {
+    if (watchUseReserveFund) {
+      return;
+    }
+
+    if (watchRefundReserveFundToNonParticipants) {
+      form.setValue('refundReserveFundToNonParticipants', false, { shouldValidate: true });
+    }
+    if ((watchReserveFundRefundRecipientIds || []).length > 0) {
+      form.setValue('reserveFundRefundRecipientIds', [], { shouldValidate: true });
+    }
+  }, [form, watchRefundReserveFundToNonParticipants, watchReserveFundRefundRecipientIds, watchUseReserveFund]);
+
+  useEffect(() => {
+    const validRecipientIds = (watchReserveFundRefundRecipientIds || []).filter(
+      id => !(watchParticipantIds || []).includes(id) && friends.some(friend => friend.id === id)
+    );
+
+    if (validRecipientIds.length !== (watchReserveFundRefundRecipientIds || []).length) {
+      form.setValue('reserveFundRefundRecipientIds', validRecipientIds, { shouldValidate: true });
+    }
+  }, [form, friends, watchParticipantIds, watchReserveFundRefundRecipientIds]);
+
+  const handleApplyTotalReserveFundAmount = useCallback(() => {
+    form.setValue('partialReserveFundAmount', reserveFundPreview.applicableContributionTotal, {
+      shouldDirty: true,
+      shouldValidate: true,
+    });
+  }, [form, reserveFundPreview.applicableContributionTotal]);
+
   const onSubmit = (data: MeetingFormData) => {
     const resolvedGroupId = currentMeetingGroupId || (initialData?.groupId ?? '');
     if (!data.isTemporary && (!resolvedGroupId || !resolvedGroupId.trim())) {
@@ -516,6 +591,8 @@ export function CreateMeetingForm({
           useReserveFund: false,
           partialReserveFundAmount: undefined,
           nonReserveFundParticipants: [],
+          refundReserveFundToNonParticipants: false,
+          reserveFundRefundRecipientIds: [],
         };
       } else {
         payloadForDb = {
@@ -532,6 +609,11 @@ export function CreateMeetingForm({
               ? data.partialReserveFundAmount
               : undefined,
           nonReserveFundParticipants: data.nonReserveFundParticipants || [],
+          refundReserveFundToNonParticipants: data.useReserveFund ? (data.refundReserveFundToNonParticipants || false) : false,
+          reserveFundRefundRecipientIds:
+            data.useReserveFund && data.refundReserveFundToNonParticipants
+              ? data.reserveFundRefundRecipientIds || []
+              : [],
           memo: data.memo || undefined,
           groupId: resolvedGroupId,
           isTemporary: false,
@@ -853,16 +935,32 @@ export function CreateMeetingForm({
 
           {watchUseReserveFund && !watchedIsTemporary && (
             <div className="space-y-4 mt-4 pl-2 border-l-2 ml-2">
-              <div>
-                <Label
-                  htmlFor="partialReserveFundAmount"
-                  className={cn((isEditMode && initialData?.isSettled) && "text-muted-foreground")}
-                >
-                  사용할 회비 금액 (원) <span className="text-destructive">*</span>
-                </Label>
-                <Controller
-                  name="partialReserveFundAmount"
-                  control={form.control}
+	              <div>
+	                <Label
+	                  htmlFor="partialReserveFundAmount"
+	                  className={cn((isEditMode && initialData?.isSettled) && "text-muted-foreground")}
+	                >
+	                  사용할 회비 금액 (원) <span className="text-destructive">*</span>
+	                </Label>
+		                {isEditMode && (
+		                  <div className="mt-2 flex flex-col gap-2 sm:flex-row sm:items-center">
+		                    <Button
+		                      type="button"
+		                      variant="outline"
+		                      size="sm"
+		                      onClick={handleApplyTotalReserveFundAmount}
+		                      disabled={isPending || (isEditMode && initialData?.isSettled) || watchedIsTemporary || reserveFundPreview.applicableContributionTotal <= 0}
+		                    >
+		                      전체 금액 회비 사용
+		                    </Button>
+		                    <p className="text-xs text-muted-foreground">
+		                      회비 사용 제외 멤버를 뺀 현재 지출 부담 총액 {reserveFundPreview.applicableContributionTotal.toLocaleString(undefined, { maximumFractionDigits: 0 })}원을 자동 입력합니다.
+		                    </p>
+		                  </div>
+		                )}
+	                <Controller
+	                  name="partialReserveFundAmount"
+	                  control={form.control}
                   render={({ field }) => (
                     <Input
                       id="partialReserveFundAmount"
@@ -905,7 +1003,7 @@ export function CreateMeetingForm({
                 <p className={cn("text-xs", (isEditMode && initialData?.isSettled) ? "text-muted-foreground/70" : "text-muted-foreground", watchedIsTemporary && "text-muted-foreground/70" )}>
                   선택된 멤버는 이 모임에서 회비 사용 혜택을 받지 않습니다.
                 </p>
-                <div className="grid gap-2 mt-2">
+	                <div className="grid gap-2 mt-2">
                   {selectedParticipants.length > 0 ? (
                       selectedParticipants.map(participant => (
                         <div key={participant.id} className="flex items-center space-x-2">
@@ -946,13 +1044,115 @@ export function CreateMeetingForm({
                   ) : (
                     <p className={cn("text-sm", (isEditMode && initialData?.isSettled) ? "text-muted-foreground/70" : "text-mutedForeground", watchedIsTemporary && "text-muted-foreground/70" )}>참여자를 먼저 선택해주세요.</p>
                   )}
+	                </div>
+	                {form.formState.errors.nonReserveFundParticipants && <p className="text-sm text-destructive mt-1">{form.formState.errors.nonReserveFundParticipants.message}</p>}
+	              </div>
+
+                <div className="space-y-2 rounded-md border border-dashed p-3">
+                  <div className="flex items-center space-x-2">
+                    <Controller
+                      control={form.control}
+                      name="refundReserveFundToNonParticipants"
+                      render={({ field }) => (
+                        <Switch
+                          id="refundReserveFundToNonParticipants"
+                          checked={field.value || false}
+                          onCheckedChange={(checked) => {
+                            field.onChange(checked);
+                            if (!checked) {
+                              form.setValue('reserveFundRefundRecipientIds', [], { shouldValidate: true });
+                            }
+                          }}
+                          disabled={isPending || (isEditMode && initialData?.isSettled) || watchedIsTemporary}
+                        />
+                      )}
+                    />
+                    <Label
+                      htmlFor="refundReserveFundToNonParticipants"
+                      className={cn(
+                        "cursor-pointer",
+                        (isEditMode && initialData?.isSettled) && "text-muted-foreground cursor-not-allowed",
+                        watchedIsTemporary && "text-muted-foreground cursor-not-allowed"
+                      )}
+                    >
+                      미참가자 회비 돌려주기
+                    </Label>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    체크하면 회비 적용 참여자 1인당 사용 회비를 선택한 미참가자에게 동일 금액으로 환급합니다.
+                  </p>
+
+                  {watchRefundReserveFundToNonParticipants && (
+                    <div className="space-y-3 pt-1">
+                      <div className="rounded-md bg-secondary/40 p-3 text-xs text-muted-foreground space-y-1">
+                        <p>
+                          현재 1인당 사용 회비: {reserveFundPreview.perApplicableFundShare.toLocaleString(undefined, { maximumFractionDigits: 0 })}원
+                        </p>
+                        <p>
+                          환급 예상 총액: {reserveFundPreview.refundTotal.toLocaleString(undefined, { maximumFractionDigits: 0 })}원
+                        </p>
+                        <p>
+                          총 회비 사용 예정: {reserveFundPreview.totalFundUsed.toLocaleString(undefined, { maximumFractionDigits: 0 })}원
+                        </p>
+                      </div>
+
+                      <div>
+                        <Label className={cn("font-medium", (isEditMode && initialData?.isSettled) && "text-muted-foreground")}>
+                          회비 돌려받을 친구
+                        </Label>
+                        <p className="text-xs text-muted-foreground">
+                          현재 모임 참여자가 아닌 친구만 선택할 수 있습니다.
+                        </p>
+                        <div className="grid gap-2 mt-2">
+                          {refundableNonParticipants.length > 0 ? (
+                            refundableNonParticipants.map(friend => (
+                              <div key={friend.id} className="flex items-center space-x-2">
+                                <Controller
+                                  control={form.control}
+                                  name="reserveFundRefundRecipientIds"
+                                  render={({ field }) => (
+                                    <Checkbox
+                                      id={`reserveFundRefundRecipient-${friend.id}`}
+                                      checked={field.value?.includes(friend.id)}
+                                      onCheckedChange={(checked) => {
+                                        const currentRecipientIds = field.value || [];
+                                        const nextRecipientIds = checked
+                                          ? [...currentRecipientIds, friend.id]
+                                          : currentRecipientIds.filter(id => id !== friend.id);
+                                        field.onChange(nextRecipientIds);
+                                      }}
+                                      disabled={isPending || (isEditMode && initialData?.isSettled) || watchedIsTemporary}
+                                    />
+                                  )}
+                                />
+                                <Label
+                                  htmlFor={`reserveFundRefundRecipient-${friend.id}`}
+                                  className={cn(
+                                    "font-normal",
+                                    (isEditMode && initialData?.isSettled) && "text-muted-foreground cursor-not-allowed",
+                                    watchedIsTemporary && "text-muted-foreground cursor-not-allowed"
+                                  )}
+                                >
+                                  {friend.name}
+                                  {friend.description && (
+                                    <span className="ml-1 text-xs text-muted-foreground">({friend.description})</span>
+                                  )}
+                                  {friend.id === currentUserId && " (나)"}
+                                </Label>
+                              </div>
+                            ))
+                          ) : (
+                            <p className="text-sm text-muted-foreground">현재 선택 가능한 미참가 친구가 없습니다.</p>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
-                {form.formState.errors.nonReserveFundParticipants && <p className="text-sm text-destructive mt-1">{form.formState.errors.nonReserveFundParticipants.message}</p>}
-              </div>
-            </div>
-          )}
-        </div>
-      )}
+	            </div>
+	          )}
+	        </div>
+	      )}
 
       {watchedIsTemporary && (
         <div className="space-y-4 border p-4 rounded-md mt-4">

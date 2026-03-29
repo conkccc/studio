@@ -49,6 +49,8 @@ export async function createMeetingAction(
       locationName,
       participantIds,
       nonReserveFundParticipants,
+      refundReserveFundToNonParticipants,
+      reserveFundRefundRecipientIds,
       temporaryParticipants,
       partialReserveFundAmount,
       memo,
@@ -76,6 +78,8 @@ export async function createMeetingAction(
       participantIds: participantIds || [],
       useReserveFund: useReserveFund || false,
       nonReserveFundParticipants: nonReserveFundParticipants || [],
+      refundReserveFundToNonParticipants: refundReserveFundToNonParticipants || false,
+      reserveFundRefundRecipientIds: reserveFundRefundRecipientIds || [],
       ...(endTime !== undefined && { endTime }),
       ...(locationCoordinates !== undefined && { locationCoordinates }),
       ...(memo !== undefined && { memo }),
@@ -94,6 +98,8 @@ export async function createMeetingAction(
       delete meetingDataToSave.useReserveFund;
       delete meetingDataToSave.partialReserveFundAmount;
       delete meetingDataToSave.nonReserveFundParticipants;
+      delete meetingDataToSave.refundReserveFundToNonParticipants;
+      delete meetingDataToSave.reserveFundRefundRecipientIds;
 
       meetingDataToSave.temporaryParticipants = temporaryParticipants || [];
       if (totalFee !== undefined) meetingDataToSave.totalFee = totalFee;
@@ -103,8 +109,12 @@ export async function createMeetingAction(
         meetingDataToSave.partialReserveFundAmount = (typeof partialReserveFundAmount === 'number' && !isNaN(partialReserveFundAmount))
           ? partialReserveFundAmount
           : 0;
+        meetingDataToSave.refundReserveFundToNonParticipants = refundReserveFundToNonParticipants || false;
+        meetingDataToSave.reserveFundRefundRecipientIds = refundReserveFundToNonParticipants ? (reserveFundRefundRecipientIds || []) : [];
       } else {
          delete (meetingDataToSave as Partial<AddMeetingPayload>).partialReserveFundAmount;
+         delete (meetingDataToSave as Partial<AddMeetingPayload>).refundReserveFundToNonParticipants;
+         delete (meetingDataToSave as Partial<AddMeetingPayload>).reserveFundRefundRecipientIds;
       }
       delete (meetingDataToSave as Partial<AddMeetingPayload>).temporaryParticipants;
       delete (meetingDataToSave as Partial<AddMeetingPayload>).totalFee;
@@ -147,6 +157,7 @@ export async function updateMeetingAction(
     const {
       name, dateTime, groupId, locationName, locationCoordinates,
       participantIds, useReserveFund, nonReserveFundParticipants,
+      refundReserveFundToNonParticipants, reserveFundRefundRecipientIds,
       partialReserveFundAmount, memo, endTime,
       totalFee, feePerPerson, temporaryParticipants,
       isShareEnabled, shareToken, shareExpiryDate, isSettled
@@ -160,7 +171,9 @@ export async function updateMeetingAction(
 
     const reserveFundSettingsChanged = payload.useReserveFund !== undefined ||
                                      payload.partialReserveFundAmount !== undefined ||
-                                     payload.nonReserveFundParticipants !== undefined;
+                                     payload.nonReserveFundParticipants !== undefined ||
+                                     payload.refundReserveFundToNonParticipants !== undefined ||
+                                     payload.reserveFundRefundRecipientIds !== undefined;
 
     if (meetingToUpdate.isSettled && reserveFundSettingsChanged) {
       await dbRevertMeetingDeduction(id);
@@ -178,6 +191,12 @@ export async function updateMeetingAction(
     if (Object.prototype.hasOwnProperty.call(payload, 'participantIds')) meetingDataToUpdate.participantIds = participantIds;
     if (Object.prototype.hasOwnProperty.call(payload, 'useReserveFund')) meetingDataToUpdate.useReserveFund = useReserveFund;
     if (Object.prototype.hasOwnProperty.call(payload, 'nonReserveFundParticipants')) meetingDataToUpdate.nonReserveFundParticipants = nonReserveFundParticipants;
+    if (Object.prototype.hasOwnProperty.call(payload, 'refundReserveFundToNonParticipants')) {
+      meetingDataToUpdate.refundReserveFundToNonParticipants = refundReserveFundToNonParticipants;
+    }
+    if (Object.prototype.hasOwnProperty.call(payload, 'reserveFundRefundRecipientIds')) {
+      meetingDataToUpdate.reserveFundRefundRecipientIds = reserveFundRefundRecipientIds;
+    }
     if (Object.prototype.hasOwnProperty.call(payload, 'partialReserveFundAmount')) meetingDataToUpdate.partialReserveFundAmount = partialReserveFundAmount;
     if (Object.prototype.hasOwnProperty.call(payload, 'memo')) meetingDataToUpdate.memo = memo;
     if (Object.prototype.hasOwnProperty.call(payload, 'endTime')) meetingDataToUpdate.endTime = endTime;
@@ -214,6 +233,8 @@ export async function updateMeetingAction(
       delete meetingDataToUpdate.useReserveFund;
       delete meetingDataToUpdate.partialReserveFundAmount;
       delete meetingDataToUpdate.nonReserveFundParticipants;
+      delete meetingDataToUpdate.refundReserveFundToNonParticipants;
+      delete meetingDataToUpdate.reserveFundRefundRecipientIds;
 
       if (Object.prototype.hasOwnProperty.call(payload, 'totalFee') && meetingDataToUpdate.totalFee !== undefined) {
         meetingDataToUpdate.feePerPerson = undefined;
@@ -236,10 +257,23 @@ export async function updateMeetingAction(
       } else {
         meetingDataToUpdate.partialReserveFundAmount = undefined;
         meetingDataToUpdate.nonReserveFundParticipants = [];
+        meetingDataToUpdate.refundReserveFundToNonParticipants = false;
+        meetingDataToUpdate.reserveFundRefundRecipientIds = [];
       }
 
       if (meetingDataToUpdate.useReserveFund === false) {
         meetingDataToUpdate.nonReserveFundParticipants = [];
+        meetingDataToUpdate.refundReserveFundToNonParticipants = false;
+        meetingDataToUpdate.reserveFundRefundRecipientIds = [];
+      }
+
+      const willRefundToNonParticipantsCurrent =
+        meetingDataToUpdate.refundReserveFundToNonParticipants !== undefined
+          ? meetingDataToUpdate.refundReserveFundToNonParticipants
+          : meetingToUpdate.refundReserveFundToNonParticipants;
+
+      if (!willRefundToNonParticipantsCurrent) {
+        meetingDataToUpdate.reserveFundRefundRecipientIds = [];
       }
     }
 

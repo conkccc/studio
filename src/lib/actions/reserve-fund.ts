@@ -14,6 +14,7 @@ import {
 import { db } from '../firebase';
 import type { FriendGroup } from '../types';
 import { ensureUserPermission } from './permissions';
+import { calculateReserveFundBreakdown } from '../reserve-fund-settlement';
 
 // 회비 관련 액션
 export async function setReserveFundBalanceAction(groupId: string, newBalance: number, description?: string, currentUserId?: string | null) {
@@ -89,7 +90,12 @@ export async function finalizeMeetingSettlementAction(meetingId: string, current
     }
 
     const currentReserveBalance = await getReserveFundBalance(meeting.groupId);
-    const amountToDeduct = meeting.partialReserveFundAmount;
+    const reserveFundBreakdown = calculateReserveFundBreakdown({
+      settings: meeting,
+      expenses,
+      participantIds: meeting.participantIds || [],
+    });
+    const amountToDeduct = reserveFundBreakdown.totalFundUsed;
 
     let message = "";
     let actualDeduction = 0;
@@ -100,6 +106,9 @@ export async function finalizeMeetingSettlementAction(meetingId: string, current
             await dbRevertMeetingDeduction(meeting.id);
             await dbRecordMeetingDeduction(meeting.groupId, meeting.id, meeting.name, actualDeduction, meeting.dateTime);
             message = `모임 (${meeting.name}) 정산 확정. 회비에서 ${actualDeduction.toLocaleString()}원 사용.`;
+            if (reserveFundBreakdown.refundTotal > 0.001) {
+                message += ` (참여자 지원 ${reserveFundBreakdown.baseFundUsed.toLocaleString()}원, 미참가자 환급 ${reserveFundBreakdown.refundTotal.toLocaleString()}원 포함)`;
+            }
             if (actualDeduction < amountToDeduct) {
                 message += ` (설정된 금액보다 회비 잔액이 부족하여 부분 사용)`;
             }

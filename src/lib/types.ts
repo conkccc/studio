@@ -54,6 +54,8 @@ export type Meeting = {
   useReserveFund: boolean;
   partialReserveFundAmount?: number;
   nonReserveFundParticipants: string[];
+  refundReserveFundToNonParticipants?: boolean;
+  reserveFundRefundRecipientIds?: string[];
   isSettled?: boolean;
   isShareEnabled?: boolean;
   shareToken?: string | null;

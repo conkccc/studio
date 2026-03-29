@@ -5,14 +5,15 @@ import { useEffect, useState, useCallback } from 'react';
 import {
   getMeetingByIdAction,
   getFriendsByGroupAction,
-  getFriendGroupsForUserAction
+  getFriendGroupsForUserAction,
+  getExpensesByMeetingIdAction,
 } from '@/lib/actions';
 import { CreateMeetingForm } from '@/features/meetings';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
 import { useAuth } from '@/contexts/AuthContext';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
-import type { Meeting, Friend, FriendGroup } from '@/lib/types';
+import type { Meeting, Friend, FriendGroup, Expense } from '@/lib/types';
 import { useParams, useRouter } from 'next/navigation';
 import { useToast } from '@/hooks/use-toast';
 import { Loader2 } from 'lucide-react';
@@ -25,6 +26,7 @@ export default function EditMeetingPage() {
   const meetingId = typeof params.meetingId === 'string' ? params.meetingId : undefined;
 
   const [meetingToEdit, setMeetingToEdit] = useState<Meeting | null>(null);
+  const [meetingExpenses, setMeetingExpenses] = useState<Expense[]>([]);
   const [friendsForForm, setFriendsForForm] = useState<Friend[]>([]);
   const [groupsForForm, setGroupsForForm] = useState<FriendGroup[]>([]);
   const [hasEditPermission, setHasEditPermission] = useState(false);
@@ -39,9 +41,10 @@ export default function EditMeetingPage() {
     }
     setIsLoadingPageData(true);
     try {
-      const [meetingResult, groupsResult] = await Promise.all([
+      const [meetingResult, groupsResult, expensesResult] = await Promise.all([
         getMeetingByIdAction(meetingId),
         getFriendGroupsForUserAction(appUser.id),
+        getExpensesByMeetingIdAction(meetingId),
       ]);
 
       if (groupsResult.success && groupsResult.groups) {
@@ -49,6 +52,13 @@ export default function EditMeetingPage() {
       } else {
         toast({ title: "경고", description: `사용자 그룹 목록 로드 실패: ${groupsResult.error}`, variant: "default" });
         setGroupsForForm([]);
+      }
+
+      if (expensesResult.success && expensesResult.expenses) {
+        setMeetingExpenses(expensesResult.expenses);
+      } else {
+        toast({ title: "경고", description: `지출 내역 로드 실패: ${expensesResult.error}`, variant: "default" });
+        setMeetingExpenses([]);
       }
 
       if (meetingResult.success && meetingResult.meeting) {
@@ -85,6 +95,7 @@ export default function EditMeetingPage() {
     } catch {
       toast({ title: "오류", description: "페이지 데이터 조회 중 예외가 발생했습니다.", variant: "destructive" });
       setMeetingToEdit(null);
+      setMeetingExpenses([]);
       setHasEditPermission(false);
       setGroupsForForm([]);
       setFriendsForForm([]);
@@ -184,6 +195,7 @@ export default function EditMeetingPage() {
             isEditMode={true}
             initialData={meetingToEdit}
             friends={friendsForForm}
+            expenses={meetingExpenses}
             isLoadingFriends={isLoadingPageData && !!selectedGroupIdInForm}
             groups={groupsForForm}
             selectedGroupId={selectedGroupIdInForm}

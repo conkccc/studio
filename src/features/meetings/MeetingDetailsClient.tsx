@@ -40,6 +40,7 @@ import { cn } from '@/lib/utils';
 import { Loader } from '@googlemaps/js-api-loader';
 import { Accordion, AccordionItem, AccordionTrigger, AccordionContent } from '@/components/ui/accordion';
 import type { User } from '@/lib/types';
+import { calculateReserveFundBreakdown } from '@/lib/reserve-fund-settlement';
 
 const googleMapsLibraries: ("places" | "maps" | "marker")[] = ["places", "maps", "marker"];
 
@@ -205,6 +206,16 @@ export function MeetingDetailsClient({
       .map(id => allFriends.find(f => f.id === id))
       .filter((f): f is Friend => Boolean(f)),
     [meeting.participantIds, allFriends]
+  );
+
+  const reserveFundBreakdown = useMemo(
+    () =>
+      calculateReserveFundBreakdown({
+        settings: meeting,
+        expenses,
+        participantIds: participants.map(participant => participant.id),
+      }),
+    [expenses, meeting, participants]
   );
 
   // Participants list to be used for display and in dialogs/components
@@ -569,6 +580,11 @@ export function MeetingDetailsClient({
                 {`회비에서 ${(meeting.partialReserveFundAmount || 0).toLocaleString()}원 사용`}
                 {meeting.isSettled && ` (정산 확정됨)`}
               </p>
+              {reserveFundBreakdown.perApplicableFundShare > 0 && (
+                <p className="text-muted-foreground pl-6 text-xs">
+                  1인당 사용 회비: {reserveFundBreakdown.perApplicableFundShare.toLocaleString()}원
+                </p>
+              )}
               {meeting.nonReserveFundParticipants && meeting.nonReserveFundParticipants.length > 0 && (
                 <p className="text-muted-foreground pl-6 text-xs">
                   (회비 사용 제외: {meeting.nonReserveFundParticipants.map(id => {
@@ -576,6 +592,19 @@ export function MeetingDetailsClient({
                     return f ? f.name + (f.description ? ` (${f.description})` : '') : '알 수 없음';
                   }).join(', ')})
                 </p>
+              )}
+              {meeting.refundReserveFundToNonParticipants && reserveFundBreakdown.refundRecipientIds.length > 0 && (
+                <>
+                  <p className="text-muted-foreground pl-6 text-xs">
+                    미참가자 환급 대상: {reserveFundBreakdown.refundRecipientIds.map((id: string) => {
+                      const f = allFriends.find(friend => friend.id === id);
+                      return f ? f.name + (f.description ? ` (${f.description})` : '') : '알 수 없음';
+                    }).join(', ')}
+                  </p>
+                  <p className="text-muted-foreground pl-6 text-xs">
+                    미참가자 환급 총액: {reserveFundBreakdown.refundTotal.toLocaleString()}원, 총 회비 사용: {reserveFundBreakdown.totalFundUsed.toLocaleString()}원
+                  </p>
+                </>
               )}
             </div>
           ) : meeting.useReserveFund ? (
