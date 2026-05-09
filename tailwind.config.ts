@@ -2,11 +2,9 @@ import type { Config } from "tailwindcss";
 import tailwindcssAnimate from "tailwindcss-animate";
 
 export default {
-    darkMode: ["class"],
-    content: [
-    // "./src/pages/**/*.{js,ts,jsx,tsx,mdx}", // App Router 사용으로 pages 디렉토리 불필요
-    "./src/components/**/*.{js,ts,jsx,tsx,mdx}",
-    "./src/app/**/*.{js,ts,jsx,tsx,mdx}",
+  darkMode: ["class"],
+  content: [
+    "./src/**/*.{js,ts,jsx,tsx,mdx}",
   ],
   theme: {
   	extend: {
