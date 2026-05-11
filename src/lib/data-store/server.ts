@@ -292,6 +292,7 @@ export const getMeetings = async ({
   
   // Admin SDK 사용 시
   if (adminDb) {
+    console.log(`[getMeetings] Admin SDK branch used for user: ${userId || 'Admin'}`);
     const meetingsColl = adminDb.collection(MEETINGS_COLLECTION);
     
     // 1. 가용 연도(availableYears) 계산 - 더 효율적으로 처리 필요하지만 일단 기존 로직 유지하되 Admin SDK로 수행
@@ -371,6 +372,7 @@ export const getMeetings = async ({
       fetchedMeetings.sort((a, b) => (b.dateTime?.getTime() || 0) - (a.dateTime?.getTime() || 0));
 
       const totalCount = fetchedMeetings.length;
+      console.log(`[getMeetings] Filtered branch returning ${fetchedMeetings.length} meetings`);
       let paginatedMeetings = fetchedMeetings;
       if (limitParam) {
         const startIndex = (page - 1) * limitParam;
@@ -378,19 +380,23 @@ export const getMeetings = async ({
       }
       return { meetings: paginatedMeetings, totalCount, availableYears };
     } else {
-      // 전체 조회 (Admin) - Pagination을 서버에서 처리
-      let finalQuery = applyDateConstraints(meetingsColl).orderBy('dateTime', 'desc');
-      const totalCountSnap = await applyDateConstraints(meetingsColl).count().get();
-      const totalCount = totalCountSnap.data().count;
-
-      if (limitParam) {
-        finalQuery = finalQuery.limit(limitParam).offset((page - 1) * limitParam);
-      }
+      // 전체 조회 (Admin)
+      const finalQuery = applyDateConstraints(meetingsColl).orderBy('dateTime', 'desc');
       const snapshot = await finalQuery.get();
       fetchedMeetings = arrayFromSnapshot<Meeting>(snapshot);
-      return { meetings: fetchedMeetings, totalCount, availableYears };
+      const totalCount = fetchedMeetings.length;
+
+      let paginatedMeetings = fetchedMeetings;
+      if (limitParam) {
+        const startIndex = (page - 1) * limitParam;
+        paginatedMeetings = fetchedMeetings.slice(startIndex, startIndex + limitParam);
+      }
+      console.log(`[getMeetings] Admin branch (memory-paginated) returning ${paginatedMeetings.length} meetings, total: ${totalCount}`);
+      return { meetings: paginatedMeetings, totalCount, availableYears };
     }
   }
+
+  console.log(`[getMeetings] Client SDK Fallback branch used for user: ${userId || 'Admin'}`);
 
   // Client SDK Fallback (기존 로직과 유사하나 약간의 최적화)
   const meetingsCollectionRef = collection(db, MEETINGS_COLLECTION);
@@ -474,25 +480,18 @@ export const getMeetings = async ({
     return { meetings: paginatedMeetings, totalCount, availableYears };
   } else {
     const qConstraints: QueryConstraint[] = [orderBy('dateTime', 'desc'), ...dateConstraints];
-    let finalQuery = query(meetingsCollectionRef, ...qConstraints);
-    const countQueryForPagination = query(meetingsCollectionRef, ...dateConstraints);
-    const totalCountSnapshotForPagination = await getCountFromServer(countQueryForPagination);
-    const totalCountForPagination = totalCountSnapshotForPagination.data().count;
-
-    if (limitParam && page > 1) {
-      const docsToSkip = (page - 1) * limitParam;
-      const skipperQuery = query(meetingsCollectionRef, ...qConstraints, firestoreLimit(docsToSkip));
-      const skipperSnapshot = await getDocs(skipperQuery);
-      if (skipperSnapshot.docs.length === docsToSkip) {
-        finalQuery = query(meetingsCollectionRef, ...qConstraints, firestoreStartAfter(skipperSnapshot.docs[skipperSnapshot.docs.length - 1]));
-      } else if (skipperSnapshot.docs.length < docsToSkip) {
-         return { meetings: [], totalCount: totalCountForPagination, availableYears };
-      }
-    }
-    if (limitParam) finalQuery = query(finalQuery, firestoreLimit(limitParam));
+    const finalQuery = query(meetingsCollectionRef, ...qConstraints);
     const snapshot = await getDocs(finalQuery);
     fetchedMeetings = arrayFromSnapshot<Meeting>(snapshot);
-    return { meetings: fetchedMeetings, totalCount: totalCountForPagination, availableYears };
+    const totalCount = fetchedMeetings.length;
+
+    let paginatedMeetings = fetchedMeetings;
+    if (limitParam) {
+      const startIndex = (page - 1) * limitParam;
+      paginatedMeetings = fetchedMeetings.slice(startIndex, startIndex + limitParam);
+    }
+    console.log(`[getMeetings] Client SDK Admin branch returning ${paginatedMeetings.length} meetings, total: ${totalCount}`);
+    return { meetings: paginatedMeetings, totalCount, availableYears };
   }
 };
 

@@ -22,6 +22,7 @@ if (existingApps.length) {
       adminApp = initializeApp({
         credential: cert(credential),
       } as AppOptions);
+      console.log('Firebase Admin SDK 초기화 성공');
     } catch (error) {
       console.warn('Firebase Admin SDK 초기화 중 오류 발생 (더미 키 또는 잘못된 형식의 키 사용 가능성):', error instanceof Error ? error.message : String(error));
       adminApp = undefined; // 오류 발생 시 adminApp을 undefined로 명시적 설정
