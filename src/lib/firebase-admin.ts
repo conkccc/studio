@@ -1,5 +1,5 @@
 // 서버 전용 Firebase Admin SDK 초기화
-import { initializeApp, getApps, cert, AppOptions } from 'firebase-admin/app';
+import { applicationDefault, initializeApp, getApps, cert, AppOptions } from 'firebase-admin/app';
 import { getFirestore as getAdminFirestore } from 'firebase-admin/firestore';
 import fs from 'fs';
 
@@ -10,27 +10,33 @@ if (existingApps.length) {
   adminApp = existingApps[0];
 } else {
   let credential;
+  const projectId =
+    process.env.FIREBASE_PROJECT_ID ||
+    process.env.GOOGLE_CLOUD_PROJECT ||
+    process.env.GCLOUD_PROJECT ||
+    process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID;
+
   if (process.env.FIREBASE_SERVICE_ACCOUNT) {
     credential = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
   } else if (process.env.GOOGLE_APPLICATION_CREDENTIALS) {
     credential = JSON.parse(fs.readFileSync(process.env.GOOGLE_APPLICATION_CREDENTIALS, 'utf8'));
   }
 
-  // 빌드 환경에서는 서비스 계정 정보가 없어도 오류를 발생시키지 않도록 처리
-  if (credential) {
-    try {
-      adminApp = initializeApp({
-        credential: cert(credential),
-      } as AppOptions);
-      console.log('Firebase Admin SDK 초기화 성공');
-    } catch (error) {
-      console.warn('Firebase Admin SDK 초기화 중 오류 발생 (더미 키 또는 잘못된 형식의 키 사용 가능성):', error instanceof Error ? error.message : String(error));
-      adminApp = undefined; // 오류 발생 시 adminApp을 undefined로 명시적 설정
+  try {
+    const appOptions: AppOptions = credential
+      ? { credential: cert(credential), projectId }
+      : { credential: applicationDefault(), projectId };
+
+    adminApp = initializeApp(appOptions);
+    console.log('Firebase Admin SDK 초기화 성공');
+  } catch (error) {
+    if (process.env.NODE_ENV !== 'production') {
+      console.warn('Firebase Admin SDK 초기화 중 오류 발생 (로컬 서비스 계정 또는 기본 자격 증명 없음):', error instanceof Error ? error.message : String(error));
+    } else {
+      console.error('Firebase Admin SDK 초기화 실패:', error instanceof Error ? error.message : String(error));
     }
-  } else if (process.env.NODE_ENV !== 'production') {
-    console.warn('Firebase Admin 서비스 계정 정보가 없어 Admin SDK가 초기화되지 않았습니다. 빌드 목적이거나, 서버사이드 기능이 필요없는 경우 무시할 수 있습니다.');
+    adminApp = undefined;
   }
-  // adminApp이 초기화되지 않았으면 adminDb도 정상적으로 작동하지 않을 것임.
 }
 
 export const adminDb = adminApp ? getAdminFirestore(adminApp) : undefined;
