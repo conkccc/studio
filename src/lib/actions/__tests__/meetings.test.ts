@@ -11,6 +11,7 @@ import {
   deleteMeeting,
   getMeetingById,
   getMeetings,
+  getFriendGroupsByUser,
   getUserById,
   updateMeeting
 } from '../../data-store';
@@ -32,6 +33,7 @@ vi.mock('../../data-store', () => ({
   deleteMeeting: vi.fn(),
   getMeetingById: vi.fn(),
   getMeetings: vi.fn(),
+  getFriendGroupsByUser: vi.fn(),
   getUserById: vi.fn()
 }));
 
@@ -41,6 +43,7 @@ const mockUpdateMeeting = vi.mocked(updateMeeting);
 const mockDeleteMeeting = vi.mocked(deleteMeeting);
 const mockGetMeetingById = vi.mocked(getMeetingById);
 const mockGetMeetings = vi.mocked(getMeetings);
+const mockGetFriendGroupsByUser = vi.mocked(getFriendGroupsByUser);
 const mockGetUserById = vi.mocked(getUserById);
 const mockRevalidatePath = vi.mocked(revalidatePath);
 
@@ -260,6 +263,8 @@ describe('getMeetingsForUserAction', () => {
   beforeEach(() => {
     mockGetUserById.mockReset();
     mockGetMeetings.mockReset();
+    mockGetFriendGroupsByUser.mockReset();
+    mockGetFriendGroupsByUser.mockResolvedValue([]);
   });
 
   it('returns error when user is not found', async () => {
@@ -302,6 +307,67 @@ describe('getMeetingsForUserAction', () => {
       limitParam: undefined,
       userId: 'u1',
       userFriendGroupIds: ['g1']
+    });
+  });
+
+  it('includes owned or accessible groups for non-admin meeting filters', async () => {
+    mockGetUserById.mockResolvedValue({
+      ...makeUser({ id: 'u1', friendGroupIds: [] })
+    });
+    mockGetFriendGroupsByUser.mockResolvedValue([
+      {
+        id: 'owned-g1',
+        name: 'Owned group',
+        ownerUserId: 'u1',
+        memberIds: [],
+        createdAt: new Date()
+      }
+    ]);
+    mockGetMeetings.mockResolvedValue({ meetings: [], totalCount: 0, availableYears: [] });
+
+    const result = await getMeetingsForUserAction({ requestingUserId: 'u1' });
+
+    expect(result.success).toBe(true);
+    expect(mockGetMeetings).toHaveBeenCalledWith({
+      year: undefined,
+      page: undefined,
+      limitParam: undefined,
+      userId: 'u1',
+      userFriendGroupIds: ['owned-g1']
+    });
+  });
+
+  it('keeps viewer meeting filters limited to referenced groups', async () => {
+    mockGetUserById.mockResolvedValue({
+      ...makeUser({ id: 'u1', role: 'viewer', friendGroupIds: ['referenced-g1'] })
+    });
+    mockGetFriendGroupsByUser.mockResolvedValue([
+      {
+        id: 'owned-g1',
+        name: 'Owned group',
+        ownerUserId: 'u1',
+        memberIds: [],
+        createdAt: new Date()
+      },
+      {
+        id: 'referenced-g1',
+        name: 'Referenced group',
+        ownerUserId: 'admin-1',
+        memberIds: [],
+        createdAt: new Date()
+      }
+    ]);
+    mockGetMeetings.mockResolvedValue({ meetings: [], totalCount: 0, availableYears: [] });
+
+    const result = await getMeetingsForUserAction({ requestingUserId: 'u1' });
+
+    expect(result.success).toBe(true);
+    expect(mockGetMeetings).toHaveBeenCalledWith({
+      year: undefined,
+      page: undefined,
+      limitParam: undefined,
+      userId: 'u1',
+      userFriendGroupIds: ['referenced-g1']
     });
   });
 

@@ -8,6 +8,7 @@ import {
   getMeetingById as dbGetMeetingById,
   getMeetings as dbGetMeetings,
   getUserById as dbGetUserById,
+  getFriendGroupsByUser as dbGetFriendGroupsByUser,
 } from '../data-store';
 import type { Meeting } from '../types';
 import { ensureUserPermission } from './permissions';
@@ -339,12 +340,24 @@ export async function getMeetingsForUserAction(params: {
   let actualUserIdForFilter: string | undefined = undefined;
   let actualUserFriendGroupIdsForFilter: string[] | undefined = undefined;
 
-  if (user.role !== 'admin') {
-    actualUserIdForFilter = user.id;
-    actualUserFriendGroupIdsForFilter = user.friendGroupIds && user.friendGroupIds.length > 0 ? user.friendGroupIds : undefined;
-  }
-
   try {
+    if (user.role !== 'admin') {
+      actualUserIdForFilter = user.id;
+      const accessibleGroupIds = new Set<string>(user.friendGroupIds || []);
+      const accessibleGroups = await dbGetFriendGroupsByUser(user.id);
+
+      accessibleGroups.forEach(group => {
+        if (user.role === 'viewer' && !user.friendGroupIds?.includes(group.id)) {
+          return;
+        }
+        accessibleGroupIds.add(group.id);
+      });
+
+      actualUserFriendGroupIdsForFilter = accessibleGroupIds.size > 0
+        ? Array.from(accessibleGroupIds)
+        : undefined;
+    }
+
     const result = await dbGetMeetings({
       year,
       page,
