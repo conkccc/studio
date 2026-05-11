@@ -21,6 +21,24 @@ import Link from 'next/link';
 
 const MEETINGS_PER_PAGE = 9;
 const FILTER_STORAGE_KEY = 'meetings:filters:v2';
+const MEETINGS_DATA_TIMEOUT_MS = 15000;
+
+const withTimeout = async <T,>(promise: Promise<T>, label: string): Promise<T> => {
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeoutId = setTimeout(() => {
+      reject(new Error(`${label} timed out.`));
+    }, MEETINGS_DATA_TIMEOUT_MS);
+  });
+
+  try {
+    return await Promise.race([promise, timeoutPromise]);
+  } finally {
+    if (timeoutId) {
+      clearTimeout(timeoutId);
+    }
+  }
+};
 
 interface MeetingListClientProps {
   allFriends: Friend[];
@@ -41,7 +59,7 @@ export function MeetingListClient({ allFriends, friendGroups, filtersReady }: Me
   const [availableYears, setAvailableYears] = useState<number[]>([]);
   const [totalPages, setTotalPages] = useState(0);
   const inFlightKeyRef = useRef<string | null>(null);
-  const lastCompletedKeyRef = useRef<string | null>(null);
+  const requestSeqRef = useRef(0);
   const usersInFlightRef = useRef(false);
   const usersLoadedRef = useRef(false);
 
@@ -110,7 +128,14 @@ export function MeetingListClient({ allFriends, friendGroups, filtersReady }: Me
   }, [activeYear, filterType, selectedGroupId, hydrated]);
 
   const fetchMeetings = useCallback(async () => {
-    if (authLoading || !currentUser?.uid || !filtersReady || !hydrated || pendingYear) {
+    if (authLoading || !filtersReady || !hydrated || pendingYear) {
+      return;
+    }
+    if (!currentUser?.uid) {
+      setMeetings([]);
+      setTotalPages(0);
+      setAvailableYears([]);
+      setIsLoading(false);
       return;
     }
     const yearToFetch = activeYear === "all" ? undefined : parseInt(activeYear, 10);
@@ -118,18 +143,21 @@ export function MeetingListClient({ allFriends, friendGroups, filtersReady }: Me
     if (inFlightKeyRef.current === requestKey) {
       return;
     }
-    if (lastCompletedKeyRef.current === requestKey) {
-      return;
-    }
     inFlightKeyRef.current = requestKey;
+    const requestSeq = requestSeqRef.current + 1;
+    requestSeqRef.current = requestSeq;
     setIsLoading(true);
     try {
-      const meetingsResult = await getMeetingsForUserAction({
-        requestingUserId: currentUser.uid,
-        year: yearToFetch,
-        page: currentPage,
-        limitParam: MEETINGS_PER_PAGE,
-      });
+      const meetingsResult = await withTimeout(
+        getMeetingsForUserAction({
+          requestingUserId: currentUser.uid,
+          year: yearToFetch,
+          page: currentPage,
+          limitParam: MEETINGS_PER_PAGE,
+        }),
+        'Meetings fetch'
+      );
+      if (requestSeqRef.current !== requestSeq) return;
       if (meetingsResult.success) {
         setMeetings(meetingsResult.meetings || []);
         setTotalPages(Math.ceil((meetingsResult.totalCount || 0) / MEETINGS_PER_PAGE));
@@ -140,13 +168,15 @@ export function MeetingListClient({ allFriends, friendGroups, filtersReady }: Me
         setTotalPages(0);
       }
     } catch {
+      if (requestSeqRef.current !== requestSeq) return;
       toast({ title: "오류", description: "데이터 로딩 중 예기치 않은 오류 발생.", variant: "destructive" });
       setMeetings([]);
       setTotalPages(0);
     } finally {
-      setIsLoading(false);
-      lastCompletedKeyRef.current = requestKey;
-      inFlightKeyRef.current = null;
+      if (requestSeqRef.current === requestSeq) {
+        setIsLoading(false);
+        inFlightKeyRef.current = null;
+      }
     }
   }, [currentUser, authLoading, activeYear, currentPage, toast, filtersReady, hydrated, pendingYear]);
 
@@ -156,7 +186,7 @@ export function MeetingListClient({ allFriends, friendGroups, filtersReady }: Me
     }
     usersInFlightRef.current = true;
     try {
-      const usersResult = await getAllUsersAction();
+      const usersResult = await withTimeout(getAllUsersAction(), 'Users fetch');
       if (usersResult.success) {
         setAllUsers(usersResult.users || []);
       } else {
