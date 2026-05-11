@@ -5,27 +5,50 @@ import fs from 'fs';
 
 let adminApp;
 const existingApps = getApps();
+const runsOnGoogleManagedRuntime = Boolean(
+  process.env.K_SERVICE ||
+  process.env.FUNCTION_TARGET ||
+  process.env.FUNCTION_NAME ||
+  process.env.FIREBASE_CONFIG ||
+  process.env.GAE_SERVICE
+);
+
+const getServiceAccountCredential = () => {
+  if (process.env.FIREBASE_SERVICE_ACCOUNT) {
+    try {
+      return JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
+    } catch {
+      const decoded = Buffer.from(process.env.FIREBASE_SERVICE_ACCOUNT, 'base64').toString('utf8');
+      return JSON.parse(decoded);
+    }
+  }
+
+  if (process.env.GOOGLE_APPLICATION_CREDENTIALS) {
+    return JSON.parse(fs.readFileSync(process.env.GOOGLE_APPLICATION_CREDENTIALS, 'utf8'));
+  }
+
+  return undefined;
+};
 
 if (existingApps.length) {
   adminApp = existingApps[0];
 } else {
-  let credential;
+  const credential = getServiceAccountCredential();
   const projectId =
     process.env.FIREBASE_PROJECT_ID ||
     process.env.GOOGLE_CLOUD_PROJECT ||
     process.env.GCLOUD_PROJECT ||
     process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID;
 
-  if (process.env.FIREBASE_SERVICE_ACCOUNT) {
-    credential = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
-  } else if (process.env.GOOGLE_APPLICATION_CREDENTIALS) {
-    credential = JSON.parse(fs.readFileSync(process.env.GOOGLE_APPLICATION_CREDENTIALS, 'utf8'));
-  }
-
   try {
-    const appOptions: AppOptions = credential
-      ? { credential: cert(credential), projectId }
-      : { credential: applicationDefault(), projectId };
+    if (!credential && !runsOnGoogleManagedRuntime) {
+      throw new Error('FIREBASE_SERVICE_ACCOUNT is required outside Google-managed runtimes.');
+    }
+
+    const appOptions: AppOptions = {
+      credential: credential ? cert(credential) : applicationDefault(),
+      projectId,
+    };
 
     adminApp = initializeApp(appOptions);
     console.log('Firebase Admin SDK 초기화 성공');
