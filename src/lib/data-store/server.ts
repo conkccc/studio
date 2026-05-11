@@ -23,7 +23,6 @@ import {
   getCountFromServer,
   deleteField,
   DocumentData,
-  DocumentSnapshot,
   FieldPath,
   QueryConstraint, // QueryConstraint import
   WriteBatch,
@@ -80,6 +79,7 @@ const convertTimestampsToDates = (data: DocumentData): DocumentData => {
 
 // Firestore DocumentSnapshot으로부터 타입에 맞는 데이터를 추출하는 헬퍼 함수
 // Client SDK와 Admin SDK Snapshot 모두 지원
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 const dataFromSnapshot = <T extends { id: string }>(snapshot: any): T | undefined => {
   if (!snapshot.exists || (typeof snapshot.exists === 'function' && !snapshot.exists())) return undefined;
   
@@ -93,8 +93,10 @@ const dataFromSnapshot = <T extends { id: string }>(snapshot: any): T | undefine
   } as T;
 };
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 const arrayFromSnapshot = <T extends { id: string }>(snapshot: any): T[] => {
   const docs = snapshot.docs || [];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   return docs.map((docSnap: any) => dataFromSnapshot<T>(docSnap)).filter((item: any): item is T => item !== undefined);
 };
 
@@ -293,7 +295,6 @@ export const getMeetings = async ({
     const meetingsColl = adminDb.collection(MEETINGS_COLLECTION);
     
     // 1. 가용 연도(availableYears) 계산 - 더 효율적으로 처리 필요하지만 일단 기존 로직 유지하되 Admin SDK로 수행
-    let yearsQuery: any = meetingsColl;
     if (userId || (userFriendGroupIds && userFriendGroupIds.length > 0)) {
       // 복잡한 권한 쿼리
       const promises = [];
@@ -305,8 +306,10 @@ export const getMeetings = async ({
         }
       }
       const snapshots = await Promise.all(promises);
-      snapshots.forEach(snap => {
-        snap.forEach(doc => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      snapshots.forEach((snap: any) => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        snap.forEach((doc: any) => {
           const dt = doc.data().dateTime;
           if (dt) {
             const date = dt.toDate ? dt.toDate() : new Date(dt);
@@ -317,7 +320,8 @@ export const getMeetings = async ({
     } else {
       // Admin 등 전체 조회 권한
       const snapshot = await meetingsColl.select('dateTime').get();
-      snapshot.forEach(doc => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      snapshot.forEach((doc: any) => {
         const dt = doc.data().dateTime;
         if (dt) {
           const date = dt.toDate ? dt.toDate() : new Date(dt);
@@ -331,6 +335,7 @@ export const getMeetings = async ({
     let fetchedMeetings: Meeting[] = [];
     const meetingIds = new Set<string>();
 
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const applyDateConstraints = (q: any) => {
       if (year) {
         const start = new Date(year, 0, 1);
@@ -350,8 +355,10 @@ export const getMeetings = async ({
         }
       }
       const snapshots = await Promise.all(promises);
-      snapshots.forEach(snap => {
-        snap.forEach(doc => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      snapshots.forEach((snap: any) => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        snap.forEach((doc: any) => {
           if (!meetingIds.has(doc.id)) {
             const m = dataFromSnapshot<Meeting>(doc);
             if (m) {
