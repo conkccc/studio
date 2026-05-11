@@ -15,7 +15,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { ChevronLeft, ChevronRight, PlusCircle, Loader2 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
-import { getMeetingsForUserAction, getAllUsersAction } from '@/lib/actions';
+import { getAllUsersAction } from '@/lib/actions';
 import { useToast } from '@/hooks/use-toast';
 import Link from 'next/link';
 
@@ -27,6 +27,23 @@ interface MeetingListClientProps {
   friendGroups: FriendGroup[];
   filtersReady: boolean;
 }
+
+interface MeetingsApiResponse {
+  success: boolean;
+  error?: string;
+  meetings?: Meeting[];
+  totalCount?: number;
+  availableYears?: number[];
+}
+
+const reviveMeetingDates = (meeting: Meeting): Meeting => ({
+  ...meeting,
+  dateTime: new Date(meeting.dateTime),
+  endTime: meeting.endTime ? new Date(meeting.endTime) : meeting.endTime,
+  createdAt: meeting.createdAt ? new Date(meeting.createdAt) : meeting.createdAt,
+  shareExpiryDate: meeting.shareExpiryDate ? new Date(meeting.shareExpiryDate) : meeting.shareExpiryDate,
+  settledReserveFundAt: meeting.settledReserveFundAt ? new Date(meeting.settledReserveFundAt) : meeting.settledReserveFundAt,
+});
 
 export function MeetingListClient({ allFriends, friendGroups, filtersReady }: MeetingListClientProps) {
   const { currentUser, loading: authLoading, appUser } = useAuth();
@@ -110,7 +127,7 @@ export function MeetingListClient({ allFriends, friendGroups, filtersReady }: Me
   }, [activeYear, filterType, selectedGroupId, hydrated]);
 
   const fetchMeetings = useCallback(async () => {
-    if (authLoading || !filtersReady || !hydrated || pendingYear) {
+    if (authLoading || !hydrated || pendingYear) {
       return;
     }
     if (!currentUser?.uid) {
@@ -130,15 +147,22 @@ export function MeetingListClient({ allFriends, friendGroups, filtersReady }: Me
     requestSeqRef.current = requestSeq;
     setIsLoading(true);
     try {
-      const meetingsResult = await getMeetingsForUserAction({
+      const params = new URLSearchParams({
         requestingUserId: currentUser.uid,
-        year: yearToFetch,
-        page: currentPage,
-        limitParam: MEETINGS_PER_PAGE,
+        page: currentPage.toString(),
+        limit: MEETINGS_PER_PAGE.toString(),
       });
+      if (yearToFetch) {
+        params.set('year', yearToFetch.toString());
+      }
+
+      const response = await fetch(`/api/meetings?${params.toString()}`, {
+        cache: 'no-store',
+      });
+      const meetingsResult = (await response.json()) as MeetingsApiResponse;
       if (requestSeqRef.current !== requestSeq) return;
-      if (meetingsResult.success) {
-        setMeetings(meetingsResult.meetings || []);
+      if (response.ok && meetingsResult.success) {
+        setMeetings((meetingsResult.meetings || []).map(reviveMeetingDates));
         setTotalPages(Math.ceil((meetingsResult.totalCount || 0) / MEETINGS_PER_PAGE));
         setAvailableYears(meetingsResult.availableYears || []);
       } else {
@@ -161,7 +185,7 @@ export function MeetingListClient({ allFriends, friendGroups, filtersReady }: Me
         inFlightKeyRef.current = null;
       }
     }
-  }, [currentUser, authLoading, activeYear, currentPage, toast, filtersReady, hydrated, pendingYear]);
+  }, [currentUser, authLoading, activeYear, currentPage, toast, hydrated, pendingYear]);
 
   const fetchUsers = useCallback(async () => {
     if (authLoading || !currentUser?.uid || usersLoadedRef.current || usersInFlightRef.current) {
@@ -211,12 +235,13 @@ export function MeetingListClient({ allFriends, friendGroups, filtersReady }: Me
   }, [meetings, filterType]);
 
   const groupFilteredMeetings = useMemo(() => {
+    if (!filtersReady) return clientFilteredMeetings;
     if (selectedGroupId === 'all') return clientFilteredMeetings;
     if (selectedGroupId === 'none') {
       return clientFilteredMeetings.filter(meeting => meeting.isTemporary || !meeting.groupId);
     }
     return clientFilteredMeetings.filter(meeting => meeting.groupId === selectedGroupId);
-  }, [clientFilteredMeetings, selectedGroupId]);
+  }, [clientFilteredMeetings, filtersReady, selectedGroupId]);
 
   useEffect(() => {
     if (!filtersReady || !hydrated) return;

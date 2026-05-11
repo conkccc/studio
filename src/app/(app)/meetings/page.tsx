@@ -96,13 +96,7 @@ export default function MeetingsPage() {
         </div>
       </div>
 
-      { dataLoading && !allFriends.length && !friendGroups.length ? (
-         <div className="flex justify-center items-center min-h-[200px]">
-            <p className="text-muted-foreground">필터 목록 로딩중...</p>
-         </div>
-      ) : (
-        <MeetingListClient allFriends={allFriends} friendGroups={friendGroups} filtersReady={!dataLoading} />
-      )}
+      <MeetingListClient allFriends={allFriends} friendGroups={friendGroups} filtersReady={!dataLoading} />
     </div>
   );
 }
