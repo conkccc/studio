@@ -19,8 +19,6 @@ import {
   QuerySnapshot,
   setDoc,
   limit as firestoreLimit,
-  startAfter as firestoreStartAfter,
-  getCountFromServer,
   deleteField,
   DocumentData,
   FieldPath,
@@ -30,15 +28,18 @@ import {
 import { db } from '../firebase';
 
 // 서버 환경에서만 adminDb import
-let adminDb: import('firebase-admin/firestore').Firestore | undefined = undefined;
-if (typeof window === 'undefined') {
-  // 서버에서만 동적 import
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  adminDb = require('../firebase-admin').adminDb;
-}
+// Firestore 인스턴스 선택 (서버: adminDb, 클라이언트: db)
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const getActiveAdminDb = (): any => {
+  if (typeof window === 'undefined') {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    return require('../firebase-admin').adminDb;
+  }
+  return undefined;
+};
 
 // Firestore 인스턴스 선택 (서버: adminDb, 클라이언트: db)
-export const firestore = typeof window === 'undefined' && adminDb ? adminDb : db;
+export const firestore = getActiveAdminDb() || db;
 
 // Firestore 컬렉션 및 서브컬렉션 이름 상수
 export const USERS_COLLECTION = 'users';
@@ -104,8 +105,9 @@ const arrayFromSnapshot = <T extends { id: string }>(snapshot: any): T[] => {
 // --- 사용자 관련 함수 ---
 export const getUserById = async (userId: string): Promise<User | undefined> => {
   if (!userId) return undefined;
-  if (adminDb) {
-    const snapshot = await adminDb.collection(USERS_COLLECTION).doc(userId).get();
+  const activeAdminDb = getActiveAdminDb();
+  if (activeAdminDb) {
+    const snapshot = await activeAdminDb.collection(USERS_COLLECTION).doc(userId).get();
     return dataFromSnapshot<User>(snapshot);
   }
   const userDocRef = doc(db, USERS_COLLECTION, userId);
@@ -146,8 +148,9 @@ export const updateUser = async (userId: string, updates: Partial<Omit<User, 'id
 };
 
 export const getUsers = async (): Promise<User[]> => {
-  if (adminDb) {
-    const snapshot = await adminDb.collection(USERS_COLLECTION).orderBy('name', 'asc').get();
+  const activeAdminDb = getActiveAdminDb();
+  if (activeAdminDb) {
+    const snapshot = await activeAdminDb.collection(USERS_COLLECTION).orderBy('name', 'asc').get();
     return arrayFromSnapshot<User>(snapshot);
   }
   const usersCollectionRef = collection(db, USERS_COLLECTION);
@@ -158,8 +161,9 @@ export const getUsers = async (): Promise<User[]> => {
 
 // --- 친구 관련 함수 ---
 export const getFriends = async (): Promise<Friend[]> => {
-  if (adminDb) {
-    const snapshot = await adminDb.collection(FRIENDS_COLLECTION).orderBy('name', 'asc').get();
+  const activeAdminDb = getActiveAdminDb();
+  if (activeAdminDb) {
+    const snapshot = await activeAdminDb.collection(FRIENDS_COLLECTION).orderBy('name', 'asc').get();
     return arrayFromSnapshot<Friend>(snapshot);
   }
   const friendsCollectionRef = collection(db, FRIENDS_COLLECTION);
@@ -211,8 +215,9 @@ export const getFriendsByGroup = async (groupId: string): Promise<Friend[]> => {
     if (!groupId || typeof groupId !== 'string') {
       throw new Error('유효하지 않은 그룹 ID입니다.');
     }
-    if (adminDb) {
-      const snapshot = await adminDb.collection(FRIENDS_COLLECTION).where('groupId', '==', groupId).get();
+    const activeAdminDb = getActiveAdminDb();
+    if (activeAdminDb) {
+      const snapshot = await activeAdminDb.collection(FRIENDS_COLLECTION).where('groupId', '==', groupId).get();
       const friends = arrayFromSnapshot<Friend>(snapshot);
       return friends.sort((a, b) => a.name.localeCompare(b.name));
     }
@@ -229,8 +234,9 @@ export const getFriendsByGroup = async (groupId: string): Promise<Friend[]> => {
 
 export const dbGetFriendById = async (friendId: string): Promise<Friend | undefined> => {
   if (!friendId) return undefined;
-  if (adminDb) {
-    const snapshot = await adminDb.collection(FRIENDS_COLLECTION).doc(friendId).get();
+  const activeAdminDb = getActiveAdminDb();
+  if (activeAdminDb) {
+    const snapshot = await activeAdminDb.collection(FRIENDS_COLLECTION).doc(friendId).get();
     return dataFromSnapshot<Friend>(snapshot);
   }
   const friendDocRef = doc(db, FRIENDS_COLLECTION, friendId);
@@ -290,10 +296,12 @@ export const getMeetings = async ({
 }: GetMeetingsParams = {}): Promise<GetMeetingsResult> => {
   const yearsSet = new Set<number>();
   
+  const activeAdminDb = getActiveAdminDb();
+  
   // Admin SDK 사용 시
-  if (adminDb) {
+  if (activeAdminDb) {
     console.log(`[getMeetings] Admin SDK branch used for user: ${userId || 'Admin'}`);
-    const meetingsColl = adminDb.collection(MEETINGS_COLLECTION);
+    const meetingsColl = activeAdminDb.collection(MEETINGS_COLLECTION);
     
     // 1. 가용 연도(availableYears) 계산 - 더 효율적으로 처리 필요하지만 일단 기존 로직 유지하되 Admin SDK로 수행
     if (userId || (userFriendGroupIds && userFriendGroupIds.length > 0)) {
