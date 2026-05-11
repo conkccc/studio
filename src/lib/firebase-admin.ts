@@ -5,7 +5,6 @@ import fs from 'fs';
 
 let adminApp;
 const existingApps = getApps();
-let credentialSource = 'application-default';
 const runsOnGoogleManagedRuntime = Boolean(
   process.env.K_SERVICE ||
   process.env.FUNCTION_TARGET ||
@@ -17,17 +16,14 @@ const runsOnGoogleManagedRuntime = Boolean(
 const getServiceAccountCredential = () => {
   if (process.env.FIREBASE_SERVICE_ACCOUNT) {
     try {
-      credentialSource = 'FIREBASE_SERVICE_ACCOUNT';
       return JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
     } catch {
       const decoded = Buffer.from(process.env.FIREBASE_SERVICE_ACCOUNT, 'base64').toString('utf8');
-      credentialSource = 'FIREBASE_SERVICE_ACCOUNT_BASE64';
       return JSON.parse(decoded);
     }
   }
 
   if (process.env.GOOGLE_APPLICATION_CREDENTIALS) {
-    credentialSource = 'GOOGLE_APPLICATION_CREDENTIALS';
     return JSON.parse(fs.readFileSync(process.env.GOOGLE_APPLICATION_CREDENTIALS, 'utf8'));
   }
 
@@ -55,7 +51,6 @@ if (existingApps.length) {
     };
 
     adminApp = initializeApp(appOptions);
-    console.log(`Firebase Admin SDK 초기화 성공 (${credentialSource})`);
   } catch (error) {
     if (process.env.NODE_ENV !== 'production') {
       console.warn('Firebase Admin SDK 초기화 중 오류 발생 (로컬 서비스 계정 또는 기본 자격 증명 없음):', error instanceof Error ? error.message : String(error));
@@ -71,7 +66,6 @@ export const adminDb = adminApp ? getAdminFirestore(adminApp) : undefined;
 if (adminDb) {
   try {
     adminDb.settings({ preferRest: true } as { preferRest: boolean });
-    console.log('Firebase Admin Firestore REST transport enabled');
   } catch (error) {
     console.warn('Firebase Admin Firestore settings skipped:', error instanceof Error ? error.message : String(error));
   }

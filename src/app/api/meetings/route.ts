@@ -22,13 +22,6 @@ export async function GET(request: NextRequest) {
   const limit = limitParam ? Number(limitParam) : undefined;
   const logUserId = requestingUserId ? `${requestingUserId.slice(0, 6)}...` : 'missing';
 
-  console.log('[api/meetings] start', {
-    user: logUserId,
-    year,
-    page,
-    limit,
-  });
-
   if (!requestingUserId) {
     return NextResponse.json(
       { success: false, error: 'User ID is required.', meetings: [], totalCount: 0, availableYears: [] },
@@ -44,14 +37,7 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const userLookupStartTime = Date.now();
     const user = await dbGetUserById(requestingUserId);
-    console.log('[api/meetings] user lookup completed', {
-      user: logUserId,
-      durationMs: Date.now() - userLookupStartTime,
-      found: Boolean(user),
-      role: user?.role,
-    });
 
     if (!user) {
       return NextResponse.json(
@@ -66,13 +52,7 @@ export async function GET(request: NextRequest) {
     if (user.role !== 'admin') {
       actualUserIdForFilter = user.id;
       const accessibleGroupIds = new Set<string>(user.friendGroupIds || []);
-      const groupsLookupStartTime = Date.now();
       const accessibleGroups = await dbGetFriendGroupsByUser(user.id);
-      console.log('[api/meetings] group lookup completed', {
-        user: logUserId,
-        durationMs: Date.now() - groupsLookupStartTime,
-        groupCount: accessibleGroups.length,
-      });
 
       accessibleGroups.forEach(group => {
         if (user.role === 'viewer' && !user.friendGroupIds?.includes(group.id)) {
@@ -94,15 +74,10 @@ export async function GET(request: NextRequest) {
       userId: actualUserIdForFilter,
       userFriendGroupIds: actualUserFriendGroupIdsForFilter,
     });
-
-    console.log('[api/meetings] completed', {
-      user: logUserId,
-      dbDurationMs: Date.now() - dbStartTime,
-      totalDurationMs: Date.now() - startTime,
-      meetingCount: result.meetings.length,
-      totalCount: result.totalCount,
-      availableYears: result.availableYears,
-    });
+    const duration = Date.now() - dbStartTime;
+    if (duration > 5000) {
+      console.warn(`[api/meetings] slow query: ${duration}ms for user ${logUserId}, total ${Date.now() - startTime}ms`);
+    }
 
     return NextResponse.json({ success: true, ...result });
   } catch (error) {

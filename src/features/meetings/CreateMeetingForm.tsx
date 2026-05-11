@@ -240,7 +240,12 @@ function SelectDate(props: SelectDateProps) {
               }
             </Button>
           </PopoverTrigger>
-          <PopoverContent className="w-auto p-0">
+          <PopoverContent
+            align="start"
+            sideOffset={8}
+            collisionPadding={16}
+            className="w-auto max-w-[calc(100vw-2rem)] max-h-[min(var(--radix-popover-content-available-height),calc(100vh-2rem))] overflow-auto p-0"
+          >
             <Calendar
               mode="single"
               selected={props.timeValue}
