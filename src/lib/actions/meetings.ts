@@ -326,25 +326,47 @@ export async function getMeetingsForUserAction(params: {
   requestingUserId: string;
 }) {
   const { year, page, limitParam, requestingUserId } = params;
+  const actionStartTime = Date.now();
+  const logUserId = requestingUserId ? `${requestingUserId.slice(0, 6)}...` : 'missing';
 
   if (!requestingUserId) {
     return { success: false, error: "User ID is required.", meetings: [], totalCount: 0, availableYears: [] };
-  }
-
-  const user = await dbGetUserById(requestingUserId);
-
-  if (!user) {
-    return { success: false, error: "User not found.", meetings: [], totalCount: 0, availableYears: [] };
   }
 
   let actualUserIdForFilter: string | undefined = undefined;
   let actualUserFriendGroupIdsForFilter: string[] | undefined = undefined;
 
   try {
+    console.log('[getMeetingsForUserAction] start', {
+      user: logUserId,
+      year,
+      page,
+      limitParam,
+    });
+
+    const userLookupStartTime = Date.now();
+    const user = await dbGetUserById(requestingUserId);
+    console.log('[getMeetingsForUserAction] user lookup completed', {
+      user: logUserId,
+      durationMs: Date.now() - userLookupStartTime,
+      found: Boolean(user),
+      role: user?.role,
+    });
+
+    if (!user) {
+      return { success: false, error: "User not found.", meetings: [], totalCount: 0, availableYears: [] };
+    }
+
     if (user.role !== 'admin') {
       actualUserIdForFilter = user.id;
       const accessibleGroupIds = new Set<string>(user.friendGroupIds || []);
+      const groupsLookupStartTime = Date.now();
       const accessibleGroups = await dbGetFriendGroupsByUser(user.id);
+      console.log('[getMeetingsForUserAction] group lookup completed', {
+        user: logUserId,
+        durationMs: Date.now() - groupsLookupStartTime,
+        groupCount: accessibleGroups.length,
+      });
 
       accessibleGroups.forEach(group => {
         if (user.role === 'viewer' && !user.friendGroupIds?.includes(group.id)) {
@@ -370,6 +392,13 @@ export async function getMeetingsForUserAction(params: {
     if (duration > 5000) {
       console.warn(`getMeetingsForUserAction took long: ${duration}ms for user ${requestingUserId}`);
     }
+    console.log('[getMeetingsForUserAction] completed', {
+      user: logUserId,
+      dbDurationMs: duration,
+      totalDurationMs: Date.now() - actionStartTime,
+      meetingCount: result.meetings.length,
+      totalCount: result.totalCount,
+    });
     return { success: true, ...result };
   } catch (error) {
     console.error("getMeetingsForUserAction Error:", {

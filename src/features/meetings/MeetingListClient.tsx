@@ -21,7 +21,7 @@ import Link from 'next/link';
 
 const MEETINGS_PER_PAGE = 9;
 const FILTER_STORAGE_KEY = 'meetings:filters:v2';
-const MEETINGS_DATA_TIMEOUT_MS = 15000;
+const MEETINGS_DATA_TIMEOUT_MS = 45000;
 
 const withTimeout = async <T,>(promise: Promise<T>, label: string): Promise<T> => {
   let timeoutId: ReturnType<typeof setTimeout> | undefined;

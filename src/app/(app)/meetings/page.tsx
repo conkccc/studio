@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button';
 import { useAuth } from '@/contexts/AuthContext';
 import type { Friend, FriendGroup } from '@/lib/types';
 
-const FILTER_DATA_TIMEOUT_MS = 15000;
+const FILTER_DATA_TIMEOUT_MS = 45000;
 
 const withTimeout = async <T,>(promise: Promise<T>, label: string): Promise<T> => {
   let timeoutId: ReturnType<typeof setTimeout> | undefined;
