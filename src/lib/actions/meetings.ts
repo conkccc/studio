@@ -358,6 +358,7 @@ export async function getMeetingsForUserAction(params: {
         : undefined;
     }
 
+    const startTime = Date.now();
     const result = await dbGetMeetings({
       year,
       page,
@@ -365,9 +366,21 @@ export async function getMeetingsForUserAction(params: {
       userId: actualUserIdForFilter,
       userFriendGroupIds: actualUserFriendGroupIdsForFilter,
     });
+    const duration = Date.now() - startTime;
+    if (duration > 5000) {
+      console.warn(`getMeetingsForUserAction took long: ${duration}ms for user ${requestingUserId}`);
+    }
     return { success: true, ...result };
   } catch (error) {
-    console.error("getMeetingsForUserAction Error:", error);
+    console.error("getMeetingsForUserAction Error:", {
+      error,
+      requestingUserId,
+      year,
+      page,
+      limitParam,
+      actualUserIdForFilter,
+      actualUserFriendGroupIdsForFilter
+    });
     const errorMessage = error instanceof Error ? error.message : 'Failed to fetch meetings.';
     return { success: false, error: errorMessage, meetings: [], totalCount: 0, availableYears: [] };
   }

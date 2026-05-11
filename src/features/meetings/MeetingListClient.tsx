@@ -167,9 +167,14 @@ export function MeetingListClient({ allFriends, friendGroups, filtersReady }: Me
         setMeetings([]);
         setTotalPages(0);
       }
-    } catch {
+    } catch (error) {
       if (requestSeqRef.current !== requestSeq) return;
-      toast({ title: "오류", description: "데이터 로딩 중 예기치 않은 오류 발생.", variant: "destructive" });
+      const isTimeout = error instanceof Error && error.message.includes('timed out');
+      toast({ 
+        title: "오류", 
+        description: isTimeout ? "데이터를 불러오는 중 시간이 초과되었습니다. 잠시 후 다시 시도해주세요." : "데이터 로딩 중 예기치 않은 오류 발생.", 
+        variant: "destructive" 
+      });
       setMeetings([]);
       setTotalPages(0);
     } finally {

@@ -62,7 +62,9 @@ const convertTimestampsToDates = (data: DocumentData): DocumentData => {
       continue;
     }
     const value = processedData[field];
-    if (value instanceof Timestamp) {
+    
+    // Client SDK 및 Admin SDK Timestamp 모두 호환되도록 수정
+    if (value && typeof value === 'object' && 'toDate' in value && typeof value.toDate === 'function') {
       processedData[field] = value.toDate();
     } else if (value === null) {
       processedData[field] = null;
@@ -77,9 +79,11 @@ const convertTimestampsToDates = (data: DocumentData): DocumentData => {
 };
 
 // Firestore DocumentSnapshot으로부터 타입에 맞는 데이터를 추출하는 헬퍼 함수
-const dataFromSnapshot = <T extends { id: string }>(snapshot: DocumentSnapshot): T | undefined => {
-  if (!snapshot.exists()) return undefined;
-  const data = snapshot.data();
+// Client SDK와 Admin SDK Snapshot 모두 지원
+const dataFromSnapshot = <T extends { id: string }>(snapshot: any): T | undefined => {
+  if (!snapshot.exists || (typeof snapshot.exists === 'function' && !snapshot.exists())) return undefined;
+  
+  const data = typeof snapshot.data === 'function' ? snapshot.data() : snapshot.data;
   if (typeof data !== 'object' || data === null) {
     return undefined;
   }
@@ -89,14 +93,19 @@ const dataFromSnapshot = <T extends { id: string }>(snapshot: DocumentSnapshot):
   } as T;
 };
 
-const arrayFromSnapshot = <T extends { id: string }>(snapshot: QuerySnapshot): T[] => {
-  return snapshot.docs.map((docSnap) => dataFromSnapshot<T>(docSnap)).filter((item): item is T => item !== undefined);
+const arrayFromSnapshot = <T extends { id: string }>(snapshot: any): T[] => {
+  const docs = snapshot.docs || [];
+  return docs.map((docSnap: any) => dataFromSnapshot<T>(docSnap)).filter((item: any): item is T => item !== undefined);
 };
 
 
 // --- 사용자 관련 함수 ---
 export const getUserById = async (userId: string): Promise<User | undefined> => {
   if (!userId) return undefined;
+  if (adminDb) {
+    const snapshot = await adminDb.collection(USERS_COLLECTION).doc(userId).get();
+    return dataFromSnapshot<User>(snapshot);
+  }
   const userDocRef = doc(db, USERS_COLLECTION, userId);
   const snapshot = await getDoc(userDocRef);
   return dataFromSnapshot<User>(snapshot);
@@ -135,6 +144,10 @@ export const updateUser = async (userId: string, updates: Partial<Omit<User, 'id
 };
 
 export const getUsers = async (): Promise<User[]> => {
+  if (adminDb) {
+    const snapshot = await adminDb.collection(USERS_COLLECTION).orderBy('name', 'asc').get();
+    return arrayFromSnapshot<User>(snapshot);
+  }
   const usersCollectionRef = collection(db, USERS_COLLECTION);
   const q = query(usersCollectionRef, orderBy('name', 'asc'));
   const snapshot = await getDocs(q);
@@ -143,6 +156,10 @@ export const getUsers = async (): Promise<User[]> => {
 
 // --- 친구 관련 함수 ---
 export const getFriends = async (): Promise<Friend[]> => {
+  if (adminDb) {
+    const snapshot = await adminDb.collection(FRIENDS_COLLECTION).orderBy('name', 'asc').get();
+    return arrayFromSnapshot<Friend>(snapshot);
+  }
   const friendsCollectionRef = collection(db, FRIENDS_COLLECTION);
   const q = query(friendsCollectionRef, orderBy('name', 'asc'));
   const snapshot = await getDocs(q);
@@ -192,6 +209,11 @@ export const getFriendsByGroup = async (groupId: string): Promise<Friend[]> => {
     if (!groupId || typeof groupId !== 'string') {
       throw new Error('유효하지 않은 그룹 ID입니다.');
     }
+    if (adminDb) {
+      const snapshot = await adminDb.collection(FRIENDS_COLLECTION).where('groupId', '==', groupId).get();
+      const friends = arrayFromSnapshot<Friend>(snapshot);
+      return friends.sort((a, b) => a.name.localeCompare(b.name));
+    }
     const friendsCollectionRef = collection(db, FRIENDS_COLLECTION);
     const q = query(friendsCollectionRef, where('groupId', '==', groupId));
     const snapshot = await getDocs(q);
@@ -199,12 +221,16 @@ export const getFriendsByGroup = async (groupId: string): Promise<Friend[]> => {
     return friends.sort((a, b) => a.name.localeCompare(b.name));
   } catch (err) {
     console.error('getFriendsByGroup 오류:', err);
-    throw err; // 오류를 다시 throw하여 호출 측에서 처리할 수 있도록 함
+    throw err;
   }
 };
 
 export const dbGetFriendById = async (friendId: string): Promise<Friend | undefined> => {
   if (!friendId) return undefined;
+  if (adminDb) {
+    const snapshot = await adminDb.collection(FRIENDS_COLLECTION).doc(friendId).get();
+    return dataFromSnapshot<Friend>(snapshot);
+  }
   const friendDocRef = doc(db, FRIENDS_COLLECTION, friendId);
   const snapshot = await getDoc(friendDocRef);
   return dataFromSnapshot<Friend>(snapshot);
@@ -260,9 +286,110 @@ export const getMeetings = async ({
   userId,
   userFriendGroupIds,
 }: GetMeetingsParams = {}): Promise<GetMeetingsResult> => {
-  const meetingsCollectionRef = collection(db, MEETINGS_COLLECTION);
-
   const yearsSet = new Set<number>();
+  
+  // Admin SDK 사용 시
+  if (adminDb) {
+    const meetingsColl = adminDb.collection(MEETINGS_COLLECTION);
+    
+    // 1. 가용 연도(availableYears) 계산 - 더 효율적으로 처리 필요하지만 일단 기존 로직 유지하되 Admin SDK로 수행
+    let yearsQuery: any = meetingsColl;
+    if (userId || (userFriendGroupIds && userFriendGroupIds.length > 0)) {
+      // 복잡한 권한 쿼리
+      const promises = [];
+      if (userId) promises.push(meetingsColl.where('creatorId', '==', userId).select('dateTime').get());
+      if (userFriendGroupIds && userFriendGroupIds.length > 0) {
+        const validGroupIds = userFriendGroupIds.filter(id => typeof id === 'string' && id.length > 0);
+        for (let i = 0; i < validGroupIds.length; i += 10) {
+          promises.push(meetingsColl.where('groupId', 'in', validGroupIds.slice(i, i + 10)).select('dateTime').get());
+        }
+      }
+      const snapshots = await Promise.all(promises);
+      snapshots.forEach(snap => {
+        snap.forEach(doc => {
+          const dt = doc.data().dateTime;
+          if (dt) {
+            const date = dt.toDate ? dt.toDate() : new Date(dt);
+            if (!isNaN(date.getTime())) yearsSet.add(date.getFullYear());
+          }
+        });
+      });
+    } else {
+      // Admin 등 전체 조회 권한
+      const snapshot = await meetingsColl.select('dateTime').get();
+      snapshot.forEach(doc => {
+        const dt = doc.data().dateTime;
+        if (dt) {
+          const date = dt.toDate ? dt.toDate() : new Date(dt);
+          if (!isNaN(date.getTime())) yearsSet.add(date.getFullYear());
+        }
+      });
+    }
+    const availableYears = Array.from(yearsSet).sort((a, b) => b - a);
+
+    // 2. 실제 데이터 조회
+    let fetchedMeetings: Meeting[] = [];
+    const meetingIds = new Set<string>();
+
+    const applyDateConstraints = (q: any) => {
+      if (year) {
+        const start = new Date(year, 0, 1);
+        const end = new Date(year + 1, 0, 1);
+        return q.where('dateTime', '>=', start).where('dateTime', '<', end);
+      }
+      return q;
+    };
+
+    if (userId || (userFriendGroupIds && userFriendGroupIds.length > 0)) {
+      const promises = [];
+      if (userId) promises.push(applyDateConstraints(meetingsColl.where('creatorId', '==', userId)).get());
+      if (userFriendGroupIds && userFriendGroupIds.length > 0) {
+        const validGroupIds = userFriendGroupIds.filter(id => typeof id === 'string' && id.length > 0);
+        for (let i = 0; i < validGroupIds.length; i += 10) {
+          promises.push(applyDateConstraints(meetingsColl.where('groupId', 'in', validGroupIds.slice(i, i + 10))).get());
+        }
+      }
+      const snapshots = await Promise.all(promises);
+      snapshots.forEach(snap => {
+        snap.forEach(doc => {
+          if (!meetingIds.has(doc.id)) {
+            const m = dataFromSnapshot<Meeting>(doc);
+            if (m) {
+              fetchedMeetings.push(m);
+              meetingIds.add(doc.id);
+            }
+          }
+        });
+      });
+      fetchedMeetings.sort((a, b) => (b.dateTime?.getTime() || 0) - (a.dateTime?.getTime() || 0));
+
+      const totalCount = fetchedMeetings.length;
+      let paginatedMeetings = fetchedMeetings;
+      if (limitParam) {
+        const startIndex = (page - 1) * limitParam;
+        paginatedMeetings = fetchedMeetings.slice(startIndex, startIndex + limitParam);
+      }
+      return { meetings: paginatedMeetings, totalCount, availableYears };
+    } else {
+      // 전체 조회 (Admin) - Pagination을 서버에서 처리
+      let finalQuery = applyDateConstraints(meetingsColl).orderBy('dateTime', 'desc');
+      const totalCountSnap = await applyDateConstraints(meetingsColl).count().get();
+      const totalCount = totalCountSnap.data().count;
+
+      if (limitParam) {
+        finalQuery = finalQuery.limit(limitParam).offset((page - 1) * limitParam);
+      }
+      const snapshot = await finalQuery.get();
+      fetchedMeetings = arrayFromSnapshot<Meeting>(snapshot);
+      return { meetings: fetchedMeetings, totalCount, availableYears };
+    }
+  }
+
+  // Client SDK Fallback (기존 로직과 유사하나 약간의 최적화)
+  const meetingsCollectionRef = collection(db, MEETINGS_COLLECTION);
+  // ... (Client SDK 로직은 기존과 동일하게 유지하거나 필요시 수정)
+  // 여기서는 중복 코드 방지를 위해 일단 adminDb가 없을 때만 실행되도록 유지
+  
   const addYearsFromSnapshot = (snapshot: QuerySnapshot) => {
     arrayFromSnapshot<Meeting>(snapshot).forEach((m) => {
       if (m?.dateTime instanceof Date && !isNaN(m.dateTime.getTime())) {
@@ -278,18 +405,11 @@ export const getMeetings = async ({
     }
     if (userFriendGroupIds && userFriendGroupIds.length > 0) {
       const validGroupIds = userFriendGroupIds.filter(id => typeof id === 'string' && id.length > 0);
-      if (validGroupIds.length > 0) {
-        const MAX_IN_QUERIES = 10;
-        const chunks = [];
-        for (let i = 0; i < validGroupIds.length; i += MAX_IN_QUERIES) {
-          chunks.push(validGroupIds.slice(i, i + MAX_IN_QUERIES));
-        }
-        for (const chunk of chunks) {
-          if (chunk.length > 0) {
-            const groupMeetingsSnapshot = await getDocs(query(meetingsCollectionRef, where('groupId', 'in', chunk)));
-            addYearsFromSnapshot(groupMeetingsSnapshot);
-          }
-        }
+      const chunks = [];
+      for (let i = 0; i < validGroupIds.length; i += 10) chunks.push(validGroupIds.slice(i, i + 10));
+      for (const chunk of chunks) {
+        const groupMeetingsSnapshot = await getDocs(query(meetingsCollectionRef, where('groupId', 'in', chunk)));
+        addYearsFromSnapshot(groupMeetingsSnapshot);
       }
     }
   } else {
@@ -324,65 +444,49 @@ export const getMeetings = async ({
 
     if (userFriendGroupIds && userFriendGroupIds.length > 0) {
       const validGroupIds = userFriendGroupIds.filter(id => typeof id === 'string' && id.length > 0);
-      if (validGroupIds.length > 0) {
-        const MAX_IN_QUERIES = 10;
-        const chunks = [];
-        for (let i = 0; i < validGroupIds.length; i += MAX_IN_QUERIES) {
-          chunks.push(validGroupIds.slice(i, i + MAX_IN_QUERIES));
-        }
-        for (const chunk of chunks) {
-          if (chunk.length > 0) {
-            const groupMeetingsQuery = query(meetingsCollectionRef, where('groupId', 'in', chunk), ...dateConstraints);
-            const groupMeetingsSnap = await getDocs(groupMeetingsQuery);
-            arrayFromSnapshot<Meeting>(groupMeetingsSnap).forEach(m => {
-              if (!meetingIds.has(m.id)) {
-                fetchedMeetings.push(m);
-                meetingIds.add(m.id);
-              }
-            });
+      const chunks = [];
+      for (let i = 0; i < validGroupIds.length; i += 10) chunks.push(validGroupIds.slice(i, i + 10));
+      for (const chunk of chunks) {
+        const groupMeetingsQuery = query(meetingsCollectionRef, where('groupId', 'in', chunk), ...dateConstraints);
+        const groupMeetingsSnap = await getDocs(groupMeetingsQuery);
+        arrayFromSnapshot<Meeting>(groupMeetingsSnap).forEach(m => {
+          if (!meetingIds.has(m.id)) {
+            fetchedMeetings.push(m);
+            meetingIds.add(m.id);
           }
-        }
+        });
       }
     }
     fetchedMeetings.sort((a, b) => (b.dateTime?.getTime() || 0) - (a.dateTime?.getTime() || 0));
-
+    const totalCount = fetchedMeetings.length;
+    let paginatedMeetings = fetchedMeetings;
+    if (limitParam) {
+      const startIndex = (page - 1) * limitParam;
+      paginatedMeetings = fetchedMeetings.slice(startIndex, startIndex + limitParam);
+    }
+    return { meetings: paginatedMeetings, totalCount, availableYears };
   } else {
     const qConstraints: QueryConstraint[] = [orderBy('dateTime', 'desc'), ...dateConstraints];
     let finalQuery = query(meetingsCollectionRef, ...qConstraints);
-
     const countQueryForPagination = query(meetingsCollectionRef, ...dateConstraints);
     const totalCountSnapshotForPagination = await getCountFromServer(countQueryForPagination);
     const totalCountForPagination = totalCountSnapshotForPagination.data().count;
 
     if (limitParam && page > 1) {
       const docsToSkip = (page - 1) * limitParam;
-      const skipperQueryConstraints: QueryConstraint[] = [orderBy('dateTime', 'desc'), ...dateConstraints, firestoreLimit(docsToSkip)];
-      const skipperQuery = query(meetingsCollectionRef, ...skipperQueryConstraints);
-
+      const skipperQuery = query(meetingsCollectionRef, ...qConstraints, firestoreLimit(docsToSkip));
       const skipperSnapshot = await getDocs(skipperQuery);
-      if (skipperSnapshot.docs.length > 0 && skipperSnapshot.docs.length === docsToSkip) {
+      if (skipperSnapshot.docs.length === docsToSkip) {
         finalQuery = query(meetingsCollectionRef, ...qConstraints, firestoreStartAfter(skipperSnapshot.docs[skipperSnapshot.docs.length - 1]));
       } else if (skipperSnapshot.docs.length < docsToSkip) {
          return { meetings: [], totalCount: totalCountForPagination, availableYears };
       }
     }
-    if (limitParam) {
-      finalQuery = query(finalQuery, firestoreLimit(limitParam));
-    }
+    if (limitParam) finalQuery = query(finalQuery, firestoreLimit(limitParam));
     const snapshot = await getDocs(finalQuery);
     fetchedMeetings = arrayFromSnapshot<Meeting>(snapshot);
     return { meetings: fetchedMeetings, totalCount: totalCountForPagination, availableYears };
   }
-
-  const totalCount = fetchedMeetings.length;
-
-  let paginatedMeetings = fetchedMeetings;
-  if (limitParam) {
-    const startIndex = (page - 1) * limitParam;
-    paginatedMeetings = fetchedMeetings.slice(startIndex, startIndex + limitParam);
-  }
-
-  return { meetings: paginatedMeetings, totalCount, availableYears };
 };
 
 export const getMeetingById = async (id: string): Promise<Meeting | undefined> => {
