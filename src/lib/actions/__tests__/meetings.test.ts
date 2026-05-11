@@ -12,8 +12,7 @@ import {
   getMeetingById,
   getMeetings,
   getUserById,
-  updateMeeting,
-  dbRevertMeetingDeduction
+  updateMeeting
 } from '../../data-store';
 import { ensureUserPermission } from '../permissions';
 import { revalidatePath } from 'next/cache';
@@ -32,7 +31,6 @@ vi.mock('../../data-store', () => ({
   updateMeeting: vi.fn(),
   deleteMeeting: vi.fn(),
   getMeetingById: vi.fn(),
-  dbRevertMeetingDeduction: vi.fn(),
   getMeetings: vi.fn(),
   getUserById: vi.fn()
 }));
@@ -44,7 +42,6 @@ const mockDeleteMeeting = vi.mocked(deleteMeeting);
 const mockGetMeetingById = vi.mocked(getMeetingById);
 const mockGetMeetings = vi.mocked(getMeetings);
 const mockGetUserById = vi.mocked(getUserById);
-const mockRevertMeetingDeduction = vi.mocked(dbRevertMeetingDeduction);
 const mockRevalidatePath = vi.mocked(revalidatePath);
 
 describe('getMeetingByIdAction', () => {
@@ -161,7 +158,6 @@ describe('updateMeetingAction', () => {
     mockEnsureUserPermission.mockReset();
     mockGetMeetingById.mockReset();
     mockUpdateMeeting.mockReset();
-    mockRevertMeetingDeduction.mockReset();
     mockRevalidatePath.mockReset();
   });
 
@@ -172,7 +168,7 @@ describe('updateMeetingAction', () => {
     expect(result.error).toContain('수정할 모임을 찾을 수 없습니다');
   });
 
-  it('reverts reserve deduction when settled meeting reserve settings change', async () => {
+  it('unsettles meeting when settled meeting reserve settings change', async () => {
     mockGetMeetingById.mockResolvedValue(
       makeMeeting({
         creatorId: 'u1',
@@ -190,9 +186,11 @@ describe('updateMeetingAction', () => {
     const result = await updateMeetingAction('m1', { useReserveFund: false }, 'u1');
 
     expect(result.success).toBe(true);
-    expect(mockRevertMeetingDeduction).toHaveBeenCalledWith('m1');
-    expect(mockUpdateMeeting).toHaveBeenCalledWith('m1', expect.objectContaining({ isSettled: false }));
-    expect(mockRevalidatePath).toHaveBeenCalledWith('/reserve-fund');
+    expect(mockUpdateMeeting).toHaveBeenCalledWith('m1', expect.objectContaining({
+      isSettled: false,
+      settledReserveFundAmount: undefined,
+      settledReserveFundAt: undefined,
+    }));
   });
 
   it('returns error when updateMeeting returns null', async () => {

@@ -1,4 +1,4 @@
-export type User = {
+﻿export type User = {
   id: string; // Firebase UID
   name?: string | null;
   email?: string | null;
@@ -10,16 +10,16 @@ export type User = {
 export type FriendGroup = {
   id: string;
   name: string;
-  ownerUserId: string; // 그룹 소유자(유저)
-  memberIds: string[]; // Friend id 목록
+  ownerUserId: string; // 洹몃９ ?뚯쑀???좎?)
+  memberIds: string[]; // Friend id 紐⑸줉
   createdAt: Date;
 };
 
 export type Friend = {
   id: string;
-  name: string; // 이름(필수)
-  description?: string; // 설명(선택)
-  groupId: string; // 소속 그룹
+  name: string; // ?대쫫(?꾩닔)
+  description?: string; // ?ㅻ챸(?좏깮)
+  groupId: string; // ?뚯냽 洹몃９
   createdAt: Date;
 };
 
@@ -57,11 +57,13 @@ export type Meeting = {
   refundReserveFundToNonParticipants?: boolean;
   reserveFundRefundRecipientIds?: string[];
   isSettled?: boolean;
+  settledReserveFundAmount?: number;
+  settledReserveFundAt?: Date | null;
   isShareEnabled?: boolean;
   shareToken?: string | null;
   shareExpiryDate?: Date | null;
   memo?: string;
-  groupId: string; // 소속 친구 그룹
+  groupId: string; // ?뚯냽 移쒓뎄 洹몃９
   isTemporary?: boolean;
   temporaryParticipants?: { name: string }[];
   totalFee?: number;
@@ -100,8 +102,8 @@ export type ReserveFundTransaction = {
   id: string;
   type: "meeting_deduction" | "balance_update";
   description: string;
-  amount: number; // 차감 시 음수, 잔액 설정 시 해당 잔액
+  amount: number;
   date: Date;
   meetingId?: string;
-  groupId: string; // 소속 그룹
+  groupId: string;
 };

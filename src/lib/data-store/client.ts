@@ -1,4 +1,4 @@
-import type { User, FriendGroup, ReserveFundTransaction } from '../types';
+import type { User, FriendGroup } from '../types';
 import {
   collection,
   doc,
@@ -11,7 +11,6 @@ import {
   Timestamp,
   setDoc,
   FieldPath,
-  limit as firestoreLimit,
   DocumentData,
   DocumentSnapshot,
   QuerySnapshot,
@@ -20,12 +19,10 @@ import { db } from '../firebase';
 
 export const USERS_COLLECTION = 'users';
 export const FRIEND_GROUPS_COLLECTION = 'friendGroups';
-export const RESERVE_FUND_CONFIG_COLLECTION = 'reserveFundConfig';
-export const RESERVE_FUND_TRANSACTIONS_COLLECTION = 'reserveFundTransactions';
 
 const convertTimestampsToDates = (data: DocumentData): DocumentData => {
   const processedData: Record<string, unknown> = { ...data };
-  const dateFields: string[] = ['createdAt', 'dateTime', 'endTime', 'date', 'shareExpiryDate', 'submittedAt'];
+  const dateFields: string[] = ['createdAt', 'dateTime', 'endTime', 'date', 'shareExpiryDate', 'submittedAt', 'settledReserveFundAt'];
 
   for (const field of dateFields) {
     if (!Object.prototype.hasOwnProperty.call(processedData, field)) {
@@ -89,7 +86,7 @@ export const addUserOnLogin = async (userData: { id: string; email?: string | nu
   }
   const existingUser = dataFromSnapshot<User>(userSnap);
   if (!existingUser) {
-    throw new Error("Failed to process existing user data after login.");
+    throw new Error('Failed to process existing user data after login.');
   }
   return existingUser;
 };
@@ -144,42 +141,4 @@ export const updateFriendGroup = async (id: string, updates: Partial<Omit<Friend
   await updateDoc(groupDocRef, updates);
   const updatedSnapshot = await getDoc(groupDocRef);
   return dataFromSnapshot<FriendGroup>(updatedSnapshot) || null;
-};
-
-export const getReserveFundBalance = async (groupId: string): Promise<number|null> => {
-  if (!groupId || groupId.trim() === '') {
-    console.error("getReserveFundBalance: 유효하지 않은 groupId가 제공되었습니다.");
-    return null;
-  }
-  const balanceDocRef = doc(db, RESERVE_FUND_CONFIG_COLLECTION, `balance_${groupId}`);
-  try {
-    const balanceSnap = await getDoc(balanceDocRef);
-    if (balanceSnap.exists()) {
-      const data = balanceSnap.data();
-      if (typeof data?.balance === 'number') {
-        return data.balance;
-      } else {
-        console.warn(`getReserveFundBalance: groupId [${groupId}]의 balance 필드가 유효하지 않거나 없습니다. 기본값 0을 반환합니다.`);
-        return 0;
-      }
-    } else {
-      try {
-        await setDoc(balanceDocRef, { balance: 0 }, { merge: true });
-        return 0;
-      } catch (setDocError) {
-        console.error(`getReserveFundBalance: groupId [${groupId}]에 대한 잔액 문서 생성 실패:`, setDocError);
-        return null;
-      }
-    }
-  } catch (error) {
-    console.error(`getReserveFundBalance: groupId [${groupId}]의 잔액 조회 중 오류 발생:`, error);
-    return null;
-  }
-};
-
-export const getLoggedReserveFundTransactionsByGroup = async (groupId: string, limitCount: number = 5): Promise<ReserveFundTransaction[]> => {
-  const transactionsCollectionRef = collection(db, RESERVE_FUND_TRANSACTIONS_COLLECTION);
-  const q = query(transactionsCollectionRef, where('groupId', '==', groupId), orderBy('date', 'desc'), firestoreLimit(limitCount));
-  const snapshot = await getDocs(q);
-  return arrayFromSnapshot<ReserveFundTransaction>(snapshot);
 };

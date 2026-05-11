@@ -10,7 +10,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "migrate:reserve-fund": "node scripts/migrate-reserve-fund-transactions.mjs"
   },
   "dependencies": {
     "@firebase/auth": "^1.7.5",

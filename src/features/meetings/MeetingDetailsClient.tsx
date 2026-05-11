@@ -303,7 +303,7 @@ export function MeetingDetailsClient({
     const result = await finalizeMeetingSettlementAction(meeting.id, currentUser.uid);
     if (result.success && result.meeting) {
       setMeeting(result.meeting);
-      toast({ title: '성공', description: result.message || '모임 정산이 확정되고 회비 사용 내역이 기록되었습니다.' });
+      toast({ title: '성공', description: result.message || '모임 정산이 확정되었습니다.' });
       router.refresh();
     } else {
       toast({ title: '오류', description: result.error || '정산 확정에 실패했습니다.', variant: 'destructive' });
@@ -442,7 +442,7 @@ export function MeetingDetailsClient({
                       <AlertDialogTitle>정말로 이 모임을 삭제하시겠습니까?</AlertDialogTitle>
                       <AlertDialogDescription>
                         이 작업은 되돌릴 수 없습니다. 모임과 관련된 모든 지출 내역도 함께 삭제됩니다.
-                        {meeting.isSettled && " 또한, 기록된 회비 사용 내역도 취소됩니다."}
+                        {meeting.isSettled && " 또한, 정산 확정 상태도 취소됩니다."}
                       </AlertDialogDescription>
                     </AlertDialogHeader>
                     <AlertDialogFooter>
@@ -580,6 +580,11 @@ export function MeetingDetailsClient({
                 {`회비에서 ${(meeting.partialReserveFundAmount || 0).toLocaleString()}원 사용`}
                 {meeting.isSettled && ` (정산 확정됨)`}
               </p>
+              {typeof meeting.settledReserveFundAmount === 'number' && (
+                <p className="text-muted-foreground pl-6 text-xs">
+                  확정된 회비 사용액: {meeting.settledReserveFundAmount.toLocaleString()}원
+                </p>
+              )}
               {reserveFundBreakdown.perApplicableFundShare > 0 && (
                 <p className="text-muted-foreground pl-6 text-xs">
                   1인당 사용 회비: {reserveFundBreakdown.perApplicableFundShare.toLocaleString()}원
@@ -803,14 +808,14 @@ export function MeetingDetailsClient({
                           <AlertDialogTrigger asChild>
                             <Button disabled={isFinalizing || isDeleting || meeting.isTemporary} size="sm">
                               {isFinalizing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <CheckCircle2 className="mr-2 h-4 w-4" />}
-                              정산 확정 및 회비 사용 기록
+                              정산 확정
                             </Button>
                           </AlertDialogTrigger>
                           <AlertDialogContent>
                             <AlertDialogHeader>
                               <AlertDialogTitle>정산을 확정하시겠습니까?</AlertDialogTitle>
                               <AlertDialogDescription>
-                                이 작업은 되돌릴 수 없습니다. 회비 사용 내역이 기록되며, 이후에는 수정이 불가합니다.
+                                이 작업은 되돌릴 수 없습니다. 이후에는 수정이 불가합니다.
                               </AlertDialogDescription>
                             </AlertDialogHeader>
                             <AlertDialogFooter>
@@ -827,7 +832,7 @@ export function MeetingDetailsClient({
                   )}
                   {meeting.useReserveFund && meeting.isSettled && expenses.length > 0 && !isReadOnlyShare && (
                     <CardDescription className="text-green-600 flex items-center gap-1 mt-2">
-                        <CheckCircle2 className="h-4 w-4"/> 이 모임의 회비 사용 정산이 확정되어 회비 내역에 기록되었습니다.
+                        <CheckCircle2 className="h-4 w-4"/> 이 모임의 회비 사용 정산이 확정되었습니다.
                     </CardDescription>
                   )}
                   {meeting.useReserveFund && !meeting.isSettled && expenses.length === 0 && typeof meeting.partialReserveFundAmount === 'number' && meeting.partialReserveFundAmount > 0 && !isReadOnlyShare &&(

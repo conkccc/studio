@@ -6,7 +6,6 @@ import {
   updateMeeting as dbUpdateMeeting,
   deleteMeeting as dbDeleteMeeting,
   getMeetingById as dbGetMeetingById,
-  dbRevertMeetingDeduction,
   getMeetings as dbGetMeetings,
   getUserById as dbGetUserById,
 } from '../data-store';
@@ -176,9 +175,9 @@ export async function updateMeetingAction(
                                      payload.reserveFundRefundRecipientIds !== undefined;
 
     if (meetingToUpdate.isSettled && reserveFundSettingsChanged) {
-      await dbRevertMeetingDeduction(id);
       meetingDataToUpdate.isSettled = false;
-      revalidatePath('/reserve-fund');
+      meetingDataToUpdate.settledReserveFundAmount = undefined;
+      meetingDataToUpdate.settledReserveFundAt = undefined;
     } else if (Object.prototype.hasOwnProperty.call(payload, 'isSettled')) {
       meetingDataToUpdate.isSettled = isSettled;
     }
@@ -283,9 +282,6 @@ export async function updateMeetingAction(
     revalidatePath('/meetings');
     revalidatePath(`/meetings/${id}`);
     revalidatePath('/');
-    if ( (meetingToUpdate.isSettled && reserveFundSettingsChanged) || (payload.isSettled === false && meetingDataToUpdate.isSettled === false) ) {
-      revalidatePath('/reserve-fund');
-    }
     return { success: true, meeting: updatedMeeting };
   } catch (error) {
     console.error("updateMeetingAction Error:", error);
@@ -314,7 +310,6 @@ export async function deleteMeetingAction(id: string, currentUserId?: string | n
     await dbDeleteMeeting(id);
     revalidatePath('/meetings');
     revalidatePath('/');
-    revalidatePath('/reserve-fund');
     return { success: true };
   } catch (error) {
     console.error("deleteMeetingAction Error:", error);

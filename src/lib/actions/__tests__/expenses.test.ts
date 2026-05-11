@@ -5,8 +5,7 @@ import {
   updateExpense,
   deleteExpense,
   getMeetingById,
-  updateMeeting,
-  dbRevertMeetingDeduction
+  updateMeeting
 } from '../../data-store';
 import { ensureUserPermission } from '../permissions';
 import { revalidatePath } from 'next/cache';
@@ -22,7 +21,6 @@ vi.mock('../../data-store', () => ({
   deleteExpense: vi.fn(),
   getMeetingById: vi.fn(),
   updateMeeting: vi.fn(),
-  dbRevertMeetingDeduction: vi.fn(),
   getExpensesByMeetingId: vi.fn()
 }));
 
@@ -36,7 +34,6 @@ const mockAddExpense = vi.mocked(addExpense);
 const mockUpdateExpense = vi.mocked(updateExpense);
 const mockDeleteExpense = vi.mocked(deleteExpense);
 const mockUpdateMeeting = vi.mocked(updateMeeting);
-const mockRevertMeetingDeduction = vi.mocked(dbRevertMeetingDeduction);
 const mockRevalidatePath = vi.mocked(revalidatePath);
 
 describe('createExpenseAction', () => {
@@ -47,7 +44,6 @@ describe('createExpenseAction', () => {
     mockUpdateExpense.mockReset();
     mockDeleteExpense.mockReset();
     mockUpdateMeeting.mockReset();
-    mockRevertMeetingDeduction.mockReset();
     mockRevalidatePath.mockReset();
   });
 
@@ -94,7 +90,7 @@ describe('createExpenseAction', () => {
     expect(result.error).toContain('지출 항목 추가 권한이 없습니다');
   });
 
-  it('unsettles meeting and reverts reserve deduction when adding expense to settled meeting', async () => {
+  it('unsettles meeting when adding expense to settled meeting', async () => {
     mockEnsureUserPermission.mockResolvedValue({
       success: true,
       user: makeAdmin({ id: 'admin-1' })
@@ -112,9 +108,11 @@ describe('createExpenseAction', () => {
     const result = await createExpenseAction(expenseData, 'admin-1');
 
     expect(result.success).toBe(true);
-    expect(mockUpdateMeeting).toHaveBeenCalledWith('m1', { isSettled: false });
-    expect(mockRevertMeetingDeduction).toHaveBeenCalledWith('m1');
-    expect(mockRevalidatePath).toHaveBeenCalledWith('/reserve-fund');
+    expect(mockUpdateMeeting).toHaveBeenCalledWith('m1', {
+      isSettled: false,
+      settledReserveFundAmount: undefined,
+      settledReserveFundAt: undefined,
+    });
     expect(mockRevalidatePath).toHaveBeenCalledWith('/meetings/m1');
   });
 
@@ -139,7 +137,6 @@ describe('updateExpenseAction', () => {
     mockGetMeetingById.mockReset();
     mockUpdateExpense.mockReset();
     mockUpdateMeeting.mockReset();
-    mockRevertMeetingDeduction.mockReset();
     mockRevalidatePath.mockReset();
   });
 
@@ -162,7 +159,7 @@ describe('updateExpenseAction', () => {
     expect(result.error).toContain('지출 항목 수정 권한이 없습니다');
   });
 
-  it('unsettles meeting and reverts reserve deduction when updating expense on settled meeting', async () => {
+  it('unsettles meeting when updating expense on settled meeting', async () => {
     mockEnsureUserPermission.mockResolvedValue({
       success: true,
       user: makeAdmin({ id: 'admin-1' })
@@ -180,9 +177,11 @@ describe('updateExpenseAction', () => {
     const result = await updateExpenseAction('e1', 'm1', { description: '수정' }, 'admin-1');
 
     expect(result.success).toBe(true);
-    expect(mockUpdateMeeting).toHaveBeenCalledWith('m1', { isSettled: false });
-    expect(mockRevertMeetingDeduction).toHaveBeenCalledWith('m1');
-    expect(mockRevalidatePath).toHaveBeenCalledWith('/reserve-fund');
+    expect(mockUpdateMeeting).toHaveBeenCalledWith('m1', {
+      isSettled: false,
+      settledReserveFundAmount: undefined,
+      settledReserveFundAt: undefined,
+    });
     expect(mockRevalidatePath).toHaveBeenCalledWith('/meetings/m1');
   });
 
@@ -207,7 +206,6 @@ describe('deleteExpenseAction', () => {
     mockGetMeetingById.mockReset();
     mockDeleteExpense.mockReset();
     mockUpdateMeeting.mockReset();
-    mockRevertMeetingDeduction.mockReset();
     mockRevalidatePath.mockReset();
   });
 
@@ -224,7 +222,7 @@ describe('deleteExpenseAction', () => {
     expect(result.error).toContain('지출 항목 삭제 권한이 없습니다');
   });
 
-  it('unsettles meeting and reverts reserve deduction when deleting expense on settled meeting', async () => {
+  it('unsettles meeting when deleting expense on settled meeting', async () => {
     mockEnsureUserPermission.mockResolvedValue({
       success: true,
       user: makeAdmin({ id: 'admin-1' })
@@ -242,9 +240,11 @@ describe('deleteExpenseAction', () => {
 
     expect(result.success).toBe(true);
     expect(mockDeleteExpense).toHaveBeenCalledWith('m1', 'e1');
-    expect(mockUpdateMeeting).toHaveBeenCalledWith('m1', { isSettled: false });
-    expect(mockRevertMeetingDeduction).toHaveBeenCalledWith('m1');
-    expect(mockRevalidatePath).toHaveBeenCalledWith('/reserve-fund');
+    expect(mockUpdateMeeting).toHaveBeenCalledWith('m1', {
+      isSettled: false,
+      settledReserveFundAmount: undefined,
+      settledReserveFundAt: undefined,
+    });
     expect(mockRevalidatePath).toHaveBeenCalledWith('/meetings/m1');
   });
 

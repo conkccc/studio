@@ -55,7 +55,7 @@ export const PARTICIPANT_AVAILABILITIES_SUBCOLLECTION = 'participantAvailabiliti
 // Firestore Timestamps를 JS Date 객체로 변환하는 헬퍼 함수
 const convertTimestampsToDates = (data: DocumentData): DocumentData => {
   const processedData: Record<string, unknown> = { ...data };
-  const dateFields: string[] = ['createdAt', 'dateTime', 'endTime', 'date', 'shareExpiryDate', 'submittedAt'];
+  const dateFields: string[] = ['createdAt', 'dateTime', 'endTime', 'date', 'shareExpiryDate', 'submittedAt', 'settledReserveFundAt'];
 
   for (const field of dateFields) {
     if (!Object.prototype.hasOwnProperty.call(processedData, field)) {
@@ -477,6 +477,20 @@ export const updateMeeting = async (id: string, updates: Partial<Omit<Meeting, '
   if (Object.prototype.hasOwnProperty.call(updates, 'shareExpiryDate')) {
     updateData.shareExpiryDate = updates.shareExpiryDate ? Timestamp.fromDate(new Date(updates.shareExpiryDate)) : null;
   }
+  if (Object.prototype.hasOwnProperty.call(updates, 'settledReserveFundAmount')) {
+    if (updates.settledReserveFundAmount === undefined) {
+      updateData.settledReserveFundAmount = deleteField();
+    } else {
+      updateData.settledReserveFundAmount = Number(updates.settledReserveFundAmount);
+    }
+  }
+  if (Object.prototype.hasOwnProperty.call(updates, 'settledReserveFundAt')) {
+    if (updates.settledReserveFundAt === undefined) {
+      updateData.settledReserveFundAt = deleteField();
+    } else {
+      updateData.settledReserveFundAt = updates.settledReserveFundAt ? Timestamp.fromDate(new Date(updates.settledReserveFundAt)) : null;
+    }
+  }
   if (Object.prototype.hasOwnProperty.call(updates, 'shareToken')) {
     updateData.shareToken = updates.shareToken === undefined ? null : updates.shareToken;
   }
@@ -504,8 +518,6 @@ export const deleteMeeting = async (id: string): Promise<void> => {
   const expensesCollectionRef = collection(db, MEETINGS_COLLECTION, id, EXPENSES_SUBCOLLECTION);
   const expensesSnapshot = await getDocs(expensesCollectionRef);
   expensesSnapshot.forEach(expenseDoc => batch.delete(expenseDoc.ref));
-
-  await dbRevertMeetingDeduction(id, batch);
 
   batch.delete(meetingDocRef);
   await batch.commit();

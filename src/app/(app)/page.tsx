@@ -3,18 +3,16 @@
 import Link from 'next/link';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { UsersRound, CalendarCheck, PiggyBank, ArrowRight, LineChart, Briefcase, Info } from 'lucide-react';
+import { UsersRound, CalendarCheck, ArrowRight, LineChart, Briefcase, Info } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useEffect, useState } from 'react';
-import { getReserveFundBalance } from '@/lib/data-store/client';
 import { getMeetingsForUserAction } from '@/lib/actions';
 import type { Meeting } from '@/lib/types';
 
 const MAX_RECENT_MEETINGS_DISPLAY = 1;
 
 export default function DashboardPage() {
-  const { appUser, isAdmin, loading: authLoading } = useAuth();
-  const [reserveBalance, setReserveBalance] = useState<number | null>(null);
+  const { appUser, loading: authLoading } = useAuth();
   const [recentMeetings, setRecentMeetings] = useState<Meeting[]>([]);
   const [isLoadingDashboardData, setIsLoadingDashboardData] = useState(true);
 
@@ -28,7 +26,6 @@ export default function DashboardPage() {
       if (!appUser?.id) {
         setIsLoadingDashboardData(false);
         setRecentMeetings([]);
-        setReserveBalance(null);
         return;
       }
 
@@ -42,17 +39,8 @@ export default function DashboardPage() {
 
         if (meetingsResult.success && meetingsResult.meetings && meetingsResult.meetings.length > 0) {
           setRecentMeetings(meetingsResult.meetings);
-
-          const latestMeetingForBalance = meetingsResult.meetings[0];
-          if (latestMeetingForBalance && latestMeetingForBalance.groupId) {
-            const groupReserveBalance = await getReserveFundBalance(latestMeetingForBalance.groupId);
-            setReserveBalance(groupReserveBalance);
-          } else {
-            setReserveBalance(null);
-          }
         } else {
           setRecentMeetings([]);
-          setReserveBalance(null);
           if (!meetingsResult.success) {
             console.error("Failed to fetch recent meetings for dashboard:", meetingsResult.error);
           }
@@ -60,7 +48,6 @@ export default function DashboardPage() {
       } catch (error) {
         console.error("Failed to fetch dashboard data:", error);
         setRecentMeetings([]);
-        setReserveBalance(null);
       } finally {
         setIsLoadingDashboardData(false);
       }
@@ -72,7 +59,6 @@ export default function DashboardPage() {
   const quickLinks = [
     { href: '/friends', label: '친구 및 그룹 관리', icon: UsersRound, description: '친구 및 그룹 목록을 보고 관리하세요.', roles: ['admin', 'user', 'viewer'] },
     { href: '/meetings', label: '모임 관리', icon: CalendarCheck, description: '모임을 만들고 지난 모임을 확인하세요.', roles: ['admin', 'user', 'viewer'] },
-    { href: '/reserve-fund', label: '회비 현황', icon: PiggyBank, description: '회비 잔액과 사용 내역을 보세요.', roles: ['admin', 'user', 'viewer'] },
     { href: '/users', label: '사용자 관리', icon: Briefcase, description: '사용자 역할을 관리합니다.', roles: ['admin'] },
   ];
 
@@ -155,18 +141,6 @@ export default function DashboardPage() {
                   </p>
                 )}
               </div>
-
-              {isAdmin && reserveBalance !== null && (
-                 <div>
-                  <h3 className="font-semibold mb-1 text-lg">회비 잔액</h3>
-                  <p className="text-2xl font-bold text-primary">
-                     {isLoadingDashboardData ? "잔액 로딩 중..." : `₩${reserveBalance.toLocaleString()}`}
-                  </p>
-                   <Button asChild variant="secondary" size="sm" className="mt-2">
-                    <Link href="/reserve-fund">내역 보기</Link>
-                  </Button>
-                </div>
-              )}
             </CardContent>
           </Card>
         </section>

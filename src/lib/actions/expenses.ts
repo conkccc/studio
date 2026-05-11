@@ -7,7 +7,6 @@ import {
   deleteExpense as dbDeleteExpense,
   getMeetingById as dbGetMeetingById,
   updateMeeting as dbUpdateMeeting,
-  dbRevertMeetingDeduction,
   getExpensesByMeetingId as dbGetExpensesByMeetingId,
 } from '../data-store';
 import type { Expense } from '../types';
@@ -46,11 +45,11 @@ export async function createExpenseAction(expenseData: Omit<Expense, 'id' | 'cre
     const newExpense = await dbAddExpense(expenseData);
 
     if (meeting.isSettled) {
-      await dbUpdateMeeting(meeting.id, { isSettled: false });
-      if (!meeting.isTemporary && meeting.useReserveFund && meeting.partialReserveFundAmount && meeting.partialReserveFundAmount > 0) {
-        await dbRevertMeetingDeduction(meeting.id);
-        revalidatePath('/reserve-fund');
-      }
+      await dbUpdateMeeting(meeting.id, {
+        isSettled: false,
+        settledReserveFundAmount: undefined,
+        settledReserveFundAt: undefined,
+      });
     }
     revalidatePath(`/meetings/${expenseData.meetingId}`);
     return { success: true, expense: newExpense };
@@ -92,11 +91,11 @@ export async function updateExpenseAction(
     if (!updatedExpense) throw new Error('지출 항목 업데이트에 실패했습니다.');
 
     if (meeting.isSettled) {
-      await dbUpdateMeeting(meeting.id, { isSettled: false });
-      if (!meeting.isTemporary && meeting.useReserveFund && meeting.partialReserveFundAmount && meeting.partialReserveFundAmount > 0) {
-        await dbRevertMeetingDeduction(meeting.id);
-        revalidatePath('/reserve-fund');
-      }
+      await dbUpdateMeeting(meeting.id, {
+        isSettled: false,
+        settledReserveFundAmount: undefined,
+        settledReserveFundAt: undefined,
+      });
     }
     revalidatePath(`/meetings/${meetingId}`);
     return { success: true, expense: updatedExpense };
@@ -132,11 +131,11 @@ export async function deleteExpenseAction(expenseId: string, meetingId: string, 
     await dbDeleteExpense(meetingId, expenseId);
 
     if (meeting.isSettled) {
-      await dbUpdateMeeting(meeting.id, { isSettled: false });
-      if (!meeting.isTemporary && meeting.useReserveFund && meeting.partialReserveFundAmount && meeting.partialReserveFundAmount > 0) {
-        await dbRevertMeetingDeduction(meeting.id);
-        revalidatePath('/reserve-fund');
-      }
+      await dbUpdateMeeting(meeting.id, {
+        isSettled: false,
+        settledReserveFundAmount: undefined,
+        settledReserveFundAt: undefined,
+      });
     }
     revalidatePath(`/meetings/${meetingId}`);
     return { success: true };
