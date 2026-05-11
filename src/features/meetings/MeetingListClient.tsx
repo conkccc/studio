@@ -21,24 +21,6 @@ import Link from 'next/link';
 
 const MEETINGS_PER_PAGE = 9;
 const FILTER_STORAGE_KEY = 'meetings:filters:v2';
-const MEETINGS_DATA_TIMEOUT_MS = 45000;
-
-const withTimeout = async <T,>(promise: Promise<T>, label: string): Promise<T> => {
-  let timeoutId: ReturnType<typeof setTimeout> | undefined;
-  const timeoutPromise = new Promise<never>((_, reject) => {
-    timeoutId = setTimeout(() => {
-      reject(new Error(`${label} timed out.`));
-    }, MEETINGS_DATA_TIMEOUT_MS);
-  });
-
-  try {
-    return await Promise.race([promise, timeoutPromise]);
-  } finally {
-    if (timeoutId) {
-      clearTimeout(timeoutId);
-    }
-  }
-};
 
 interface MeetingListClientProps {
   allFriends: Friend[];
@@ -148,15 +130,12 @@ export function MeetingListClient({ allFriends, friendGroups, filtersReady }: Me
     requestSeqRef.current = requestSeq;
     setIsLoading(true);
     try {
-      const meetingsResult = await withTimeout(
-        getMeetingsForUserAction({
-          requestingUserId: currentUser.uid,
-          year: yearToFetch,
-          page: currentPage,
-          limitParam: MEETINGS_PER_PAGE,
-        }),
-        'Meetings fetch'
-      );
+      const meetingsResult = await getMeetingsForUserAction({
+        requestingUserId: currentUser.uid,
+        year: yearToFetch,
+        page: currentPage,
+        limitParam: MEETINGS_PER_PAGE,
+      });
       if (requestSeqRef.current !== requestSeq) return;
       if (meetingsResult.success) {
         setMeetings(meetingsResult.meetings || []);
@@ -167,12 +146,11 @@ export function MeetingListClient({ allFriends, friendGroups, filtersReady }: Me
         setMeetings([]);
         setTotalPages(0);
       }
-    } catch (error) {
+    } catch {
       if (requestSeqRef.current !== requestSeq) return;
-      const isTimeout = error instanceof Error && error.message.includes('timed out');
       toast({ 
         title: "오류", 
-        description: isTimeout ? "데이터를 불러오는 중 시간이 초과되었습니다. 잠시 후 다시 시도해주세요." : "데이터 로딩 중 예기치 않은 오류 발생.", 
+        description: "데이터 로딩 중 예기치 않은 오류 발생.", 
         variant: "destructive" 
       });
       setMeetings([]);
@@ -191,7 +169,7 @@ export function MeetingListClient({ allFriends, friendGroups, filtersReady }: Me
     }
     usersInFlightRef.current = true;
     try {
-      const usersResult = await withTimeout(getAllUsersAction(), 'Users fetch');
+      const usersResult = await getAllUsersAction();
       if (usersResult.success) {
         setAllUsers(usersResult.users || []);
       } else {

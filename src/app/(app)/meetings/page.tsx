@@ -8,25 +8,6 @@ import { Button } from '@/components/ui/button';
 import { useAuth } from '@/contexts/AuthContext';
 import type { Friend, FriendGroup } from '@/lib/types';
 
-const FILTER_DATA_TIMEOUT_MS = 45000;
-
-const withTimeout = async <T,>(promise: Promise<T>, label: string): Promise<T> => {
-  let timeoutId: ReturnType<typeof setTimeout> | undefined;
-  const timeoutPromise = new Promise<never>((_, reject) => {
-    timeoutId = setTimeout(() => {
-      reject(new Error(`${label} timed out.`));
-    }, FILTER_DATA_TIMEOUT_MS);
-  });
-
-  try {
-    return await Promise.race([promise, timeoutPromise]);
-  } finally {
-    if (timeoutId) {
-      clearTimeout(timeoutId);
-    }
-  }
-};
-
 export default function MeetingsPage() {
   const { currentUser, appUser, loading: authLoading } = useAuth();
   const [allFriends, setAllFriends] = useState<Friend[]>([]);
@@ -48,8 +29,8 @@ export default function MeetingsPage() {
         setDataLoading(true);
         try {
           const [friendsResult, groupsResult] = await Promise.all([
-            withTimeout(getFriendsForUserAction(appUser.id), 'Friends filter fetch'),
-            withTimeout(getFriendGroupsForUserAction(appUser.id), 'Friend groups filter fetch'),
+            getFriendsForUserAction(appUser.id),
+            getFriendGroupsForUserAction(appUser.id),
           ]);
           if (requestSeqRef.current !== requestSeq) return;
           if (friendsResult.success) {
