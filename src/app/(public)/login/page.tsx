@@ -19,7 +19,7 @@ export default function LoginPage() {
 
   if (loading) {
     return (
-      <div className="flex flex-col justify-center items-center min-h-screen text-center">
+      <div className="flex flex-col justify-center items-center min-h-[calc(100dvh-3.5rem)] text-center">
         <p className="text-xl text-muted-foreground">페이지 로딩 중...</p>
       </div>
     );
@@ -27,7 +27,7 @@ export default function LoginPage() {
 
   if (!loading && currentUser && userRole === null) {
     return (
-      <div className="flex flex-col justify-center items-center min-h-screen text-center">
+      <div className="flex flex-col justify-center items-center min-h-[calc(100dvh-3.5rem)] text-center">
         <p className="text-xl text-muted-foreground mb-4">사용자 정보 확인 중...</p>
         <Button variant="outline" onClick={async () => { await signOut(); }}>로그아웃</Button>
       </div>
@@ -36,7 +36,7 @@ export default function LoginPage() {
 
   if (!loading && currentUser && userRole === 'none') {
     return (
-      <div className="flex flex-col justify-center items-center min-h-screen text-center">
+      <div className="flex flex-col justify-center items-center min-h-[calc(100dvh-3.5rem)] text-center">
         <p className="text-xl text-muted-foreground mb-4">
           아직 권한이 부여되지 않은 계정입니다.<br />
           관리자의 승인을 기다려주세요.
@@ -48,7 +48,7 @@ export default function LoginPage() {
 
   if (!currentUser) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-muted/40 py-12 px-4 sm:px-6 lg:px-8">
+      <div className="min-h-[calc(100dvh-3.5rem)] flex items-center justify-center bg-muted/40 py-12 px-4 sm:px-6 lg:px-8">
         <div className="w-full max-w-md space-y-8">
           <div>
             <h2 className="mt-6 text-center text-3xl font-extrabold text-foreground">N빵친구 로그인</h2>
@@ -69,7 +69,7 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="flex flex-col justify-center items-center min-h-screen text-center">
+    <div className="flex flex-col justify-center items-center min-h-[calc(100dvh-3.5rem)] text-center">
       <p className="text-xl text-muted-foreground">대시보드로 이동 중...</p>
       {currentUser && (
         <Button variant="outline" onClick={signOut} className="mt-4">로그아웃 (이동 문제 발생 시)</Button>

@@ -733,7 +733,7 @@ export function MeetingDetailsClient({
 
       {canManageMeetingActions && (
         <Accordion type="single" collapsible className="my-4">
-          <AccordionItem value="share-settings" className="rounded-lg border bg-white px-4 py-2">
+          <AccordionItem value="share-settings" className="rounded-lg border bg-card px-4 py-2">
             <AccordionTrigger className="py-4 px-2">
               <div className="flex items-center gap-2">
                 <Share2 className="h-5 w-5" />

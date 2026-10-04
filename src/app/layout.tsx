@@ -2,6 +2,8 @@ import type { Metadata, Viewport } from 'next';
 import './globals.css';
 import { AuthProvider } from '@/contexts/AuthContext';
 import { Toaster } from "@/components/ui/toaster";
+import { ThemeProvider } from '@/contexts/ThemeContext';
+import { THEME_BOOTSTRAP_SCRIPT } from '@/lib/theme';
 
 export const metadata: Metadata = {
   title: 'N빵친구 - 모임 정산 도우미',
@@ -26,12 +28,13 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="ko" className='h-full'>
+    <html lang="ko" className='h-full' suppressHydrationWarning>
+      <head><script dangerouslySetInnerHTML={{ __html: THEME_BOOTSTRAP_SCRIPT }} /></head>
       <body className="h-full antialiased">
-        <AuthProvider>
+        <ThemeProvider><AuthProvider>
           {children}
           <Toaster />
-        </AuthProvider>
+        </AuthProvider></ThemeProvider>
       </body>
     </html>
   );

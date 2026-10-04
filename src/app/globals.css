@@ -61,10 +61,10 @@ body {
     --background: 224 71.4% 4.1%;
     --foreground: 208 100% 97.1%;
 
-    --card: 224 71.4% 4.1%;
+    --card: 224 50% 8%;
     --card-foreground: 208 100% 97.1%;
 
-    --popover: 224 71.4% 4.1%;
+    --popover: 224 50% 8%;
     --popover-foreground: 208 100% 97.1%;
 
     --primary: 207 100% 72.4%;

@@ -29,6 +29,7 @@ import { Sheet, SheetContent, SheetTrigger, SheetTitle, SheetDescription } from 
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
 import type { User } from '@/lib/types';
+import { ThemeMenu } from './ThemeMenu';
 
 interface NavItem {
   href: string;
@@ -258,6 +259,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           )}
           <div className="flex-1">
           </div>
+          <ThemeMenu />
         </header>
         <main className="flex-1 p-4 sm:p-6">
           {children}

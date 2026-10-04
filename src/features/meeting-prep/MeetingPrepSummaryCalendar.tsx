@@ -128,7 +128,7 @@ export function MeetingPrepSummaryCalendar({
                                 aria-label={`${format(date, 'yyyy년 MM월 dd일 (EEE)', { locale: ko })} 참석 가능 상세 보기`}
                                 className={cn(
                                   "flex h-10 w-10 items-center justify-center rounded-md text-center cursor-pointer transition-transform hover:scale-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
-                                  summary ? getColorClass(summary.availableCount) : "bg-gray-100",
+                                  summary ? `${getColorClass(summary.availableCount)} text-slate-950` : "bg-muted text-foreground",
                                   isToday && "border-2 border-blue-500",
                                   date.getDay() === 0 && "text-red-700", // Sunday
                                   date.getDay() === 6 && "text-blue-700" // Saturday

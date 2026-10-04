@@ -326,10 +326,10 @@ export function MeetingPrepDetailsClient({ meetingPrepId, shareToken }: MeetingP
                         size="icon"
                         className={cn(
                           "h-8 w-8 rounded-full text-xs",
-                          isSelected ? "bg-green-500 hover:bg-green-600 text-white" : "bg-gray-100 hover:bg-gray-200 text-gray-800",
+                          isSelected ? "bg-green-600 hover:bg-green-700 text-white" : "bg-muted hover:bg-accent text-foreground",
                           isPastDate && "opacity-50 cursor-not-allowed",
-                          date.getDay() === 0 && "text-red-500", // Sunday
-                          date.getDay() === 6 && "text-blue-500" // Saturday
+                          !isSelected && date.getDay() === 0 && "text-red-500 dark:text-red-400", // Sunday
+                          !isSelected && date.getDay() === 6 && "text-blue-500 dark:text-blue-400" // Saturday
                         )}
                         onMouseDown={() => handleMouseDown(date)}
                         onMouseEnter={() => handleMouseEnter(date)}
