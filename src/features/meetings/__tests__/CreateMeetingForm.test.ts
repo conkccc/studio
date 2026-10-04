@@ -137,4 +137,33 @@ describe('meeting participant editing flow', () => {
     await submit();
     expect(updateMeetingAction).toHaveBeenCalledWith('m1', expect.objectContaining({ reserveFundCoverAll: false, partialReserveFundAmount: 10000 }), 'owner');
   });
+
+  it('sets a missing end to one hour after the selected start, across midnight', async () => {
+    render({});
+    const start = new Date('2026-10-04T23:30:00+09:00');
+    await act(async () => renderer!.root.findByProps({ varName: 'dateTime' }).props.onDateChanged(start));
+    expect(renderer!.root.findByProps({ varName: 'endTime' }).props.timeValue.getTime()).toBe(start.getTime() + 3600000);
+  });
+
+  it.each(['2026-10-04T10:00:00+09:00', '2026-10-04T11:00:00+09:00'])('adjusts an earlier or equal end after a start change: %s', async end => {
+    render({});
+    await act(async () => renderer!.root.findByProps({ varName: 'endTime' }).props.onDateChanged(new Date(end)));
+    const start = new Date('2026-10-04T11:00:00+09:00');
+    await act(async () => renderer!.root.findByProps({ varName: 'dateTime' }).props.onDateChanged(start));
+    expect(renderer!.root.findByProps({ varName: 'endTime' }).props.timeValue.getTime()).toBe(start.getTime() + 3600000);
+  });
+
+  it('preserves a manually chosen end that is after the new start', async () => {
+    render({});
+    const end = new Date('2026-10-04T18:00:00+09:00');
+    await act(async () => renderer!.root.findByProps({ varName: 'endTime' }).props.onDateChanged(end));
+    await act(async () => renderer!.root.findByProps({ varName: 'dateTime' }).props.onDateChanged(new Date('2026-10-04T11:00:00+09:00')));
+    expect(renderer!.root.findByProps({ varName: 'endTime' }).props.timeValue).toEqual(end);
+  });
+
+  it('does not automatically overwrite an existing meeting end in edit mode', async () => {
+    render({ isEditMode: true, initialData: meeting });
+    await act(async () => renderer!.root.findByProps({ varName: 'dateTime' }).props.onDateChanged(new Date('2026-10-04T11:00:00+09:00')));
+    expect(renderer!.root.findByProps({ varName: 'endTime' }).props.timeValue).toBeUndefined();
+  });
 });

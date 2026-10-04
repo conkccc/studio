@@ -574,7 +574,14 @@ export function CreateMeetingForm({
           titleNode={<>시작 날짜 및 시간 <span className="text-destructive">*</span></>}
           openState={startDateOpen}
           openStateFunc={setStartDateOpen}
-          onDateChanged={date => form.setValue('dateTime', date!, { shouldValidate: true })}
+          onDateChanged={date => {
+            if (!date || !Number.isFinite(date.getTime())) return;
+            const currentEnd = form.getValues('endTime');
+            if (!isEditMode && (!currentEnd || !Number.isFinite(currentEnd.getTime()) || currentEnd <= date)) {
+              form.setValue('endTime', new Date(date.getTime() + 60 * 60 * 1000), { shouldDirty: true });
+            }
+            form.setValue('dateTime', date, { shouldDirty: true, shouldValidate: true });
+          }}
         />
         {form.formState.errors.dateTime && <p className="text-sm text-destructive mt-1">{form.formState.errors.dateTime.message}</p>}
       </div>
