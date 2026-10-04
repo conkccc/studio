@@ -22,7 +22,7 @@ npm run build
 
 `.env.example`을 `.env.local`로 복사하고 기존 Firebase 프로젝트의 공개 설정을 입력합니다. Google Maps API 키는 선택 사항이며, 키 없이도 장소를 직접 입력할 수 있습니다.
 
-서버는 Firebase Admin SDK를 사용합니다. 로컬에서는 저장소 밖에 둔 서비스 계정 파일의 절대 경로를 `GOOGLE_APPLICATION_CREDENTIALS`로 지정하거나 Application Default Credentials를 설정합니다. `FIREBASE_SERVICE_ACCOUNT` JSON도 지원합니다. Firebase App Hosting에서는 런타임에 할당된 서비스 계정의 기본 자격 증명을 사용합니다.
+서버는 Firebase Admin SDK를 사용합니다. 로컬에서는 저장소 밖에 둔 서비스 계정 파일의 절대 경로를 `GOOGLE_APPLICATION_CREDENTIALS`로 지정하거나 Application Default Credentials를 설정합니다. `FIREBASE_SERVICE_ACCOUNT`는 JSON과 Base64로 인코딩한 JSON을 지원합니다. Vercel에서는 이 서버용 자격 증명을 별도로 설정해야 합니다. Firebase App Hosting에서는 런타임에 할당된 서비스 계정의 기본 자격 증명을 사용합니다.
 
 계정은 Firestore 접근과 Firebase Authentication 세션 생성·검증 권한이 필요합니다. 비밀 키는 저장소에 넣지 않습니다. 서비스 계정 초기화는 요청 시점에 수행하므로 빌드에는 서비스 계정 파일이 필요하지 않습니다.
 

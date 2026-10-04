@@ -5,7 +5,7 @@ import type { Friend, FriendGroup, Meeting } from '@/lib/types';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { useAuth } from '@/contexts/AuthContext';
-import { getMeetingsForUserAction } from '@/lib/actions';
+import { fetchMeetingList } from './meeting-list-api';
 import { MeetingCard } from './MeetingCard';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -63,15 +63,14 @@ export function MeetingListClient({ allFriends, friendGroups, filtersReady }: Me
     }
     if (!preferences.ready) return;
     let active = true;
+    const controller = new AbortController();
     setIsLoading(true);
     setError(null);
     const params = new URLSearchParams(query);
     const numericYear = Number(params.get('year'));
     const fetchData = async () => {
-      let timeout: ReturnType<typeof setTimeout> | undefined;
       try {
-        const result = await Promise.race([
-          getMeetingsForUserAction({
+        const result = await fetchMeetingList({
             year: Number.isInteger(numericYear) && numericYear > 1900 ? numericYear : undefined,
             limitParam: 9,
             groupId: params.get('groupId') || undefined,
@@ -79,9 +78,7 @@ export function MeetingListClient({ allFriends, friendGroups, filtersReady }: Me
             status: params.get('status') === 'pending' ? 'pending' : params.get('status') === 'finalized' ? 'finalized' : undefined,
             search: params.get('search') || undefined,
             cursor: params.get('cursor') || undefined,
-          }),
-          new Promise<never>((_, reject) => { timeout = setTimeout(() => reject(new Error('목록 조회 시간이 초과되었습니다. 다시 시도해주세요.')), 15000); }),
-        ]);
+          }, controller.signal);
         if (!active || requestSequence.current !== sequence) return;
         if (!result.success) throw new Error(('error' in result && result.error) || '모임 목록을 불러오지 못했습니다.');
         setMeetings(result.meetings || []);
@@ -92,12 +89,11 @@ export function MeetingListClient({ allFriends, friendGroups, filtersReady }: Me
         if (!active || requestSequence.current !== sequence) return;
         setError(cause instanceof Error ? cause.message : '모임 목록을 불러오지 못했습니다.');
       } finally {
-        clearTimeout(timeout);
         if (active && requestSequence.current === sequence) setIsLoading(false);
       }
     };
     void fetchData();
-    return () => { active = false; };
+    return () => { active = false; controller.abort(); };
   }, [authLoading, currentUser?.uid, query, retry, preferences.ready]);
 
   const navigate = (params: URLSearchParams) => router.push(`${pathname}${params.size ? `?${params}` : ''}`, { scroll: false });

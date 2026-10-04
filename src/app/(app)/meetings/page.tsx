@@ -22,19 +22,14 @@ export default function MeetingsPage() {
     setDataLoading(true);
     setFilterError(null);
     const fetchGroups = async () => {
-      let timeout: ReturnType<typeof setTimeout> | undefined;
       try {
-        const result = await Promise.race([
-          getFriendGroupsForUserAction(appUser.id),
-          new Promise<never>((_, reject) => { timeout = setTimeout(() => reject(new Error('그룹 조회 시간이 초과되었습니다.')), 15000); }),
-        ]);
+        const result = await getFriendGroupsForUserAction(appUser.id);
         if (!active) return;
         if (!result.success) throw new Error(result.error || '그룹 목록을 불러오지 못했습니다.');
         setFriendGroups(result.groups || []);
       } catch (cause) {
         if (active) setFilterError(cause instanceof Error ? cause.message : '그룹 목록을 불러오지 못했습니다.');
       } finally {
-        clearTimeout(timeout);
         if (active) setDataLoading(false);
       }
     };
