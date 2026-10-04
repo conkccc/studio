@@ -11,17 +11,23 @@ import {
   dbUpdateMeetingPrep,
   dbDeleteMeetingPrep,
   dbGetFriendsByUserFriendGroupIds,
+  dbGetFriendById,
+  getFriendGroupById,
 } from '../data-store';
 import type { MeetingPrep, Friend } from '../types';
 import { ensureUserPermission } from './permissions';
 import { getFriendsByGroupAction } from './friends';
+import { timingSafeEqual } from 'node:crypto';
+import { meetingPrepInputSchema } from '../schemas/meeting-prep';
 
 // 모임 준비 관련 액션
 export async function createMeetingPrepAction(
   payload: Omit<MeetingPrep, 'id' | 'createdAt' | 'isDeleted' | 'shareToken' | 'shareExpiryDate' | 'creatorId'> & { shareExpiryDays?: number },
   currentUserId?: string | null
 ) {
-  const { shareExpiryDays, friendGroupId, ...restPayload } = payload;
+  const parsed = meetingPrepInputSchema.safeParse(payload);
+  if (!parsed.success) return { success: false, error: parsed.error.issues[0]?.message || '모임 준비 입력을 확인해주세요.' };
+  const { shareExpiryDays, friendGroupId, ...restPayload } = parsed.data;
   const permissionCheck = await ensureUserPermission(currentUserId, {
     requiredRole: ['user', 'admin'],
     entityName: '모임 준비 생성'
@@ -33,6 +39,14 @@ export async function createMeetingPrepAction(
   const creator = permissionCheck.user!;
 
   try {
+    const group = await getFriendGroupById(friendGroupId);
+    if (!group || (creator.role !== 'admin' && group.ownerUserId !== creator.id && !creator.friendGroupIds?.includes(friendGroupId))) {
+      return { success: false, error: '선택한 친구 그룹에 모임 준비를 생성할 권한이 없습니다.' };
+    }
+    const participantFriends = await Promise.all(restPayload.participantFriendIds.map(dbGetFriendById));
+    if (participantFriends.some(friend => !friend || friend.groupId !== friendGroupId)) {
+      return { success: false, error: '참여자는 선택한 친구 그룹에 속해야 합니다.' };
+    }
     const shareToken = nanoid(16);
     const shareExpiryDate = addDays(new Date(), shareExpiryDays !== undefined ? shareExpiryDays : 7);
 
@@ -75,7 +89,7 @@ export async function getMeetingPrepsAction(currentUserId: string | null) {
       if (prep.friendGroupId && prep.participantFriendIds && prep.participantFriendIds.length > 0) {
         const friendsInGroupResult = await getFriendsByGroupAction(prep.friendGroupId);
         if (friendsInGroupResult.success && friendsInGroupResult.friends) {
-          const participantFriends = friendsInGroupResult.friends.filter(friend => 
+          const participantFriends = friendsInGroupResult.friends.filter(friend =>
             prep.participantFriendIds.includes(friend.id)
           );
           return { ...prep, participantFriends };
@@ -92,14 +106,22 @@ export async function getMeetingPrepsAction(currentUserId: string | null) {
   }
 }
 
-export async function getMeetingPrepByIdAction(meetingPrepId: string, currentUserId?: string | null) {
+export async function getMeetingPrepByIdAction(meetingPrepId: string, currentUserId?: string | null, shareToken?: string) {
   try {
     const meetingPrep = await dbGetMeetingPrepById(meetingPrepId);
-    if (!meetingPrep) {
+    if (!meetingPrep || meetingPrep.isDeleted) {
       return { success: false, error: '모임 준비를 찾을 수 없습니다.', meetingPrep: null };
     }
 
-    if (currentUserId) {
+    if (shareToken !== undefined) {
+      const validToken = typeof shareToken === 'string' && typeof meetingPrep.shareToken === 'string'
+        && shareToken.length > 0 && shareToken.length <= 200
+        && Buffer.byteLength(shareToken) === Buffer.byteLength(meetingPrep.shareToken)
+        && timingSafeEqual(Buffer.from(shareToken), Buffer.from(meetingPrep.shareToken));
+      if (!validToken || !(meetingPrep.shareExpiryDate instanceof Date) || meetingPrep.shareExpiryDate.getTime() <= Date.now()) {
+        return { success: false, error: '공유 링크가 유효하지 않거나 만료되었습니다.', meetingPrep: null };
+      }
+    } else {
       const permissionCheck = await ensureUserPermission(currentUserId, {
         entityName: '모임 준비 상세 조회'
       });
@@ -119,15 +141,9 @@ export async function getMeetingPrepByIdAction(meetingPrepId: string, currentUse
       }
     }
 
-    let participantFriends: Friend[] = [];
-    if (meetingPrep.friendGroupId && meetingPrep.participantFriendIds && meetingPrep.participantFriendIds.length > 0) {
-      const friendsInGroupResult = await getFriendsByGroupAction(meetingPrep.friendGroupId);
-      if (friendsInGroupResult.success && friendsInGroupResult.friends) {
-        participantFriends = friendsInGroupResult.friends.filter(friend => 
-          meetingPrep.participantFriendIds.includes(friend.id)
-        );
-      }
-    }
+    const participantFriends = (await Promise.all(meetingPrep.participantFriendIds.map(dbGetFriendById)))
+      .filter((friend): friend is Friend => !!friend && friend.groupId === meetingPrep.friendGroupId)
+      .map(friend => ({ id: friend.id, name: friend.name, groupId: friend.groupId, createdAt: friend.createdAt }));
 
     return { success: true, meetingPrep: { ...meetingPrep, participantFriends } };
   } catch (error) {
@@ -142,13 +158,16 @@ export async function updateMeetingPrepAction(
   payload: Partial<Omit<MeetingPrep, 'id' | 'createdAt' | 'shareToken' | 'shareExpiryDate' | 'isDeleted' | 'creatorId'>> & { shareExpiryDays?: number },
   currentUserId?: string | null
 ) {
-  const { shareExpiryDays, ...restPayload } = payload;
+  const parsed = meetingPrepInputSchema.partial().safeParse(payload);
+  if (!parsed.success) return { success: false, error: parsed.error.issues[0]?.message || '모임 준비 입력을 확인해주세요.' };
+  const { shareExpiryDays, ...restPayload } = parsed.data;
   const meetingPrepToUpdate = await dbGetMeetingPrepById(id);
   if (!meetingPrepToUpdate) {
     return { success: false, error: "수정할 모임 준비를 찾을 수 없습니다." };
   }
 
   const permissionCheck = await ensureUserPermission(currentUserId, {
+    requiredRole: ['user', 'admin'],
     ownerId: meetingPrepToUpdate.creatorId,
     adminCanOverride: true,
     entityName: '모임 준비 수정'
@@ -159,6 +178,16 @@ export async function updateMeetingPrepAction(
   }
 
   try {
+    const groupId = restPayload.friendGroupId ?? meetingPrepToUpdate.friendGroupId;
+    const group = await getFriendGroupById(groupId);
+    const user = permissionCheck.user!;
+    if (!group || (user.role !== 'admin' && group.ownerUserId !== user.id && !user.friendGroupIds?.includes(groupId))) {
+      return { success: false, error: '선택한 친구 그룹에 모임 준비를 수정할 권한이 없습니다.' };
+    }
+    const participants = await Promise.all((restPayload.participantFriendIds ?? meetingPrepToUpdate.participantFriendIds).map(dbGetFriendById));
+    if (participants.some(friend => !friend || friend.groupId !== groupId)) {
+      return { success: false, error: '참여자는 선택한 친구 그룹에 속해야 합니다.' };
+    }
     const updateData: Partial<Omit<MeetingPrep, 'id' | 'createdAt'>> = {
       ...restPayload,
     };
@@ -187,6 +216,7 @@ export async function deleteMeetingPrepAction(id: string, currentUserId?: string
   }
 
   const permissionCheck = await ensureUserPermission(currentUserId, {
+    requiredRole: ['user', 'admin'],
     ownerId: meetingPrepToDelete.creatorId,
     adminCanOverride: true,
     entityName: '모임 준비 삭제'

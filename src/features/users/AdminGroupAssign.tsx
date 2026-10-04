@@ -1,5 +1,8 @@
+'use client';
+
 import { useEffect, useState } from 'react';
-import { getFriendGroupsByUser, updateFriendGroup } from '@/lib/data-store/client';
+import { getFriendGroupsForAdminUserAction, updateFriendGroupAction } from '@/lib/actions';
+import { useAuth } from '@/contexts/AuthContext';
 import type { User, FriendGroup } from '@/lib/types';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -12,6 +15,7 @@ interface AdminGroupAssignProps {
 }
 
 export default function AdminGroupAssign({ user }: AdminGroupAssignProps) {
+  const { appUser } = useAuth();
   const [groups, setGroups] = useState<FriendGroup[]>([]);
   const [editingGroupId, setEditingGroupId] = useState<string | null>(null); // 현재 수정 중인 그룹 ID
   const [editingName, setEditingName] = useState(''); // 현재 수정 중인 그룹 이름
@@ -21,14 +25,19 @@ export default function AdminGroupAssign({ user }: AdminGroupAssignProps) {
   useEffect(() => {
     // 컴포넌트 마운트 시 또는 사용자 ID 변경 시 그룹 목록을 가져옴
     setLoading(true);
-    getFriendGroupsByUser(user.id)
-      .then(setGroups)
+    let active = true;
+    getFriendGroupsForAdminUserAction(user.id)
+      .then(result => {
+        if (!result.success) throw new Error(result.error || '그룹 목록을 불러오지 못했습니다.');
+        if (active) setGroups(result.groups);
+      })
       .catch(() => {
         console.error("Failed to load groups for user:", user.id);
         toast({ title: '오류', description: '그룹 목록을 불러오지 못했습니다.', variant: 'destructive' });
-        setGroups([]);
+        if (active) setGroups([]);
       })
-      .finally(() => setLoading(false));
+      .finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
   }, [toast, user.id]);
 
   const startEdit = (group: FriendGroup) => {
@@ -48,8 +57,9 @@ export default function AdminGroupAssign({ user }: AdminGroupAssignProps) {
     }
     setLoading(true);
     try {
-      const result = await updateFriendGroup(groupId, { name: editingName });
-      if (result) { // data-store의 updateFriendGroup이 성공 시 업데이트된 그룹 객체, 실패 시 null 반환 가정
+      if (!appUser) throw new Error('로그인이 필요합니다.');
+      const result = await updateFriendGroupAction(groupId, { name: editingName }, appUser.id);
+      if (result.success) {
         setGroups(prevGroups => prevGroups.map(g => (g.id === groupId ? { ...g, name: editingName } : g)));
         toast({ title: '성공', description: '그룹 이름이 변경되었습니다.' });
       } else {

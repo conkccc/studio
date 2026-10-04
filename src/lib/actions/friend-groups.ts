@@ -1,167 +1,73 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
-import { doc, getDoc, Timestamp } from 'firebase/firestore';
-import { db } from '../firebase';
-import {
-  addFriendGroup as dbAddFriendGroup,
-  updateFriendGroup as dbUpdateFriendGroup,
-  deleteFriendGroup as dbDeleteFriendGroup,
-  getFriendGroupsByUser as dbGetFriendGroupsByUser,
-  dbGetAllFriendGroups,
-  getUserById as dbGetUserById,
-} from '../data-store';
+import { addFriendGroup, updateFriendGroup, deleteFriendGroup, getFriendGroupsByUser, dbGetAllFriendGroups, getUserById } from '../data-store';
 import type { FriendGroup } from '../types';
 import { ensureUserPermission } from './permissions';
+import { ensureGroupAccess } from '../services/access';
 
-// 모든 친구 그룹 목록 가져오기
 export async function getAllFriendGroupsAction() {
   try {
-    const groups = await dbGetAllFriendGroups();
-    return { success: true, groups };
-  } catch (error) {
-    console.error('getAllFriendGroupsAction Error:', error);
-    const errorMessage = error instanceof Error ? error.message : '모든 친구 그룹 목록을 가져오는데 실패했습니다.';
-    return { success: false, error: errorMessage };
-  }
+    const permission = await ensureUserPermission(undefined, { requiredRole: 'admin' });
+    if (!permission.success) return { success: false, error: permission.error, groups: [] };
+    return { success: true, groups: await dbGetAllFriendGroups() };
+  } catch { return { success: false, error: '그룹 목록 조회에 실패했습니다.', groups: [] }; }
 }
 
-// 친구 그룹 관련 액션
-export async function createFriendGroupAction(
-  name: string,
-  currentUserId: string,
-  memberIds: string[] = []
-) {
-  const permissionCheck = await ensureUserPermission(currentUserId, {
-    requiredRole: ['user', 'admin'],
-    entityName: '친구 그룹 생성'
-  });
-
-  if (!permissionCheck.success) {
-    return { success: false, error: permissionCheck.error };
-  }
-
+export async function getFriendGroupsForAdminUserAction(targetUserId: string) {
   try {
-    const newGroup = await dbAddFriendGroup({ name, ownerUserId: currentUserId, memberIds });
-    revalidatePath('/friends');
-    revalidatePath('/meetings/new');
-    revalidatePath('/groups');
-    return { success: true, group: newGroup };
-  } catch (error) {
-    console.error('createFriendGroupAction Error:', error);
-    const errorMessage = error instanceof Error ? error.message : '친구 그룹 생성 중 오류가 발생했습니다.';
-    return { success: false, error: errorMessage };
-  }
+    const permission = await ensureUserPermission(undefined, { requiredRole: 'admin' });
+    if (!permission.success) return { success: false, error: permission.error, groups: [] };
+    if (!targetUserId || targetUserId.length > 128 || targetUserId.includes('/')) return { success: false, error: '사용자 정보를 확인해주세요.', groups: [] };
+    return { success: true, groups: await getFriendGroupsByUser(targetUserId) };
+  } catch { return { success: false, error: '사용자 그룹을 조회하지 못했습니다.', groups: [] }; }
 }
 
-export async function updateFriendGroupAction(
-  id: string,
-  updates: Partial<Omit<FriendGroup, 'id' | 'createdAt'>>,
-  currentUserId: string
-) {
-  const permissionCheck = await ensureUserPermission(currentUserId, { entityName: '친구 그룹 수정' });
-  if (!permissionCheck.success) {
-    return { success: false, error: permissionCheck.error };
-  }
-  const currentUser = permissionCheck.user!;
-
+export async function createFriendGroupAction(name: string, currentUserId: string, memberIds: string[] = []) {
+  const permission = await ensureUserPermission(currentUserId, { requiredRole: ['user', 'admin'] });
+  if (!permission.success || !permission.user) return { success: false, error: permission.error };
+  if (!name?.trim() || name.length > 100) return { success: false, error: '그룹 이름은 1~100자로 입력해주세요.' };
+  if (memberIds.length) return { success: false, error: '그룹을 만든 뒤 친구를 추가해주세요.' };
   try {
-    const groupDocRef = doc(db, 'friendGroups', id);
-    const groupSnap = await getDoc(groupDocRef);
-
-    if (!groupSnap.exists()) {
-      return { success: false, error: "수정할 친구 그룹을 찾을 수 없습니다." };
-    }
-    const groupData = groupSnap.data() as FriendGroup;
-
-    if (currentUser.role !== 'admin' && groupData.ownerUserId !== currentUserId) {
-      return { success: false, error: "친구 그룹을 수정할 권한이 없습니다." };
-    }
-
-    const updatedGroup = await dbUpdateFriendGroup(id, updates);
-    if (!updatedGroup) {
-        return { success: false, error: "친구 그룹 업데이트에 실패했습니다."};
-    }
+    const group = await addFriendGroup({ name: name.trim(), ownerUserId: permission.user.id, memberIds: [] });
     revalidatePath('/friends');
-    revalidatePath('/groups');
-    revalidatePath(`/friends/${id}`);
-    return { success: true, group: updatedGroup };
-  } catch (error) {
-    console.error('updateFriendGroupAction Error:', error);
-    const errorMessage = error instanceof Error ? error.message : '친구 그룹 수정 중 오류가 발생했습니다.';
-    return { success: false, error: errorMessage };
-  }
+    return { success: true, group };
+  } catch { return { success: false, error: '친구 그룹 생성에 실패했습니다.' }; }
+}
+
+export async function updateFriendGroupAction(id: string, updates: Partial<Omit<FriendGroup, 'id' | 'createdAt'>>, currentUserId: string) {
+  try {
+    const access = await ensureGroupAccess(id, currentUserId, true);
+    if (!access.success) return access;
+    if (!updates.name?.trim() || updates.name.length > 100) return { success: false, error: '그룹 이름을 확인해주세요.' };
+    const group = await updateFriendGroup(id, { name: updates.name.trim() });
+    if (!group) return { success: false, error: '친구 그룹을 찾을 수 없습니다.' };
+    revalidatePath('/friends');
+    return { success: true, group };
+  } catch { return { success: false, error: '친구 그룹 수정에 실패했습니다.' }; }
 }
 
 export async function deleteFriendGroupAction(id: string, currentUserId: string) {
-  const permissionCheck = await ensureUserPermission(currentUserId, { entityName: '친구 그룹 삭제' });
-  if (!permissionCheck.success) {
-    return { success: false, error: permissionCheck.error };
-  }
-  const currentUser = permissionCheck.user!;
-
   try {
-    const groupDocRef = doc(db, 'friendGroups', id);
-    const groupSnap = await getDoc(groupDocRef);
-
-    if (!groupSnap.exists()) {
-      return { success: false, error: "삭제할 친구 그룹을 찾을 수 없습니다." };
-    }
-    const groupData = groupSnap.data() as FriendGroup;
-
-    if (currentUser.role !== 'admin' && groupData.ownerUserId !== currentUserId) {
-      return { success: false, error: "친구 그룹을 삭제할 권한이 없습니다." };
-    }
-
-    await dbDeleteFriendGroup(id);
+    const access = await ensureGroupAccess(id, currentUserId, true);
+    if (!access.success) return access;
+    await deleteFriendGroup(id);
     revalidatePath('/friends');
-    revalidatePath('/groups');
     return { success: true };
-  } catch (error) {
-    console.error('deleteFriendGroupAction Error:', error);
-    const errorMessage = error instanceof Error ? error.message : '친구 그룹 삭제 중 오류가 발생했습니다.';
-    return { success: false, error: errorMessage };
-  }
+  } catch { return { success: false, error: '친구 그룹 삭제에 실패했습니다.' }; }
 }
 
-export async function getFriendGroupsForUserAction(currentUserId: string) {
+export async function getFriendGroupsForUserAction(currentUserId?: string) {
   try {
-    if (!currentUserId) {
-      return { success: false, error: "인증되지 않은 사용자입니다. 로그인이 필요합니다." };
-    }
-    const currentUser = await dbGetUserById(currentUserId);
-    if (!currentUser) {
-      return { success: false, error: "사용자 정보를 찾을 수 없습니다." };
-    }
-
-    let rawGroups: FriendGroup[] = [];
-    if (currentUser.role === 'admin') {
-      rawGroups = await dbGetAllFriendGroups();
-    } else {
-      rawGroups = await dbGetFriendGroupsByUser(currentUserId);
-      if (currentUser.role === 'viewer') {
-        const referencedIds = currentUser.friendGroupIds || [];
-        rawGroups = rawGroups.filter(group => referencedIds.includes(group.id));
-      }
-    }
-
-    const processedGroups = rawGroups.map(group => ({
-      ...group,
-      isOwned: group.ownerUserId === currentUserId,
-      isReferenced: currentUser.friendGroupIds?.includes(group.id) || false,
-    }));
-
-    const sortedGroups = processedGroups.sort((a, b) => {
-      const dateA = a.createdAt instanceof Timestamp ? a.createdAt.toMillis() : (a.createdAt ? new Date(a.createdAt).getTime() : 0);
-      const dateB = b.createdAt instanceof Timestamp ? b.createdAt.toMillis() : (b.createdAt ? new Date(b.createdAt).getTime() : 0);
-      return dateB - dateA;
-    });
-
-    return { success: true, groups: sortedGroups };
-
-  } catch (error) {
-    console.error('getFriendGroupsForUserAction Error:', error);
-    const errorMessage = error instanceof Error ? error.message : '친구 그룹 목록 조회 중 오류가 발생했습니다.';
-    return { success: false, error: errorMessage, groups: [] };
-  }
+    const permission = await ensureUserPermission(currentUserId);
+    if (!permission.success || !permission.user) return { success: false, error: permission.error, groups: [] };
+    const user = permission.user;
+    let groups = user.role === 'admin' ? await dbGetAllFriendGroups() : await getFriendGroupsByUser(user.id);
+    if (user.role === 'viewer') groups = groups.filter(group => user.friendGroupIds?.includes(group.id));
+    const ownerIds = Array.from(new Set(groups.map(group => group.ownerUserId)));
+    const owners = await Promise.all(ownerIds.map(id => getUserById(id)));
+    const names = new Map(owners.filter(Boolean).map(owner => [owner!.id, owner!.name || '사용자']));
+    return { success: true, groups: groups.map(group => ({ ...group, ownerName: names.get(group.ownerUserId) || '사용자',
+      isOwned: user.role !== 'viewer' && group.ownerUserId === user.id, isReferenced: user.friendGroupIds?.includes(group.id) || false })) };
+  } catch { return { success: false, error: '친구 그룹 목록을 불러오지 못했습니다.', groups: [] }; }
 }

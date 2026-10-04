@@ -1,5 +1,6 @@
 import { getUserById as dbGetUserById } from '../data-store';
 import type { User } from '../types';
+import { getAuthenticatedUserId } from '../auth/session';
 
 export type UserRole = 'admin' | 'user' | 'viewer' | 'none';
 
@@ -20,16 +21,27 @@ export async function ensureUserPermission(
   currentUserId: string | null | undefined,
   options: PermissionCheckOptions = {}
 ): Promise<PermissionCheckResult> {
-  if (!currentUserId) {
+  const authenticatedUserId = await getAuthenticatedUserId();
+  if (!authenticatedUserId) {
     return { success: false, error: "인증되지 않은 사용자입니다. 로그인이 필요합니다." };
   }
 
-  const currentUser = await dbGetUserById(currentUserId);
+  if (currentUserId && currentUserId !== authenticatedUserId) {
+    return { success: false, error: '로그인한 사용자와 요청한 사용자 정보가 일치하지 않습니다.' };
+  }
+  const currentUser = await dbGetUserById(authenticatedUserId);
   if (!currentUser) {
     return { success: false, error: "사용자 정보를 찾을 수 없습니다." };
   }
+  if (!['admin', 'user', 'viewer', 'none'].includes(currentUser.role)) {
+    return { success: false, error: '유효하지 않은 사용자 권한입니다.' };
+  }
 
   const { requiredRole, ownerId, adminCanOverride = true, entityName = '작업' } = options;
+
+  if (currentUser.role === 'none' && !(Array.isArray(requiredRole) ? requiredRole : [requiredRole]).includes('none')) {
+    return { success: false, error: '관리자의 승인이 필요한 계정입니다.' };
+  }
 
   if (requiredRole) {
     const roles = Array.isArray(requiredRole) ? requiredRole : [requiredRole];

@@ -1,7 +1,6 @@
 'use client';
 
 import type { Meeting, Expense, Friend } from '@/lib/types';
-import { Timestamp } from 'firebase/firestore';
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
@@ -9,11 +8,11 @@ import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter }
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { format, differenceInCalendarDays, isValid } from 'date-fns';
 import { ko } from 'date-fns/locale';
-import { deleteMeetingAction, finalizeMeetingSettlementAction, toggleMeetingShareAction } from '@/lib/actions';
+import { deleteMeetingAction, finalizeMeetingSettlementAction, reopenMeetingSettlementAction, toggleMeetingShareAction } from '@/lib/actions';
 import { useToast } from '@/hooks/use-toast';
 import {
   CalendarDays, MapPin, Users as UsersIcon, Edit3, Trash2, PlusCircle, Loader2, ExternalLink, Eye,
-  PiggyBank, CheckCircle2, AlertCircle, Info, Copy, Share2, ArrowLeft
+  PiggyBank, CheckCircle2, AlertCircle, Copy, Share2, ArrowLeft
 } from 'lucide-react';
 import { AddExpenseDialog } from './AddExpenseDialog';
 import { ExpenseItem } from './ExpenseItem';
@@ -37,39 +36,37 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Input } from '@/components/ui/input';
 import Link from 'next/link';
 import { cn } from '@/lib/utils';
-import { Loader } from '@googlemaps/js-api-loader';
+import { useGoogleMaps } from '@/hooks/use-google-maps';
 import { Accordion, AccordionItem, AccordionTrigger, AccordionContent } from '@/components/ui/accordion';
 import type { User } from '@/lib/types';
 import { calculateReserveFundBreakdown } from '@/lib/reserve-fund-settlement';
-
-const googleMapsLibraries: ("places" | "maps" | "marker")[] = ["places", "maps", "marker"];
+import { isSettlementSnapshot } from '@/lib/settlement';
+import { meetingDate } from './meeting-date';
 
 interface MeetingDetailsClientProps {
   initialMeeting: Meeting;
   initialExpenses: Expense[];
   allFriends: Friend[];
-  allUsers: User[];
+  allUsers?: User[];
   isReadOnlyShare?: boolean;
 }
 
-const getExpenseTime = (value: Date | Timestamp | undefined | null) => {
-  if (!value) return 0;
-  if (value instanceof Date) return value.getTime();
-  if (value instanceof Timestamp) return value.toDate().getTime();
-  return 0;
-};
+const getExpenseTime = (value: unknown) => meetingDate(value).getTime() || 0;
 
 export function MeetingDetailsClient({
   initialMeeting,
   initialExpenses,
   allFriends,
-  allUsers,
+  allUsers = [],
   isReadOnlyShare = false,
 }: MeetingDetailsClientProps) {
+  const activeMeetingId = useRef(initialMeeting.id);
+  activeMeetingId.current = initialMeeting.id;
   const [meeting, setMeeting] = useState<Meeting>(initialMeeting);
-  const [expenses, setExpenses] = useState<Expense[]>(initialExpenses.sort((a, b) => getExpenseTime(b.createdAt) - getExpenseTime(a.createdAt)));
+  const [expenses, setExpenses] = useState<Expense[]>([...initialExpenses].sort((a, b) => getExpenseTime(b.createdAt) - getExpenseTime(a.createdAt)));
   const [isDeleting, setIsDeleting] = useState(false);
   const [isFinalizing, setIsFinalizing] = useState(false);
+  const [isReopening, setIsReopening] = useState(false);
   const [formattedMeetingDateTime, setFormattedMeetingDateTime] = useState<string | null>(null);
 
   const [shareEnabled, setShareEnabled] = useState(initialMeeting.isShareEnabled || false);
@@ -86,40 +83,16 @@ export function MeetingDetailsClient({
   const { appUser, currentUser, isAdmin, userRole } = useAuth();
   const isCreator = appUser?.id === meeting.creatorId;
 
-  const canManageMeetingActions = (isAdmin || isCreator) && !isReadOnlyShare;
-  const canManageExpenses = (isAdmin || isCreator) && !isReadOnlyShare;
-  const canFinalize = isAdmin && meeting.useReserveFund && meeting.partialReserveFundAmount && meeting.partialReserveFundAmount > 0 && !meeting.isSettled && expenses.length > 0 && !isReadOnlyShare;
+  const canManageMeetingActions = (isAdmin || (userRole === 'user' && isCreator)) && !isReadOnlyShare;
+  const canManageExpenses = canManageMeetingActions;
+  const canFinalize = canManageMeetingActions && !meeting.isSettled && expenses.length > 0;
   const isReadOnlyUser = userRole === 'user' && !isAdmin && !isCreator;
 
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<google.maps.Map | null>(null);
   const markerInstanceRef = useRef<google.maps.marker.AdvancedMarkerElement | null>(null);
-  const [isMapsLoaded, setIsMapsLoaded] = useState(false);
-  const [mapsLoadError, setMapsLoadError] = useState<Error | null>(null);
   const [showMap, setShowMap] = useState(false);
-
-  useEffect(() => {
-    const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
-    if (!apiKey) {
-      setMapsLoadError(new Error("Google Maps API key is not configured."));
-      setIsMapsLoaded(false);
-      return;
-    }
-    const loader = new Loader({
-      apiKey,
-      version: "weekly",
-      libraries: googleMapsLibraries,
-    });
-    loader.load()
-      .then(() => {
-        setIsMapsLoaded(true);
-        setMapsLoadError(null);
-      })
-      .catch(e => {
-        setMapsLoadError(e as Error);
-        setIsMapsLoaded(false);
-      });
-  }, []);
+  const { isMapsLoaded, mapsLoadError, retryMaps } = useGoogleMaps(showMap);
 
   useEffect(() => {
     setMeeting(initialMeeting);
@@ -142,15 +115,15 @@ export function MeetingDetailsClient({
   }, [initialMeeting]);
 
   useEffect(() => {
-    setExpenses(initialExpenses.sort((a, b) => getExpenseTime(b.createdAt) - getExpenseTime(a.createdAt)));
+    setExpenses([...initialExpenses].sort((a, b) => getExpenseTime(b.createdAt) - getExpenseTime(a.createdAt)));
   }, [initialExpenses]);
 
   useEffect(() => {
     if (meeting?.dateTime) {
       let localFormattedString;
-      const startTime = meeting.dateTime instanceof Timestamp ? meeting.dateTime.toDate() : new Date(meeting.dateTime);
+      const startTime = meetingDate(meeting.dateTime);
       if (meeting.endTime) {
-        const endTime = meeting.endTime instanceof Timestamp ? meeting.endTime.toDate() : new Date(meeting.endTime);
+        const endTime = meetingDate(meeting.endTime);
         if (isValid(startTime) && isValid(endTime)) {
            const duration = differenceInCalendarDays(endTime, startTime);
            localFormattedString = `${format(startTime, 'yyyy년 M월 d일 HH:mm', { locale: ko })} (${Math.max(0, duration) + 1}일)`;
@@ -190,6 +163,11 @@ export function MeetingDetailsClient({
         position: currentCoords,
         title: meeting.locationName || '선택된 장소',
       });
+      return () => {
+        if (markerInstanceRef.current) markerInstanceRef.current.map = null;
+        markerInstanceRef.current = null;
+        mapInstanceRef.current = null;
+      };
     } else if (!showMap) {
       if (markerInstanceRef.current) {
         markerInstanceRef.current.map = null;
@@ -209,8 +187,9 @@ export function MeetingDetailsClient({
   );
 
   const reserveFundBreakdown = useMemo(
-    () =>
-      calculateReserveFundBreakdown({
+    () => meeting.isSettled && isSettlementSnapshot(meeting.settlementSnapshot)
+      ? meeting.settlementSnapshot.reserveFund
+      : calculateReserveFundBreakdown({
         settings: meeting,
         expenses,
         participantIds: participants.map(participant => participant.id),
@@ -222,7 +201,7 @@ export function MeetingDetailsClient({
   const displayParticipants = useMemo(() => {
     if (meeting.isTemporary) {
       return meeting.temporaryParticipants?.map((p) => ({
-        id: p.name,
+        id: p.id || p.name,
         name: p.name,
         description: '',
         groupId: meeting.groupId,
@@ -234,7 +213,7 @@ export function MeetingDetailsClient({
 
   const creatorName = useMemo(() => {
     const creator = allUsers.find(user => user.id === meeting.creatorId);
-    let name = '알 수 없음';
+    let name = meeting.creatorName || '모임 작성자';
     if (creator) {
       name = creator.name || creator.email || meeting.creatorId.substring(0, 6);
       if (appUser && appUser.id === meeting.creatorId) {
@@ -244,19 +223,17 @@ export function MeetingDetailsClient({
       name = (appUser.name || appUser.email || appUser.id.substring(0,6)) + " (나)";
     }
     return name;
-  }, [meeting.creatorId, allUsers, appUser]);
+  }, [meeting.creatorId, meeting.creatorName, allUsers, appUser]);
 
   const handleExpenseAdded = (newExpense: Expense) => {
-    const newExpenses = [newExpense, ...expenses].sort((a,b) => getExpenseTime(b.createdAt) - getExpenseTime(a.createdAt));
-    setExpenses(newExpenses);
+    setExpenses(previous => [newExpense, ...previous.filter(item => item.id !== newExpense.id)].sort((a,b) => getExpenseTime(b.createdAt) - getExpenseTime(a.createdAt)));
     if (meeting.isSettled) {
       setMeeting(prev => ({ ...prev, isSettled: false }));
     }
   };
 
   const handleExpenseUpdated = (updatedExpense: Expense) => {
-    const newExpenses = expenses.map(e => e.id === updatedExpense.id ? updatedExpense : e).sort((a,b) => getExpenseTime(b.createdAt) - getExpenseTime(a.createdAt));
-    setExpenses(newExpenses);
+    setExpenses(previous => previous.map(e => e.id === updatedExpense.id ? updatedExpense : e).sort((a,b) => getExpenseTime(b.createdAt) - getExpenseTime(a.createdAt)));
     if (meeting.isSettled) {
       setMeeting(prev => ({ ...prev, isSettled: false }));
     }
@@ -279,15 +256,16 @@ export function MeetingDetailsClient({
       return;
     }
     setIsDeleting(true);
-    const result = await deleteMeetingAction(meeting.id, currentUser.uid);
-    if (result.success) {
+    try {
+      const result = await deleteMeetingAction(meeting.id, currentUser.uid);
+      if (activeMeetingId.current !== meeting.id) return;
+      if (!result.success) throw new Error(result.error || '모임 삭제에 실패했습니다.');
       toast({ title: '성공', description: '모임이 삭제되었습니다.' });
       router.push('/meetings');
       router.refresh();
-    } else {
-      toast({ title: '오류', description: result.error || '모임 삭제에 실패했습니다.', variant: 'destructive' });
-      setIsDeleting(false);
-    }
+    } catch (cause) {
+      toast({ title: '오류', description: cause instanceof Error ? cause.message : '모임 삭제에 실패했습니다.', variant: 'destructive' });
+    } finally { setIsDeleting(false); }
   };
 
   const handleFinalizeSettlement = async () => {
@@ -300,15 +278,31 @@ export function MeetingDetailsClient({
       return;
     }
     setIsFinalizing(true);
-    const result = await finalizeMeetingSettlementAction(meeting.id, currentUser.uid);
-    if (result.success && result.meeting) {
+    try {
+      const result = await finalizeMeetingSettlementAction(meeting.id, currentUser.uid);
+      if (activeMeetingId.current !== meeting.id) return;
+      if (!result.success || !result.meeting) throw new Error(result.error || '정산 확정에 실패했습니다.');
       setMeeting(result.meeting);
       toast({ title: '성공', description: result.message || '모임 정산이 확정되었습니다.' });
       router.refresh();
-    } else {
-      toast({ title: '오류', description: result.error || '정산 확정에 실패했습니다.', variant: 'destructive' });
-    }
-    setIsFinalizing(false);
+    } catch (cause) {
+      toast({ title: '오류', description: cause instanceof Error ? cause.message : '정산 확정에 실패했습니다.', variant: 'destructive' });
+    } finally { setIsFinalizing(false); }
+  };
+
+  const handleReopenSettlement = async () => {
+    if (!currentUser || !canManageMeetingActions) return;
+    setIsReopening(true);
+    try {
+      const result = await reopenMeetingSettlementAction(meeting.id, currentUser.uid);
+      if (activeMeetingId.current !== meeting.id) return;
+      if (!result.success || !result.meeting) throw new Error(result.error || '정산을 다시 열지 못했습니다.');
+      setMeeting(result.meeting);
+      toast({ title: '정산 다시 열기', description: '수정 후 다시 정산을 확정해주세요.' });
+      router.refresh();
+    } catch (cause) {
+      toast({ title: '오류', description: cause instanceof Error ? cause.message : '정산을 다시 열지 못했습니다.', variant: 'destructive' });
+    } finally { setIsReopening(false); }
   };
 
   const handleSaveShareSettings = async () => {
@@ -321,32 +315,29 @@ export function MeetingDetailsClient({
         return;
     }
     setIsShareSettingsSaving(true);
-    const result = await toggleMeetingShareAction(meeting.id, currentUser.uid, shareEnabled, parseInt(selectedExpiryDays));
-    if (result.success && result.meeting) {
-      toast({ title: "성공", description: "공유 설정이 저장되었습니다." });
-      setMeeting(result.meeting); 
-      if (result.meeting.isShareEnabled && result.meeting.shareToken) {
-        setCurrentShareLink(`${window.location.origin}/share/meeting/${result.meeting.shareToken}`);
-      } else {
-        setCurrentShareLink(null);
-      }
-    } else {
-      toast({ title: "오류", description: result.error || "공유 설정 저장에 실패했습니다.", variant: "destructive" });
-    }
-    setIsShareSettingsSaving(false);
+    try {
+      const result = await toggleMeetingShareAction(meeting.id, currentUser.uid, shareEnabled, parseInt(selectedExpiryDays));
+      if (activeMeetingId.current !== meeting.id) return;
+      if (!result.success || !result.meeting) throw new Error(result.error || '공유 설정 저장에 실패했습니다.');
+      toast({ title: '성공', description: '공유 설정이 저장되었습니다.' });
+      setMeeting(result.meeting);
+      setCurrentShareLink(result.meeting.isShareEnabled && result.meeting.shareToken ? `${window.location.origin}/share/meeting/${result.meeting.shareToken}` : null);
+    } catch (cause) {
+      toast({ title: '오류', description: cause instanceof Error ? cause.message : '공유 설정 저장에 실패했습니다.', variant: 'destructive' });
+    } finally { setIsShareSettingsSaving(false); }
   };
 
   const handleCopyToClipboard = (copyText: string, descText: string) => {
     navigator.clipboard.writeText(copyText)
       .then(() => toast({ title: "성공", description: `${descText}가 복사되었습니다.` }))
-      .catch(() => toast({ title: "오류", description: '${descText} 복사에 실패했습니다.', variant: "destructive" }));
+      .catch(() => toast({ title: "오류", description: `${descText} 복사에 실패했습니다.`, variant: "destructive" }));
   };
 
   const handleCopyShareLink = () => {
     if (currentShareLink)
       handleCopyToClipboard(currentShareLink, "공유 링크");
   };
-  
+
   const handleCopyLocationName = () => {
     if (meeting.locationName)
       handleCopyToClipboard(meeting.locationName, "장소");
@@ -371,25 +362,10 @@ export function MeetingDetailsClient({
             <div>
               <div className="flex items-center gap-2 flex-wrap">
                 <CardTitle className="text-3xl font-bold">{meeting.name}</CardTitle>
-                {meeting.useReserveFund && meeting.partialReserveFundAmount && meeting.partialReserveFundAmount > 0 && !isReadOnlyShare ? (
-                    meeting.isSettled ? (
-                    <Badge variant="default" className="bg-green-600 hover:bg-green-700 shrink-0">
-                        <CheckCircle2 className="h-4 w-4 mr-1.5" /> 정산 확정됨
-                    </Badge>
-                    ) : expenses.length > 0 ? (
-                    <Badge variant="outline" className="border-orange-500 text-orange-600 shrink-0">
-                        <AlertCircle className="h-4 w-4 mr-1.5" /> 정산 확정 필요
-                    </Badge>
-                    ) : (
-                    <Badge variant="outline" className="border-blue-500 text-blue-600 shrink-0">
-                        <Info className="h-4 w-4 mr-1.5" /> 회비 사용 예정
-                    </Badge>
-                    )
-                ) : meeting.useReserveFund && !isReadOnlyShare ? (
-                     <Badge variant="outline" className="border-yellow-500 text-yellow-600 shrink-0">
-                        <Info className="h-4 w-4 mr-1.5" /> 회비 사용 예정 (금액 미설정)
-                    </Badge>
-                ): null}
+                <Badge variant={meeting.isSettled ? 'secondary' : 'outline'} className="shrink-0">
+                  {meeting.isSettled ? <CheckCircle2 className="mr-1 h-4 w-4" /> : <AlertCircle className="mr-1 h-4 w-4" />}
+                  {meeting.isSettled ? '정산 확정' : '정산 미확정'}
+                </Badge>
                  {isReadOnlyShare && (
                     <Badge variant="secondary" className="shrink-0">
                         <Eye className="h-4 w-4 mr-1.5" /> 공유된 페이지 (읽기 전용)
@@ -427,7 +403,7 @@ export function MeetingDetailsClient({
             </div>
             {canManageMeetingActions && !isReadOnlyUser && (
               <div className="flex space-x-2 shrink-0">
-                <Button variant="outline" size="sm" onClick={() => router.push(`/meetings/${meeting.id}/edit`)} disabled={isDeleting || isFinalizing || (meeting.isSettled && !isAdmin) }>
+                <Button variant="outline" size="sm" onClick={() => router.push(`/meetings/${meeting.id}/edit`)} disabled={isDeleting || isFinalizing || meeting.isSettled }>
                   <Edit3 className="mr-2 h-4 w-4" /> 수정
                 </Button>
                 <AlertDialog>
@@ -458,6 +434,13 @@ export function MeetingDetailsClient({
             )}
           </div>
         </CardHeader>
+        <CardContent className="grid grid-cols-3 gap-2 border-t px-4 py-4 text-center sm:px-6">
+          <div><p className="text-xs text-muted-foreground">총 지출</p><p className="mt-1 font-semibold sm:text-xl">{expenses.reduce((sum, expense) => sum + expense.totalAmount, 0).toLocaleString()}원</p></div>
+          <div><p className="text-xs text-muted-foreground">참여자</p><p className="mt-1 font-semibold sm:text-xl">{displayParticipants.length}명</p></div>
+          <div><p className="text-xs text-muted-foreground">정산 상태</p><p className="mt-1 font-semibold sm:text-xl">{meeting.isSettled ? '금액 확정' : '미확정'}</p></div>
+        </CardContent>
+        <details className="border-t">
+          <summary className="cursor-pointer px-6 py-4 text-sm font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">일정 · 장소 · 참여자 · 회비 설정 보기</summary>
         <CardContent className="p-6 space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
             <div className="flex items-start gap-2">
@@ -504,12 +487,14 @@ export function MeetingDetailsClient({
                     </Button>
                   </div>
                 )}
+                {showMap && !isMapsLoaded && !mapsLoadError && <p role="status" className="mt-2 text-sm text-muted-foreground">지도를 불러오고 있습니다.</p>}
+                {showMap && mapsLoadError && <div role="alert" className="mt-2 space-y-2 text-sm"><p>{mapsLoadError.message}</p><Button variant="outline" size="sm" onClick={retryMaps}>지도 다시 불러오기</Button></div>}
                 {meeting.locationCoordinates && showMap && (
                   <div
                     ref={mapContainerRef}
                     className={cn(
                       'w-full mt-2 h-64 rounded-md border',
-                      isMapsLoaded ? 'block' : 'hidden'
+                      isMapsLoaded && !mapsLoadError ? 'block' : 'hidden'
                     )}
                   >
                     {(!meeting.locationCoordinates && showMap && isMapsLoaded) && (
@@ -570,14 +555,16 @@ export function MeetingDetailsClient({
                 <p className="text-muted-foreground pl-6">설정된 회비 정보가 없습니다.</p>
               )}
             </div>
-          ) : meeting.useReserveFund && meeting.partialReserveFundAmount && meeting.partialReserveFundAmount > 0 ? (
+          ) : meeting.useReserveFund && (meeting.reserveFundCoverAll || (meeting.partialReserveFundAmount || 0) > 0) ? (
             <div className="p-3 bg-secondary/30 rounded-md border border-primary/30 text-sm space-y-1">
               <div className="flex items-center gap-2">
                 <PiggyBank className="h-4 w-4 text-primary" />
                 <span className="font-medium">회비 사용 설정:</span>
               </div>
               <p className="text-muted-foreground pl-6">
-                {`회비에서 ${(meeting.partialReserveFundAmount || 0).toLocaleString()}원 사용`}
+                {meeting.reserveFundCoverAll
+                  ? `참가자 비용 전액 자동 지원 · 현재 ${reserveFundBreakdown.baseFundUsed.toLocaleString()}원 (미참가자 환급 별도)`
+                  : `참가자 지원 예산 ${(meeting.partialReserveFundAmount || 0).toLocaleString()}원 (미참가자 환급 별도)`}
                 {meeting.isSettled && ` (정산 확정됨)`}
               </p>
               {typeof meeting.settledReserveFundAmount === 'number' && (
@@ -587,7 +574,7 @@ export function MeetingDetailsClient({
               )}
               {reserveFundBreakdown.perApplicableFundShare > 0 && (
                 <p className="text-muted-foreground pl-6 text-xs">
-                  1인당 사용 회비: {reserveFundBreakdown.perApplicableFundShare.toLocaleString()}원
+                  참여자 평균 회비 지원액: {reserveFundBreakdown.perApplicableFundShare.toLocaleString()}원
                 </p>
               )}
               {meeting.nonReserveFundParticipants && meeting.nonReserveFundParticipants.length > 0 && (
@@ -640,9 +627,111 @@ export function MeetingDetailsClient({
             )
           )}
         </CardContent>
+        </details>
       </Card>
 
-      {!isReadOnlyShare && (isAdmin || isCreator || userRole === 'user') && (
+      <Tabs defaultValue="summary" className="w-full">
+        <TabsList className="w-full">
+          <TabsTrigger value="summary" className="flex-1">정산 요약</TabsTrigger>
+          <TabsTrigger value="expenses" className="flex-1">지출 내역 ({expenses.length})</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="expenses">
+          <Card>
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <CardTitle>지출 내역</CardTitle>
+                {canManageExpenses && (
+                  <AddExpenseDialog
+                    meetingId={meeting.id}
+                    participants={displayParticipants}
+                    roomCreatorName={creatorName}
+                    onExpenseAdded={handleExpenseAdded}
+                    triggerButton={
+                      <Button variant="outline" size="sm" disabled={isDeleting || isFinalizing || meeting.isSettled || isReadOnlyUser}>
+                        <PlusCircle className="mr-2 h-4 w-4" /> 새 지출 추가
+                      </Button>
+                    }
+                  />
+                )}
+              </div>
+              <CardDescription>이 모임에서 발생한 모든 지출 항목입니다.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              {expenses.length > 0 ? (
+                  <ul className="space-y-4">
+                    {expenses.map(expense => (
+                      <ExpenseItem
+                        key={expense.id}
+                        expense={expense}
+                        meetingId={meeting.id}
+                        allFriends={allFriends}
+                        participants={displayParticipants}
+                        onExpenseUpdated={handleExpenseUpdated}
+                        onExpenseDeleted={handleExpenseDeleted}
+                        isCreator={isCreator}
+                        isMeetingSettled={meeting.isSettled || false}
+                        isTemporaryMeeting={meeting.isTemporary}
+                        isReadOnly={isReadOnlyShare}
+                      />
+                    ))}
+                  </ul>
+              ) : (
+                <p className="text-center text-muted-foreground py-8">등록된 지출 내역이 없습니다.</p>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="summary">
+          <div className="space-y-4">
+            {(canFinalize || (canManageMeetingActions && meeting.isSettled)) && <div aria-label="정산 관리" className="flex justify-end">
+              {canManageMeetingActions && meeting.isSettled && <AlertDialog>
+                <AlertDialogTrigger asChild><Button variant="outline" size="sm" disabled={isReopening || isDeleting || isFinalizing}>{isReopening && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}정산 다시 열기</Button></AlertDialogTrigger>
+                <AlertDialogContent><AlertDialogHeader><AlertDialogTitle>확정한 정산을 다시 여시겠습니까?</AlertDialogTitle><AlertDialogDescription>확정된 정산을 해제하고 회비 기록을 반영합니다. 수정한 뒤 새 금액으로 다시 확정해주세요.</AlertDialogDescription></AlertDialogHeader><AlertDialogFooter><AlertDialogCancel>취소</AlertDialogCancel><AlertDialogAction onClick={handleReopenSettlement}>다시 열기</AlertDialogAction></AlertDialogFooter></AlertDialogContent>
+              </AlertDialog>}
+                  {canManageExpenses && !meeting.isSettled && !isReadOnlyShare && (
+                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                      {canFinalize && (
+                        <AlertDialog>
+                          <AlertDialogTrigger asChild>
+                            <Button disabled={isFinalizing || isDeleting} size="sm">
+                              {isFinalizing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <CheckCircle2 className="mr-2 h-4 w-4" />}
+                              정산 확정
+                            </Button>
+                          </AlertDialogTrigger>
+                          <AlertDialogContent>
+                            <AlertDialogHeader>
+                              <AlertDialogTitle>정산을 확정하시겠습니까?</AlertDialogTitle>
+                              <AlertDialogDescription>
+                                현재 지출과 참여자 기준으로 정산 금액을 저장합니다. 확정 후 모임과 지출 수정이 제한됩니다.
+                              </AlertDialogDescription>
+                            </AlertDialogHeader>
+                            <AlertDialogFooter>
+                              <AlertDialogCancel disabled={isFinalizing || isDeleting}>취소</AlertDialogCancel>
+                              <AlertDialogAction onClick={handleFinalizeSettlement} disabled={isFinalizing || isDeleting} className="bg-primary">
+                                {isFinalizing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                                정산 확정
+                              </AlertDialogAction>
+                            </AlertDialogFooter>
+                          </AlertDialogContent>
+                        </AlertDialog>
+                      )}
+                    </div>
+                  )}
+
+            </div>}
+            <PaymentSummary
+              meeting={meeting}
+              expenses={expenses}
+              participants={displayParticipants}
+              allFriends={allFriends}
+            />
+          </div>
+        </TabsContent>
+      </Tabs>
+
+      {canManageMeetingActions && (
         <Accordion type="single" collapsible className="my-4">
           <AccordionItem value="share-settings" className="rounded-lg border bg-white px-4 py-2">
             <AccordionTrigger className="py-4 px-2">
@@ -715,7 +804,7 @@ export function MeetingDetailsClient({
                           </div>
                           {meeting.shareExpiryDate && (
                             <p className="text-xs text-muted-foreground">
-                              만료일: {format(meeting.shareExpiryDate instanceof Timestamp ? meeting.shareExpiryDate.toDate() : new Date(meeting.shareExpiryDate), 'yyyy년 M월 d일 HH:mm', { locale: ko })}
+                              만료일: {isValid(meetingDate(meeting.shareExpiryDate)) ? format(meetingDate(meeting.shareExpiryDate), 'yyyy년 M월 d일 HH:mm', { locale: ko }) : '날짜 정보 없음'}
                             </p>
                           )}
                         </div>
@@ -735,128 +824,7 @@ export function MeetingDetailsClient({
         </Accordion>
       )}
 
-      <Tabs defaultValue="expenses" className="w-full">
-        <TabsList className="w-full">
-          <TabsTrigger value="expenses" className="flex-1">
-            지출 내역
-          </TabsTrigger>
-          <TabsTrigger value="summary" className="flex-1">
-            정산 요약
-          </TabsTrigger>
-        </TabsList>
 
-        <TabsContent value="expenses">
-          <Card>
-            <CardHeader>
-              <div className="flex items-center justify-between">
-                <CardTitle>지출 내역</CardTitle>
-                {canManageExpenses && (
-                  <AddExpenseDialog
-                    meetingId={meeting.id}
-                    participants={displayParticipants}
-                    roomCreatorName={creatorName}
-                    onExpenseAdded={handleExpenseAdded}
-                    triggerButton={
-                      <Button variant="outline" size="sm" disabled={isDeleting || isFinalizing || (meeting.isSettled && !isAdmin) || isReadOnlyUser}>
-                        <PlusCircle className="mr-2 h-4 w-4" /> 새 지출 추가
-                      </Button>
-                    }
-                  />
-                )}
-              </div>
-              <CardDescription>이 모임에서 발생한 모든 지출 항목입니다.</CardDescription>
-            </CardHeader>
-            <CardContent>
-              {expenses.length > 0 ? (
-                  <ul className="space-y-4">
-                    {expenses.map(expense => (
-                      <ExpenseItem
-                        key={expense.id}
-                        expense={expense}
-                        meetingId={meeting.id}
-                        allFriends={allFriends}
-                        participants={displayParticipants}
-                        onExpenseUpdated={handleExpenseUpdated}
-                        onExpenseDeleted={handleExpenseDeleted}
-                        isCreator={isCreator}
-                        isMeetingSettled={meeting.isSettled || false}
-                        isTemporaryMeeting={meeting.isTemporary}
-                      />
-                    ))}
-                  </ul>
-              ) : (
-                <p className="text-center text-muted-foreground py-8">등록된 지출 내역이 없습니다.</p>
-              )}
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        <TabsContent value="summary">
-          <Card>
-            <CardHeader>
-              <CardTitle>정산 요약</CardTitle>
-              {meeting.isTemporary ? (
-                <CardDescription>
-                  임시 모임의 지출 내역 및 설정된 회비 정보를 바탕으로 요약됩니다.
-                </CardDescription>
-              ) : (
-                <>
-                  {canManageExpenses && !meeting.isSettled && !isReadOnlyShare && (
-                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-                      {canFinalize && (
-                        <AlertDialog>
-                          <AlertDialogTrigger asChild>
-                            <Button disabled={isFinalizing || isDeleting || meeting.isTemporary} size="sm">
-                              {isFinalizing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <CheckCircle2 className="mr-2 h-4 w-4" />}
-                              정산 확정
-                            </Button>
-                          </AlertDialogTrigger>
-                          <AlertDialogContent>
-                            <AlertDialogHeader>
-                              <AlertDialogTitle>정산을 확정하시겠습니까?</AlertDialogTitle>
-                              <AlertDialogDescription>
-                                이 작업은 되돌릴 수 없습니다. 이후에는 수정이 불가합니다.
-                              </AlertDialogDescription>
-                            </AlertDialogHeader>
-                            <AlertDialogFooter>
-                              <AlertDialogCancel disabled={isFinalizing || isDeleting}>취소</AlertDialogCancel>
-                              <AlertDialogAction onClick={handleFinalizeSettlement} disabled={isFinalizing || isDeleting} className="bg-primary">
-                                {isFinalizing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                                정산 확정
-                              </AlertDialogAction>
-                            </AlertDialogFooter>
-                          </AlertDialogContent>
-                        </AlertDialog>
-                      )}
-                    </div>
-                  )}
-                  {meeting.useReserveFund && meeting.isSettled && expenses.length > 0 && !isReadOnlyShare && (
-                    <CardDescription className="text-green-600 flex items-center gap-1 mt-2">
-                        <CheckCircle2 className="h-4 w-4"/> 이 모임의 회비 사용 정산이 확정되었습니다.
-                    </CardDescription>
-                  )}
-                  {meeting.useReserveFund && !meeting.isSettled && expenses.length === 0 && typeof meeting.partialReserveFundAmount === 'number' && meeting.partialReserveFundAmount > 0 && !isReadOnlyShare &&(
-                    <CardDescription className="text-muted-foreground flex items-center gap-1 mt-2">
-                        <AlertCircle className="h-4 w-4"/> 지출 내역이 없어 회비 사용을 확정할 수 없습니다.
-                    </CardDescription>
-                  )}
-                  {!meeting.useReserveFund && meeting.isSettled && !isReadOnlyShare && (
-                     <CardDescription className="text-green-600 flex items-center gap-1 mt-2">
-                        <CheckCircle2 className="h-4 w-4"/> 이 모임의 정산이 완료되었습니다 (회비 미사용).
-                    </CardDescription>
-                  )}
-                </>
-              )}
-            </CardHeader>
-            <PaymentSummary
-              meeting={meeting}
-              expenses={expenses}
-              participants={displayParticipants}
-              allFriends={allFriends}
-            />
-          </Card>
-        </TabsContent>
-      </Tabs>
     </div>
   );
 }

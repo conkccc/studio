@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { getFriendGroupsForUserAction, getFriendsByGroupAction } from '@/lib/actions';
-import { CreateMeetingForm } from '@/features/meetings';
+import { CreateMeetingForm } from '@/features/meetings/CreateMeetingForm';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/AuthContext';
@@ -21,7 +21,9 @@ export default function NewMeetingPage() {
   const [isLoadingParticipants, setIsLoadingParticipants] = useState(false);
 
   useEffect(() => {
-    if (authLoading || !appUser?.id) {
+    if (authLoading) return;
+    let active = true;
+    if (!appUser?.id) {
       setIsLoadingInitialData(false);
       setAllOwnedGroups([]);
       return;
@@ -30,6 +32,7 @@ export default function NewMeetingPage() {
     const fetchInitialData = async () => {
       try {
         const groupResponse = await getFriendGroupsForUserAction(appUser.id);
+        if (!active) return;
         if (groupResponse.success && groupResponse.groups) {
           setAllOwnedGroups(groupResponse.groups);
         } else {
@@ -37,17 +40,21 @@ export default function NewMeetingPage() {
           toast({ title: "오류", description: groupResponse.error || "모임 생성을 위한 그룹 목록을 가져오지 못했습니다.", variant: "destructive"});
         }
       } catch (error) {
+        if (!active) return;
         console.error("Error fetching initial data for new meeting:", error);
         setAllOwnedGroups([]);
         toast({ title: "오류", description: "데이터 로딩 중 오류 발생.", variant: "destructive"});
       } finally {
-        setIsLoadingInitialData(false);
+        if (active) setIsLoadingInitialData(false);
       }
     };
-    fetchInitialData();
-  }, [authLoading, appUser, toast]);
+    void fetchInitialData();
+    return () => { active = false; };
+  }, [authLoading, appUser?.id, toast]);
 
   useEffect(() => {
+    let active = true;
+    setFriendsForParticipantSelect([]);
     const fetchFriendsForGroup = async () => {
       if (!selectedMeetingGroupId) {
         setFriendsForParticipantSelect([]);
@@ -57,6 +64,7 @@ export default function NewMeetingPage() {
       setIsLoadingParticipants(true);
       try {
         const response = await getFriendsByGroupAction(selectedMeetingGroupId);
+        if (!active) return;
         if (response.success && response.friends) {
           setFriendsForParticipantSelect(response.friends);
         } else {
@@ -64,11 +72,12 @@ export default function NewMeetingPage() {
           toast({ title: "오류", description: response.error || "선택된 그룹의 친구 목록을 가져오지 못했습니다.", variant: "destructive" });
         }
       } catch (error) {
+        if (!active) return;
         setFriendsForParticipantSelect([]);
         toast({ title: "오류", description: "참여자 목록 조회 중 예외가 발생했습니다.", variant: "destructive" });
         console.error("Error fetching friends for group:", error);
       } finally {
-        setIsLoadingParticipants(false);
+        if (active) setIsLoadingParticipants(false);
       }
     };
 
@@ -76,7 +85,9 @@ export default function NewMeetingPage() {
         fetchFriendsForGroup();
     } else {
         setFriendsForParticipantSelect([]);
+        setIsLoadingParticipants(false);
     }
+    return () => { active = false; };
   }, [selectedMeetingGroupId, toast]);
 
 
@@ -88,7 +99,7 @@ export default function NewMeetingPage() {
     );
   }
 
-  if (!currentUser && process.env.NEXT_PUBLIC_DEV_MODE_SKIP_AUTH !== "true") { 
+  if (!currentUser) {
     return (
       <div className="container mx-auto py-8 text-center">
         <h1 className="text-2xl font-bold mb-4">로그인이 필요합니다</h1>
@@ -99,7 +110,7 @@ export default function NewMeetingPage() {
       </div>
     );
   }
-  
+
   if (!(isAdmin || userRole === 'user')) {
     return (
       <div className="container mx-auto py-8 text-center">

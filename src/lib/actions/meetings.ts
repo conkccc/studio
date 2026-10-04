@@ -1,374 +1,151 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
-import {
-  addMeeting as dbAddMeeting,
-  updateMeeting as dbUpdateMeeting,
-  deleteMeeting as dbDeleteMeeting,
-  getMeetingById as dbGetMeetingById,
-  getMeetings as dbGetMeetings,
-  getUserById as dbGetUserById,
-  getFriendGroupsByUser as dbGetFriendGroupsByUser,
-} from '../data-store';
+import { z } from 'zod';
+import { addMeeting, updateMeeting, deleteMeeting, getMeetings, getUserById, getMeetingFriends, getExpensesByMeetingId, getFriendsByIds } from '../data-store';
 import type { Meeting } from '../types';
+import type { MeetingFilters } from '../meeting-filters';
+import { meetingInputSchema } from '../meeting-schema';
 import { ensureUserPermission } from './permissions';
+import { ensureMeetingAccess, ensureGroupAccess, accessibleGroupIds } from '../services/access';
+import { meetingForDisplay } from '../participant-names';
 
-// ID로 특정 모임 정보 가져오기
-export async function getMeetingByIdAction(meetingId: string) {
+const errorText = (error: unknown) => error instanceof Error ? error.message : '모임 처리 중 오류가 발생했습니다.';
+const listInput = z.object({
+  year: z.number().int().min(1900).max(2200).optional(),
+  limitParam: z.number().int().min(1).max(50).optional(),
+  page: z.number().int().positive().optional(),
+  requestingUserId: z.string().min(1).max(128).optional(),
+  groupId: z.string().max(128).refine(value => !value.includes('/')).optional(),
+  type: z.enum(['regular', 'temporary']).optional(),
+  status: z.enum(['pending', 'finalized']).optional(),
+  search: z.string().trim().max(100).optional(),
+  cursor: z.string().max(512).optional(),
+});
+
+export async function getMeetingByIdAction(meetingId: string, currentUserId?: string | null) {
   try {
-    const meeting = await dbGetMeetingById(meetingId);
-    if (!meeting) {
-      return { success: false, error: '모임을 찾을 수 없습니다.', meeting: null };
+    const access = await ensureMeetingAccess(meetingId, currentUserId);
+    if (!access.success) return { success: false, error: access.error, meeting: null };
+    const creator = await getUserById(access.meeting.creatorId);
+    const friends = await getMeetingFriends(access.meeting);
+    return { success: true, meeting: { ...meetingForDisplay(access.meeting, friends), creatorName: access.meeting.creatorName || creator?.name || '사용자' } };
+  } catch (error) { return { success: false, error: errorText(error), meeting: null }; }
+}
+
+export async function getMeetingDetailsAction(meetingId: string) {
+  try {
+    const access = await ensureMeetingAccess(meetingId);
+    if (!access.success) return { success: false, error: access.error };
+    const [expenses, creator] = await Promise.all([
+      getExpensesByMeetingId(meetingId), getUserById(access.meeting.creatorId),
+    ]);
+    const friends = await getMeetingFriends(access.meeting, expenses);
+    return { success: true, meeting: { ...meetingForDisplay(access.meeting, friends), creatorName: access.meeting.creatorName || creator?.name || '사용자' }, expenses, friends };
+  } catch (error) { return { success: false, error: errorText(error) }; }
+}
+
+export async function createMeetingAction(payload: Omit<Meeting, 'id' | 'createdAt' | 'creatorId' | 'isSettled' | 'isShareEnabled' | 'shareToken' | 'shareExpiryDate'>, currentUserId?: string | null) {
+  try {
+    const permission = await ensureUserPermission(currentUserId, { requiredRole: ['user', 'admin'] });
+    if (!permission.success || !permission.user) return { success: false, error: permission.error };
+    const parsed = meetingInputSchema.safeParse(payload);
+    if (!parsed.success) return { success: false, error: parsed.error.issues[0].message };
+    const data = parsed.data;
+    data.reserveFundCoverAll = data.useReserveFund && !data.isTemporary && data.reserveFundCoverAll;
+    let participantSnapshot: Meeting['participantSnapshot'] = [];
+    if (!data.isTemporary) {
+      const groupAccess = await ensureGroupAccess(data.groupId, permission.user.id);
+      if (!groupAccess.success) return groupAccess;
+      if (groupAccess.group.isArchived) return { success: false, error: '보관된 그룹에 새 모임을 만들 수 없습니다.' };
+      const friends = await getFriendsByIds([...data.participantIds, ...data.reserveFundRefundRecipientIds]);
+      if (friends.length !== new Set([...data.participantIds, ...data.reserveFundRefundRecipientIds]).size || friends.some(friend => friend.groupId !== data.groupId || friend.isArchived)) {
+        return { success: false, error: '선택한 그룹의 참여자와 환급 대상을 확인해주세요.' };
+      }
+      participantSnapshot = friends.map(({id, name, description}) => ({ id, name, ...(description ? { description } : {}) }));
     }
+    const meeting = await addMeeting({ ...data, creatorId: permission.user.id, creatorName: permission.user.name || '사용자', participantSnapshot,
+      ...(data.isTemporary ? { participantIds: [], useReserveFund: false, nonReserveFundParticipants: [], refundReserveFundToNonParticipants: false, reserveFundRefundRecipientIds: [] } : {}) });
+    revalidatePath('/meetings'); revalidatePath('/');
     return { success: true, meeting };
-  } catch (error) {
-    console.error(`getMeetingByIdAction Error for meetingId ${meetingId}:`, error);
-    const errorMessage = error instanceof Error ? error.message : '모임 정보를 가져오는 중 오류가 발생했습니다.';
-    return { success: false, error: errorMessage, meeting: null };
-  }
+  } catch (error) { return { success: false, error: errorText(error) }; }
 }
 
-// 모임 관련 액션
-export async function createMeetingAction(
-  payload: Omit<Meeting, 'id' | 'createdAt' | 'isSettled' | 'isShareEnabled' | 'shareToken' | 'shareExpiryDate'>,
-  currentUserId?: string | null
-) {
-  const permissionCheck = await ensureUserPermission(currentUserId, {
-    requiredRole: ['user', 'admin'],
-    entityName: '모임 생성'
-  });
-
-  if (!permissionCheck.success) {
-    return { success: false, error: permissionCheck.error };
-  }
-  const creator = permissionCheck.user!;
-
+export async function updateMeetingAction(id: string, payload: Partial<Omit<Meeting, 'id' | 'createdAt'>>, currentUserId?: string | null) {
   try {
-    const {
-      locationCoordinates,
-      locationName,
-      participantIds,
-      nonReserveFundParticipants,
-      refundReserveFundToNonParticipants,
-      reserveFundRefundRecipientIds,
-      temporaryParticipants,
-      partialReserveFundAmount,
-      memo,
-      totalFee,
-      feePerPerson,
-      endTime,
-      name,
-      dateTime,
-      groupId,
-      isTemporary,
-      useReserveFund,
-    } = payload;
-
-    if (!isTemporary && (!groupId || !groupId.trim())) {
-      return { success: false, error: "일반 모임은 친구 그룹을 선택해야 합니다." };
+    const access = await ensureMeetingAccess(id, currentUserId, true);
+    if (!access.success) return access;
+    if (access.meeting.isSettled) return { success: false, error: '확정된 정산입니다. 정산을 다시 연 뒤 수정해주세요.' };
+    const parsed = meetingInputSchema.safeParse({ ...access.meeting, ...payload, isTemporary: access.meeting.isTemporary || false });
+    if (!parsed.success) return { success: false, error: parsed.error.issues[0].message };
+    const data = parsed.data;
+    data.reserveFundCoverAll = data.useReserveFund && !data.isTemporary && data.reserveFundCoverAll;
+    const existingExpenses = await getExpensesByMeetingId(id);
+    const oldIds = access.meeting.isTemporary ? (access.meeting.temporaryParticipants || []).map(p => p.id || p.name) : access.meeting.participantIds || [];
+    const newIds = data.isTemporary ? (data.temporaryParticipants || []).map(p => p.id || p.name) : data.participantIds;
+    const financialReferences = new Set(existingExpenses.flatMap(expense => [expense.paidById,
+      ...(expense.splitAmongIds || []), ...(expense.customSplits || []).map(split => split.friendId)]));
+    const recordedRoster = existingExpenses.length && !data.isTemporary ? await getMeetingFriends(access.meeting, existingExpenses) : [];
+    const protectedParticipants = new Set(data.isTemporary ? oldIds : recordedRoster.map(friend => friend.id));
+    if (existingExpenses.length && (oldIds.some(value => !newIds.includes(value) && (financialReferences.has(value) || protectedParticipants.has(value))) || (!data.isTemporary && access.meeting.groupId !== data.groupId))) {
+      return { success: false, error: '지출이 등록된 참여자를 제거하거나 그룹을 바꿀 수 없습니다. 해당 지출을 먼저 수정해주세요.' };
     }
-
-    const meetingDataToSaveBase = {
-      name,
-      dateTime,
-      creatorId: creator.id,
-      groupId: groupId || '',
-      locationName: locationName || '',
-      isTemporary: isTemporary || false,
-      participantIds: participantIds || [],
-      useReserveFund: useReserveFund || false,
-      nonReserveFundParticipants: nonReserveFundParticipants || [],
-      refundReserveFundToNonParticipants: refundReserveFundToNonParticipants || false,
-      reserveFundRefundRecipientIds: reserveFundRefundRecipientIds || [],
-      ...(endTime !== undefined && { endTime }),
-      ...(locationCoordinates !== undefined && { locationCoordinates }),
-      ...(memo !== undefined && { memo }),
-      ...(partialReserveFundAmount !== undefined && { partialReserveFundAmount }),
-      ...(temporaryParticipants !== undefined && { temporaryParticipants }),
-    };
-
-    type AddMeetingPayload = Parameters<typeof dbAddMeeting>[0];
-
-    const meetingDataToSave: AddMeetingPayload = {
-      ...meetingDataToSaveBase,
-    };
-
-    if (meetingDataToSave.isTemporary) {
-      delete meetingDataToSave.participantIds;
-      delete meetingDataToSave.useReserveFund;
-      delete meetingDataToSave.partialReserveFundAmount;
-      delete meetingDataToSave.nonReserveFundParticipants;
-      delete meetingDataToSave.refundReserveFundToNonParticipants;
-      delete meetingDataToSave.reserveFundRefundRecipientIds;
-
-      meetingDataToSave.temporaryParticipants = temporaryParticipants || [];
-      if (totalFee !== undefined) meetingDataToSave.totalFee = totalFee;
-      if (feePerPerson !== undefined) meetingDataToSave.feePerPerson = feePerPerson;
-    } else {
-      if (meetingDataToSave.useReserveFund) {
-        meetingDataToSave.partialReserveFundAmount = (typeof partialReserveFundAmount === 'number' && !isNaN(partialReserveFundAmount))
-          ? partialReserveFundAmount
-          : 0;
-        meetingDataToSave.refundReserveFundToNonParticipants = refundReserveFundToNonParticipants || false;
-        meetingDataToSave.reserveFundRefundRecipientIds = refundReserveFundToNonParticipants ? (reserveFundRefundRecipientIds || []) : [];
-      } else {
-         delete (meetingDataToSave as Partial<AddMeetingPayload>).partialReserveFundAmount;
-         delete (meetingDataToSave as Partial<AddMeetingPayload>).refundReserveFundToNonParticipants;
-         delete (meetingDataToSave as Partial<AddMeetingPayload>).reserveFundRefundRecipientIds;
+    let participantSnapshot = access.meeting.participantSnapshot;
+    if (!data.isTemporary) {
+      const group = await ensureGroupAccess(data.groupId, access.user.id);
+      if (!group.success) return group;
+      const friends = await getFriendsByIds([...data.participantIds, ...data.reserveFundRefundRecipientIds]);
+      if (friends.length !== new Set([...data.participantIds, ...data.reserveFundRefundRecipientIds]).size || friends.some(friend => friend.groupId !== data.groupId || (friend.isArchived && !oldIds.includes(friend.id)))) {
+        return { success: false, error: '참여자와 환급 대상을 확인해주세요.' };
       }
-      delete (meetingDataToSave as Partial<AddMeetingPayload>).temporaryParticipants;
-      delete (meetingDataToSave as Partial<AddMeetingPayload>).totalFee;
-      delete (meetingDataToSave as Partial<AddMeetingPayload>).feePerPerson;
+      const oldSnapshots = new Map((participantSnapshot || []).map(person => [person.id, person]));
+      participantSnapshot = friends.map(friend => oldSnapshots.get(friend.id) || { id: friend.id, name: friend.name, ...(friend.description ? { description: friend.description } : {}) });
     }
-
-    const newMeeting = await dbAddMeeting(meetingDataToSave);
-    revalidatePath('/meetings');
-    revalidatePath('/');
-    revalidatePath(`/meetings/${newMeeting.id}`);
-    return { success: true, meeting: newMeeting };
-  } catch (error) {
-    console.error("createMeetingAction Error:", error);
-    const errorMessage = error instanceof Error ? error.message : '모임 생성에 실패했습니다.';
-    return { success: false, error: errorMessage };
-  }
-}
-
-export async function updateMeetingAction(
-  id: string,
-  payload: Partial<Omit<Meeting, 'id' | 'createdAt'>>,
-  currentUserId?: string | null
-) {
-  const meetingToUpdate = await dbGetMeetingById(id);
-  if (!meetingToUpdate) {
-    return { success: false, error: "수정할 모임을 찾을 수 없습니다." };
-  }
-
-  const permissionCheck = await ensureUserPermission(currentUserId, {
-    ownerId: meetingToUpdate.creatorId,
-    adminCanOverride: true,
-    entityName: '모임 수정'
-  });
-
-  if (!permissionCheck.success) {
-    return { success: false, error: permissionCheck.error };
-  }
-
-  try {
-    const {
-      name, dateTime, groupId, locationName, locationCoordinates,
-      participantIds, useReserveFund, nonReserveFundParticipants,
-      refundReserveFundToNonParticipants, reserveFundRefundRecipientIds,
-      partialReserveFundAmount, memo, endTime,
-      totalFee, feePerPerson, temporaryParticipants,
-      isShareEnabled, shareToken, shareExpiryDate, isSettled
-    } = payload;
-
-    if (!meetingToUpdate.isTemporary && Object.prototype.hasOwnProperty.call(payload, 'groupId') && (!groupId || !groupId.trim())) {
-      return { success: false, error: "일반 모임은 친구 그룹을 선택해야 합니다." };
-    }
-
-    const meetingDataToUpdate: Partial<Omit<Meeting, 'id' | 'createdAt'>> = {};
-
-    const reserveFundSettingsChanged = payload.useReserveFund !== undefined ||
-                                     payload.partialReserveFundAmount !== undefined ||
-                                     payload.nonReserveFundParticipants !== undefined ||
-                                     payload.refundReserveFundToNonParticipants !== undefined ||
-                                     payload.reserveFundRefundRecipientIds !== undefined;
-
-    if (meetingToUpdate.isSettled && reserveFundSettingsChanged) {
-      meetingDataToUpdate.isSettled = false;
-      meetingDataToUpdate.settledReserveFundAmount = undefined;
-      meetingDataToUpdate.settledReserveFundAt = undefined;
-    } else if (Object.prototype.hasOwnProperty.call(payload, 'isSettled')) {
-      meetingDataToUpdate.isSettled = isSettled;
-    }
-
-    if (Object.prototype.hasOwnProperty.call(payload, 'name')) meetingDataToUpdate.name = name;
-    if (Object.prototype.hasOwnProperty.call(payload, 'dateTime')) meetingDataToUpdate.dateTime = dateTime;
-    if (Object.prototype.hasOwnProperty.call(payload, 'groupId')) meetingDataToUpdate.groupId = groupId;
-    if (Object.prototype.hasOwnProperty.call(payload, 'locationName')) meetingDataToUpdate.locationName = locationName;
-    if (Object.prototype.hasOwnProperty.call(payload, 'locationCoordinates')) meetingDataToUpdate.locationCoordinates = locationCoordinates;
-    if (Object.prototype.hasOwnProperty.call(payload, 'participantIds')) meetingDataToUpdate.participantIds = participantIds;
-    if (Object.prototype.hasOwnProperty.call(payload, 'useReserveFund')) meetingDataToUpdate.useReserveFund = useReserveFund;
-    if (Object.prototype.hasOwnProperty.call(payload, 'nonReserveFundParticipants')) meetingDataToUpdate.nonReserveFundParticipants = nonReserveFundParticipants;
-    if (Object.prototype.hasOwnProperty.call(payload, 'refundReserveFundToNonParticipants')) {
-      meetingDataToUpdate.refundReserveFundToNonParticipants = refundReserveFundToNonParticipants;
-    }
-    if (Object.prototype.hasOwnProperty.call(payload, 'reserveFundRefundRecipientIds')) {
-      meetingDataToUpdate.reserveFundRefundRecipientIds = reserveFundRefundRecipientIds;
-    }
-    if (Object.prototype.hasOwnProperty.call(payload, 'partialReserveFundAmount')) meetingDataToUpdate.partialReserveFundAmount = partialReserveFundAmount;
-    if (Object.prototype.hasOwnProperty.call(payload, 'memo')) meetingDataToUpdate.memo = memo;
-    if (Object.prototype.hasOwnProperty.call(payload, 'endTime')) meetingDataToUpdate.endTime = endTime;
-    if (Object.prototype.hasOwnProperty.call(payload, 'totalFee')) meetingDataToUpdate.totalFee = totalFee;
-    if (Object.prototype.hasOwnProperty.call(payload, 'feePerPerson')) meetingDataToUpdate.feePerPerson = feePerPerson;
-    if (Object.prototype.hasOwnProperty.call(payload, 'temporaryParticipants')) meetingDataToUpdate.temporaryParticipants = temporaryParticipants;
-
-    if (Object.prototype.hasOwnProperty.call(payload, 'isShareEnabled')) {
-      meetingDataToUpdate.isShareEnabled = isShareEnabled;
-      if (meetingDataToUpdate.isShareEnabled === false) {
-        meetingDataToUpdate.shareToken = null;
-        meetingDataToUpdate.shareExpiryDate = null;
-      } else if (meetingDataToUpdate.isShareEnabled === true) {
-        meetingDataToUpdate.shareToken = Object.prototype.hasOwnProperty.call(payload, 'shareToken') ? shareToken : meetingToUpdate.shareToken;
-        meetingDataToUpdate.shareExpiryDate = Object.prototype.hasOwnProperty.call(payload, 'shareExpiryDate') ? shareExpiryDate : meetingToUpdate.shareExpiryDate;
-      }
-    }
-
-    if (Object.prototype.hasOwnProperty.call(payload, 'locationName')) {
-      meetingDataToUpdate.locationName = locationName || '';
-      if (!Object.prototype.hasOwnProperty.call(payload, 'locationCoordinates') && !meetingDataToUpdate.locationName) {
-        delete meetingDataToUpdate.locationCoordinates;
-      }
-    }
-    if (Object.prototype.hasOwnProperty.call(payload, 'locationCoordinates')) {
-      if (locationCoordinates)
-        meetingDataToUpdate.locationCoordinates = locationCoordinates;
-      else
-        delete meetingDataToUpdate.locationCoordinates;
-    }
-
-    if (meetingToUpdate.isTemporary) {
-      delete meetingDataToUpdate.participantIds;
-      delete meetingDataToUpdate.useReserveFund;
-      delete meetingDataToUpdate.partialReserveFundAmount;
-      delete meetingDataToUpdate.nonReserveFundParticipants;
-      delete meetingDataToUpdate.refundReserveFundToNonParticipants;
-      delete meetingDataToUpdate.reserveFundRefundRecipientIds;
-
-      if (Object.prototype.hasOwnProperty.call(payload, 'totalFee') && meetingDataToUpdate.totalFee !== undefined) {
-        meetingDataToUpdate.feePerPerson = undefined;
-      } else if (Object.prototype.hasOwnProperty.call(payload, 'feePerPerson') && meetingDataToUpdate.feePerPerson !== undefined) {
-        meetingDataToUpdate.totalFee = undefined;
-      }
-    } else {
-      delete meetingDataToUpdate.temporaryParticipants;
-      if (Object.prototype.hasOwnProperty.call(payload, 'totalFee')) meetingDataToUpdate.totalFee = undefined;
-      if (Object.prototype.hasOwnProperty.call(payload, 'feePerPerson')) meetingDataToUpdate.feePerPerson = undefined;
-
-      const willUseReserveFundCurrent = meetingDataToUpdate.useReserveFund !== undefined ? meetingDataToUpdate.useReserveFund : meetingToUpdate.useReserveFund;
-
-      if (willUseReserveFundCurrent) {
-        if (meetingDataToUpdate.partialReserveFundAmount === undefined && !Object.prototype.hasOwnProperty.call(payload, 'partialReserveFundAmount')) {
-           meetingDataToUpdate.partialReserveFundAmount = meetingToUpdate.partialReserveFundAmount !== undefined ? meetingToUpdate.partialReserveFundAmount : 0;
-        } else if (meetingDataToUpdate.partialReserveFundAmount === undefined && Object.prototype.hasOwnProperty.call(payload, 'partialReserveFundAmount') && typeof payload.partialReserveFundAmount !== 'number' ){
-            meetingDataToUpdate.partialReserveFundAmount = 0;
-        }
-      } else {
-        meetingDataToUpdate.partialReserveFundAmount = undefined;
-        meetingDataToUpdate.nonReserveFundParticipants = [];
-        meetingDataToUpdate.refundReserveFundToNonParticipants = false;
-        meetingDataToUpdate.reserveFundRefundRecipientIds = [];
-      }
-
-      if (meetingDataToUpdate.useReserveFund === false) {
-        meetingDataToUpdate.nonReserveFundParticipants = [];
-        meetingDataToUpdate.refundReserveFundToNonParticipants = false;
-        meetingDataToUpdate.reserveFundRefundRecipientIds = [];
-      }
-
-      const willRefundToNonParticipantsCurrent =
-        meetingDataToUpdate.refundReserveFundToNonParticipants !== undefined
-          ? meetingDataToUpdate.refundReserveFundToNonParticipants
-          : meetingToUpdate.refundReserveFundToNonParticipants;
-
-      if (!willRefundToNonParticipantsCurrent) {
-        meetingDataToUpdate.reserveFundRefundRecipientIds = [];
-      }
-    }
-
-    const updatedMeeting = await dbUpdateMeeting(id, meetingDataToUpdate);
-    if (!updatedMeeting) throw new Error('모임 업데이트에 실패했습니다.');
-
-    revalidatePath('/meetings');
-    revalidatePath(`/meetings/${id}`);
-    revalidatePath('/');
-    return { success: true, meeting: updatedMeeting };
-  } catch (error) {
-    console.error("updateMeetingAction Error:", error);
-    const errorMessage = error instanceof Error ? error.message : '모임 수정에 실패했습니다.';
-    return { success: false, error: errorMessage };
-  }
+    const meeting = await updateMeeting(id, { ...data, participantSnapshot }, access.meeting.revision || 0);
+    revalidatePath('/meetings'); revalidatePath('/'); revalidatePath(`/meetings/${id}`);
+    return { success: true, meeting };
+  } catch (error) { return { success: false, error: errorText(error) }; }
 }
 
 export async function deleteMeetingAction(id: string, currentUserId?: string | null) {
-  const meetingToDelete = await dbGetMeetingById(id);
-  if (!meetingToDelete) {
-    return { success: false, error: "삭제할 모임을 찾을 수 없습니다." };
-  }
-
-  const permissionCheck = await ensureUserPermission(currentUserId, {
-    ownerId: meetingToDelete.creatorId,
-    adminCanOverride: true,
-    entityName: '모임 삭제'
-  });
-
-  if (!permissionCheck.success) {
-    return { success: false, error: permissionCheck.error };
-  }
-
   try {
-    await dbDeleteMeeting(id);
-    revalidatePath('/meetings');
-    revalidatePath('/');
+    const access = await ensureMeetingAccess(id, currentUserId, true);
+    if (!access.success) return access;
+    if (access.meeting.isSettled) return { success: false, error: '확정된 모임은 정산을 다시 연 뒤 삭제해주세요.' };
+    await deleteMeeting(id);
+    revalidatePath('/meetings'); revalidatePath('/');
     return { success: true };
-  } catch (error) {
-    console.error("deleteMeetingAction Error:", error);
-    const errorMessage = error instanceof Error ? error.message : '모임 삭제에 실패했습니다.';
-    return { success: false, error: errorMessage };
-  }
+  } catch (error) { return { success: false, error: errorText(error) }; }
 }
 
-export async function getMeetingsForUserAction(params: {
-  year?: number;
-  page?: number;
-  limitParam?: number;
-  requestingUserId: string;
-}) {
-  const { year, page, limitParam, requestingUserId } = params;
-
-  if (!requestingUserId) {
-    return { success: false, error: "User ID is required.", meetings: [], totalCount: 0, availableYears: [] };
-  }
-
-  const user = await dbGetUserById(requestingUserId);
-
-  if (!user) {
-    return { success: false, error: "User not found.", meetings: [], totalCount: 0, availableYears: [] };
-  }
-
-  let actualUserIdForFilter: string | undefined = undefined;
-  let actualUserFriendGroupIdsForFilter: string[] | undefined = undefined;
-
+export async function getMeetingsForUserAction(params: MeetingFilters & { page?: number; limitParam?: number; requestingUserId?: string; cursor?: string }) {
+  const empty = { meetings: [], totalCount: 0, availableYears: [], nextCursor: null, hasMore: false };
   try {
-    if (user.role !== 'admin') {
-      actualUserIdForFilter = user.id;
-      const accessibleGroupIds = new Set<string>(user.friendGroupIds || []);
-      const accessibleGroups = await dbGetFriendGroupsByUser(user.id);
-
-      accessibleGroups.forEach(group => {
-        if (user.role === 'viewer' && !user.friendGroupIds?.includes(group.id)) {
-          return;
-        }
-        accessibleGroupIds.add(group.id);
-      });
-
-      actualUserFriendGroupIdsForFilter = accessibleGroupIds.size > 0
-        ? Array.from(accessibleGroupIds)
-        : undefined;
-    }
-
-    const result = await dbGetMeetings({
-      year,
-      page,
-      limitParam,
-      userId: actualUserIdForFilter,
-      userFriendGroupIds: actualUserFriendGroupIdsForFilter,
-    });
+    const parsed = listInput.safeParse(params);
+    if (!parsed.success) return { success: false, error: '검색 조건을 확인해주세요.', ...empty };
+    const permission = await ensureUserPermission(parsed.data.requestingUserId);
+    if (!permission.success || !permission.user) return { success: false, error: permission.error, ...empty };
+    const user = permission.user;
+    const result = await getMeetings({ ...parsed.data, userId: user.role === 'admin' ? undefined : user.id,
+      includeCreated: user.role !== 'viewer',
+      userFriendGroupIds: user.role === 'admin' ? undefined : await accessibleGroupIds(user) });
     return { success: true, ...result };
-  } catch (error) {
-    console.error("getMeetingsForUserAction Error:", error);
-    const errorMessage = error instanceof Error ? error.message : 'Failed to fetch meetings.';
-    return { success: false, error: errorMessage, meetings: [], totalCount: 0, availableYears: [] };
-  }
+  } catch (error) { return { success: false, error: errorText(error), ...empty }; }
+}
+
+export async function getDashboardAction() {
+  try {
+    const permission = await ensureUserPermission(undefined);
+    if (!permission.success || !permission.user) return { success: false, error: permission.error, recentMeetings: [], upcomingMeetings: [], pendingMeetings: [] };
+    const user = permission.user;
+    const scope = { limitParam: 3, includeYears: false, userId: user.role === 'admin' ? undefined : user.id,
+      includeCreated: user.role !== 'viewer',
+      userFriendGroupIds: user.role === 'admin' ? undefined : await accessibleGroupIds(user) };
+    const [recent, upcoming, pending] = await Promise.all([
+      getMeetings({ ...scope, before: new Date() }),
+      getMeetings({ ...scope, after: new Date(), ascending: true }),
+      getMeetings({ ...scope, before: new Date(), status: 'pending' }),
+    ]);
+    return { success: true, recentMeetings: recent.meetings, upcomingMeetings: upcoming.meetings, pendingMeetings: pending.meetings };
+  } catch (error) { return { success: false, error: errorText(error), recentMeetings: [], upcomingMeetings: [], pendingMeetings: [] }; }
 }

@@ -1,0 +1,10 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Application data access runs through verified server actions using Admin SDK.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

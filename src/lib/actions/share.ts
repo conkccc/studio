@@ -14,7 +14,8 @@ import { ensureUserPermission } from './permissions';
 
 // 모임 공유 액션
 export async function toggleMeetingShareAction(meetingId: string, currentUserId: string, enable: boolean, expiryDays: number = 7) {
-  const permissionCheck = await ensureUserPermission(currentUserId, { entityName: '공유 설정 변경' });
+  if (typeof enable !== 'boolean' || !Number.isInteger(expiryDays) || expiryDays < 1 || expiryDays > 90) return { success: false, error: '공유 기간은 1~90일로 설정해주세요.' };
+  const permissionCheck = await ensureUserPermission(currentUserId, { requiredRole: ['user', 'admin'], entityName: '공유 설정 변경' });
   if (!permissionCheck.success) {
     return { success: false, error: permissionCheck.error };
   }
@@ -67,7 +68,8 @@ export async function toggleMeetingShareAction(meetingId: string, currentUserId:
 }
 
 export async function toggleMeetingPrepShareAction(meetingPrepId: string, currentUserId: string, enable: boolean, expiryDays: number = 7) {
-  const permissionCheck = await ensureUserPermission(currentUserId, { entityName: '모임 준비 공유 설정 변경' });
+  if (typeof enable !== 'boolean' || !Number.isInteger(expiryDays) || expiryDays < 1 || expiryDays > 90) return { success: false, error: '공유 기간은 1~90일로 설정해주세요.' };
+  const permissionCheck = await ensureUserPermission(currentUserId, { requiredRole: ['user', 'admin'], entityName: '모임 준비 공유 설정 변경' });
   if (!permissionCheck.success) {
     return { success: false, error: permissionCheck.error };
   }

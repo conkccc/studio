@@ -1,5 +1,5 @@
 import { Metadata } from 'next';
-import { CreateMeetingPrepForm } from '@/features/meeting-prep';
+import { CreateMeetingPrepForm } from '@/features/meeting-prep/CreateMeetingPrepForm';
 
 export const metadata: Metadata = {
   title: '새 모임 준비 생성',

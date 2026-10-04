@@ -3,7 +3,7 @@
 import type { ReactNode } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import React, { useRef, useEffect, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   Home,
   UsersRound,
@@ -25,7 +25,7 @@ import {
   useSidebar,
 } from '@/components/ui/sidebar';
 import { Button } from '@/components/ui/button';
-import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
+import { Sheet, SheetContent, SheetTrigger, SheetTitle, SheetDescription } from "@/components/ui/sheet";
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
 import type { User } from '@/lib/types';
@@ -51,9 +51,8 @@ export function AppShell({ children }: { children: ReactNode }) {
   const router = useRouter();
   const { isMobile, setOpenMobile, openMobile } = useSidebar();
   const { currentUser, appUser, userRole, loading, signOut } = useAuth();
+  const roleLabel = userRole ? { admin: '관리자', user: '사용자', viewer: '읽기 전용', none: '승인 대기' }[userRole] : '';
 
-  const sheetTriggerRef = useRef<HTMLButtonElement>(null);
-  const sheetContentRef = useRef<HTMLDivElement>(null);
   const [isClient, setIsClient] = useState(false);
 
   useEffect(() => {
@@ -70,27 +69,6 @@ export function AppShell({ children }: { children: ReactNode }) {
     await signOut();
     handleClose();
   };
-
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (
-        openMobile &&
-        sheetContentRef.current &&
-        !sheetContentRef.current.contains(event.target as Node) &&
-        sheetTriggerRef.current &&
-        !sheetTriggerRef.current.contains(event.target as Node)
-      ) {
-        setOpenMobile(false);
-      }
-    };
-    if (openMobile) {
-      document.addEventListener('mousedown', handleClickOutside);
-    }
-    return () => {
-      document.removeEventListener('mousedown', handleClickOutside);
-    };
-  }, [openMobile, setOpenMobile]);
-
 
   const renderNavLinks = (isSheetContext = false) => (
     <SidebarMenu>
@@ -112,28 +90,15 @@ export function AppShell({ children }: { children: ReactNode }) {
           return (
             <SidebarMenuItem key={item.href}>
               <SidebarMenuButton
-                asChild={!isSheetContext}
+                asChild
                 isActive={isActive}
                 className="w-full"
                 tooltip={isMobile ? undefined : item.label}
-                onClick={() => {
-                  if (isSheetContext) {
-                    router.push(item.href);
-                  }
-                  handleClose();
-                }}
               >
-                {isSheetContext ? (
-                  <div className="flex w-full items-center gap-2 text-sm">
-                    <item.icon aria-hidden="true" className="h-5 w-5 shrink-0" />
-                    <span className="truncate">{item.label}</span>
-                  </div>
-                ) : (
-                  <Link href={item.href} className="flex w-full items-center gap-2">
-                    <item.icon aria-hidden="true" />
-                    <span>{item.label}</span>
-                  </Link>
-                )}
+                <Link href={item.href} onClick={handleClose} aria-current={isActive ? 'page' : undefined} className="flex w-full items-center gap-2">
+                  <item.icon aria-hidden="true" className={isSheetContext ? 'h-5 w-5 shrink-0' : undefined} />
+                  <span>{item.label}</span>
+                </Link>
               </SidebarMenuButton>
             </SidebarMenuItem>
           );
@@ -204,7 +169,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                       <div className="flex flex-col text-xs group-data-[collapsible=icon]:hidden">
                         <span className="font-medium truncate">{appUser?.name || currentUser.displayName || '사용자'}</span>
                         <span className="text-muted-foreground truncate">
-                          {appUser?.email || currentUser.email} ({userRole || 'N/A'})
+                          {appUser?.email || currentUser.email} ({roleLabel})
                         </span>
                       </div>
                     </div>
@@ -238,12 +203,14 @@ export function AppShell({ children }: { children: ReactNode }) {
           {isMobile && canShowAppShell && (
             <Sheet open={openMobile} onOpenChange={setOpenMobile}>
               <SheetTrigger asChild>
-                <Button ref={sheetTriggerRef} size="icon" variant="outline" className="sm:hidden" aria-label="메뉴 토글">
+                <Button size="icon" variant="outline" className="md:hidden" aria-label="메뉴 토글">
                   <Menu className="h-5 w-5" />
                 </Button>
               </SheetTrigger>
-              <SheetContent ref={sheetContentRef} side="left" className="sm:max-w-xs p-0 flex flex-col">
-                <nav className="grid gap-6 text-lg font-medium">
+              <SheetContent side="left" className="sm:max-w-xs p-0 flex flex-col">
+                <SheetTitle className="sr-only">탐색 메뉴</SheetTitle>
+                <SheetDescription className="sr-only">모임과 친구 목록으로 이동할 수 있습니다.</SheetDescription>
+                <nav aria-label="주 메뉴" className="grid gap-6 text-lg font-medium">
                   <Link
                     href="/"
                     className="group flex h-16 items-center justify-center gap-2 border-b px-6 text-lg font-semibold text-primary"
@@ -265,7 +232,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                             <div className="flex flex-col">
                               <span className="font-medium truncate">{appUser?.name || currentUser.displayName || '사용자'}</span>
                               <span className="text-xs text-muted-foreground truncate">
-                                {appUser?.email || currentUser.email} ({userRole || 'N/A'})
+                                {appUser?.email || currentUser.email} ({roleLabel})
                               </span>
                             </div>
                           </div>

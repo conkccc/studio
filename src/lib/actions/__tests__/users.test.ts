@@ -1,9 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { assignFriendGroupsToUserAction, updateUserRoleAction } from '../users';
-import { updateUser } from '../../data-store';
+import { assignFriendGroupsToUserAction, getAllUsersAction, updateUserRoleAction } from '../users';
+import { getUsers, updateUser } from '../../data-store';
 import { ensureUserPermission } from '../permissions';
 import { revalidatePath } from 'next/cache';
-import { makeAdmin } from './fixtures';
+import { makeAdmin, makeUser } from './fixtures';
 
 vi.mock('next/cache', () => ({
   revalidatePath: vi.fn()
@@ -64,7 +64,7 @@ describe('assignFriendGroupsToUserAction', () => {
       success: true,
       user: makeAdmin()
     });
-    mockUpdateUser.mockResolvedValue({ id: 'u2' });
+    mockUpdateUser.mockResolvedValue(makeUser({ id: 'u2' }));
 
     const result = await assignFriendGroupsToUserAction({
       adminUserId: 'admin-1',
@@ -104,6 +104,7 @@ describe('updateUserRoleAction', () => {
   });
 
   it('blocks updating own role', async () => {
+    mockEnsureUserPermission.mockResolvedValue({ success: true, user: makeAdmin() });
     const result = await updateUserRoleAction('admin-1', 'user', 'admin-1');
     expect(result.success).toBe(false);
     expect(result.error).toContain('자신의 역할은 변경할 수 없습니다');
@@ -121,7 +122,7 @@ describe('updateUserRoleAction', () => {
       success: true,
       user: makeAdmin()
     });
-    mockUpdateUser.mockResolvedValue({ id: 'u1', role: 'viewer' });
+    mockUpdateUser.mockResolvedValue(makeUser({ id: 'u1', role: 'viewer' }));
 
     const result = await updateUserRoleAction('u1', 'viewer', 'admin-1');
 
@@ -141,5 +142,15 @@ describe('updateUserRoleAction', () => {
 
     expect(result.success).toBe(false);
     expect(result.error).toContain('사용자 역할 업데이트에 실패했습니다');
+  });
+});
+
+describe('getAllUsersAction', () => {
+  it('does not expose user profiles to a non-admin', async () => {
+    mockEnsureUserPermission.mockResolvedValue({ success: false, error: '권한 없음' });
+    const result = await getAllUsersAction();
+    expect(result.success).toBe(false);
+    expect(result.users).toEqual([]);
+    expect(getUsers).not.toHaveBeenCalled();
   });
 });

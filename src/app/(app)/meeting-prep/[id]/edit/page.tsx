@@ -1,5 +1,5 @@
 import { Metadata } from 'next';
-import { EditMeetingPrepForm } from '@/features/meeting-prep';
+import { EditMeetingPrepForm } from '@/features/meeting-prep/EditMeetingPrepForm';
 import { getMeetingPrepByIdAction } from '@/lib/actions';
 
 type EditMeetingPrepPageProps = {

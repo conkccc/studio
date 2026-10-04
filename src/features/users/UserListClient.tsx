@@ -10,7 +10,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Loader2, Settings2 } from 'lucide-react';
 import { format, isValid } from 'date-fns';
 import { ko } from 'date-fns/locale';
-import { Timestamp } from 'firebase/firestore';
 import { AssignFriendGroupsDialog } from './AssignFriendGroupsDialog';
 import type { FriendGroup } from '@/lib/types';
 
@@ -62,18 +61,16 @@ export function UserListClient({ initialUsers, currentAdminId, isAdmin, allFrien
       }
     });
   };
-  
-  const formatDate = (dateInput: Date | Timestamp | undefined | null): string => {
+
+  const formatDate = (dateInput: Date | undefined | null): string => {
     if (!dateInput) return 'N/A';
     let date: Date;
-    if (dateInput instanceof Timestamp) {
-      date = dateInput.toDate();
-    } else if (dateInput instanceof Date) {
+    if (dateInput instanceof Date) {
       date = dateInput;
     } else { // Attempt to parse if it's a string or number (e.g. from older data)
       date = new Date(dateInput);
     }
-    
+
     if (!isValid(date)) return '날짜 정보 없음';
     return format(date, 'yyyy.MM.dd HH:mm', { locale: ko });
   };

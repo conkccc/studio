@@ -1,197 +1,123 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
-import { format, getDaysInMonth, isSameDay } from 'date-fns';
+import { format, getDaysInMonth, startOfDay } from 'date-fns';
 import {
   dbGetParticipantAvailability,
   dbUpdateParticipantAvailability,
   dbGetAllParticipantAvailabilities,
   dbAddParticipantAvailability,
-  dbGetFriendById,
 } from '../data-store';
-import type { ParticipantAvailability } from '../types';
-import { ensureUserPermission } from './permissions';
+import type { MeetingPrep, ParticipantAvailability } from '../types';
 import { getMeetingPrepByIdAction } from './meeting-prep';
+import { hashAvailabilityPassword, verifyAvailabilityPassword, withoutAvailabilitySecrets } from '../auth/availability-password';
 
-// 참석 가능 여부 관련 액션
+function getUpcomingPrepDates(prep: MeetingPrep): string[] {
+  const dates: string[] = [];
+  const today = startOfDay(new Date());
+  for (const monthString of prep.selectedMonths) {
+    if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(monthString)) continue;
+    const [year, month] = monthString.split('-').map(Number);
+    const daysInMonth = getDaysInMonth(new Date(year, month - 1));
+    for (let day = 1; day <= daysInMonth; day++) {
+      const date = new Date(year, month - 1, day);
+      if (date >= today) dates.push(format(date, 'yyyy-MM-dd'));
+    }
+  }
+  return [...new Set(dates)];
+}
+
+function reconstructAvailability(availability: ParticipantAvailability, dates: string[]) {
+  const storedDates = new Set(availability.storedDates);
+  const availableDates = dates.filter(date => availability.storedAsAvailable ? storedDates.has(date) : !storedDates.has(date));
+  const unavailableDates = dates.filter(date => !availableDates.includes(date));
+  return { ...withoutAvailabilitySecrets(availability), availableDates, unavailableDates };
+}
+
 export async function submitParticipantAvailabilityAction(
-  payload: Omit<ParticipantAvailability, 'id' | 'submittedAt' | 'storedDates' | 'storedAsAvailable'> & { availableDates: string[]; unavailableDates: string[]; },
-  currentUserId?: string | null
+  payload: Omit<ParticipantAvailability, 'id' | 'submittedAt' | 'storedDates' | 'storedAsAvailable' | 'passwordHash'> & { availableDates: string[]; unavailableDates: string[] },
+  currentUserId?: string | null,
+  shareToken?: string
 ) {
-  const { meetingPrepId, selectedFriendId, password, availableDates, unavailableDates } = payload;
-
-  if (!meetingPrepId || !selectedFriendId) {
-    return { success: false, error: "모임 준비 ID와 친구 ID는 필수입니다." };
+  const { meetingPrepId, selectedFriendId, password, availableDates } = payload;
+  if (!meetingPrepId || !selectedFriendId) return { success: false, error: '모임 준비 ID와 친구 ID는 필수입니다.' };
+  if (typeof password !== 'string' || !password.trim() || password.length > 256) {
+    return { success: false, error: '수정용 비밀번호를 입력해주세요. 비밀번호는 256자 이하여야 합니다.' };
+  }
+  if (!Array.isArray(availableDates) || availableDates.length > 3660 || availableDates.some(date => typeof date !== 'string')) {
+    return { success: false, error: '참석 가능 날짜 형식이 올바르지 않습니다.' };
   }
 
   try {
-    const meetingPrepResult = await getMeetingPrepByIdAction(meetingPrepId, currentUserId);
-    if (!meetingPrepResult.success || !meetingPrepResult.meetingPrep) {
-      return { success: false, error: meetingPrepResult.error || "모임 준비를 찾을 수 없거나 접근 권한이 없습니다." };
+    // The share token is verified again on every submission, including for
+    // signed-in visitors. An ID alone never authorizes a public request.
+    const prepResult = await getMeetingPrepByIdAction(meetingPrepId, currentUserId, shareToken);
+    if (!prepResult.success || !prepResult.meetingPrep) return { success: false, error: prepResult.error || '모임 준비를 찾을 수 없습니다.' };
+    const prep = prepResult.meetingPrep;
+    if (!prep.participantFriendIds.includes(selectedFriendId) || !prep.participantFriends?.some(friend => friend.id === selectedFriendId)) {
+      return { success: false, error: '이 모임 준비에 포함된 참여자만 응답할 수 있습니다.' };
     }
-    const meetingPrep = meetingPrepResult.meetingPrep;
-
-    if (currentUserId) {
-      const userResult = await ensureUserPermission(currentUserId);
-      if (!userResult.success || !userResult.user) {
-        return { success: false, error: userResult.error || "사용자 정보를 찾을 수 없습니다." };
-      }
-      const user = userResult.user;
-
-      const friend = await dbGetFriendById(selectedFriendId);
-      if (!friend) {
-        return { success: false, error: "친구를 찾을 수 없습니다." };
-      }
-      if (user.role !== 'admin' && !user.friendGroupIds?.includes(friend.groupId)) {
-        return { success: false, error: "선택된 친구에 대한 참석 가능 여부를 제출할 권한이 없습니다." };
-      }
-      if (!password) {
-        return { success: false, error: "수정을 위해 비밀번호를 입력해주세요." };
-      }
-    } else {
-      if (!meetingPrep.shareToken || !meetingPrep.shareExpiryDate || meetingPrep.shareExpiryDate < new Date()) {
-        return { success: false, error: "공유 링크가 유효하지 않거나 만료되었습니다." };
-      }
-      if (!password) {
-        return { success: false, error: "수정을 위해 비밀번호를 입력해주세요." };
-      }
+    const dates = getUpcomingPrepDates(prep);
+    const validDates = new Set(dates);
+    if (availableDates.some(date => !validDates.has(date))) {
+      return { success: false, error: '선택한 모임 준비 기간 내의 날짜만 제출할 수 있습니다.' };
     }
-
-    const today = format(new Date(), 'yyyy-MM-dd');
-    const filteredAvailableDates = availableDates.filter(date => date >= today);
-    const filteredUnavailableDates = unavailableDates.filter(date => date >= today);
-
-    let storedDates: string[];
-    let storedAsAvailable: boolean;
-
-    if (filteredAvailableDates.length <= filteredUnavailableDates.length) {
-      storedDates = filteredAvailableDates;
-      storedAsAvailable = true;
-    } else {
-      storedDates = filteredUnavailableDates;
-      storedAsAvailable = false;
+    const availableSet = new Set(availableDates);
+    const filteredAvailableDates = dates.filter(date => availableSet.has(date));
+    const unavailableDates = dates.filter(date => !availableSet.has(date));
+    const storedAsAvailable = filteredAvailableDates.length <= unavailableDates.length;
+    const existing = await dbGetParticipantAvailability(meetingPrepId, selectedFriendId);
+    if (existing && !(await verifyAvailabilityPassword(password, existing))) {
+      return { success: false, error: '비밀번호가 일치하지 않습니다.' };
     }
-
-    const dataToStore = {
+    const data = {
       meetingPrepId,
       selectedFriendId,
-      password,
-      storedDates,
+      passwordHash: existing?.passwordHash ?? await hashAvailabilityPassword(password),
+      storedDates: storedAsAvailable ? filteredAvailableDates : unavailableDates,
       storedAsAvailable,
     };
-
-    const existingAvailability = await dbGetParticipantAvailability(meetingPrepId, selectedFriendId);
-
-    if (existingAvailability) {
-      if (existingAvailability.password !== undefined && existingAvailability.password !== null && existingAvailability.password !== password) {
-        return { success: false, error: "비밀번호가 일치하지 않습니다." };
-      }
-      const updatedAvailability = await dbUpdateParticipantAvailability(meetingPrepId, selectedFriendId, dataToStore);
-      revalidatePath(`/meeting-prep/${meetingPrepId}`);
-      if (meetingPrep.shareToken) {
-        revalidatePath(`/share/meeting-prep/${meetingPrep.shareToken}`);
-      }
-      return { success: true, availability: updatedAvailability };
-    } else {
-      const newAvailability = await dbAddParticipantAvailability(dataToStore);
-      revalidatePath(`/meeting-prep/${meetingPrepId}`);
-      if (meetingPrep.shareToken) {
-        revalidatePath(`/share/meeting-prep/${meetingPrep.shareToken}`);
-      }
-      return { success: true, availability: newAvailability };
-    }
+    const availability = existing
+      ? await dbUpdateParticipantAvailability(meetingPrepId, selectedFriendId, data)
+      : await dbAddParticipantAvailability(data);
+    if (!availability) throw new Error('참석 가능 여부를 저장할 수 없습니다.');
+    revalidatePath(`/meeting-prep/${meetingPrepId}`);
+    if (prep.shareToken) revalidatePath(`/share/meeting-prep/${prep.shareToken}`);
+    return { success: true, availability: reconstructAvailability(availability, dates) };
   } catch (error) {
-    console.error("submitParticipantAvailabilityAction Error:", error);
-    const errorMessage = error instanceof Error ? error.message : '참석 가능 여부 제출에 실패했습니다.';
-    return { success: false, error: errorMessage };
+    console.error('submitParticipantAvailabilityAction Error:', error);
+    return { success: false, error: '참석 가능 여부 제출에 실패했습니다.' };
   }
 }
 
-export async function getParticipantAvailabilityAction(meetingPrepId: string, selectedFriendId: string, currentUserId?: string | null) {
+export async function getParticipantAvailabilityAction(meetingPrepId: string, selectedFriendId: string, currentUserId?: string | null, shareToken?: string) {
   try {
-    const meetingPrepResult = await getMeetingPrepByIdAction(meetingPrepId, currentUserId);
-    if (!meetingPrepResult.success || !meetingPrepResult.meetingPrep) {
-      return { success: false, error: meetingPrepResult.error || "모임 준비를 찾을 수 없거나 접근 권한이 없습니다." };
-    }
-    const meetingPrep = meetingPrepResult.meetingPrep;
-
+    const prepResult = await getMeetingPrepByIdAction(meetingPrepId, currentUserId, shareToken);
+    if (!prepResult.success || !prepResult.meetingPrep) return { success: false, error: prepResult.error || '모임 준비에 접근할 수 없습니다.' };
+    const prep = prepResult.meetingPrep;
+    if (!prep.participantFriendIds.includes(selectedFriendId)) return { success: false, error: '모임 준비 참여자가 아닙니다.' };
     const availability = await dbGetParticipantAvailability(meetingPrepId, selectedFriendId);
-
-    if (availability) {
-      const allDatesInPrep: string[] = [];
-      const today = new Date();
-      meetingPrep.selectedMonths.forEach(monthStr => {
-        const [year, month] = monthStr.split('-').map(Number);
-        const daysInMonth = getDaysInMonth(new Date(year, month - 1));
-        for (let i = 1; i <= daysInMonth; i++) {
-          const date = new Date(year, month - 1, i);
-          if (date >= today || isSameDay(date, today)) {
-            allDatesInPrep.push(format(date, 'yyyy-MM-dd'));
-          }
-        }
-      });
-
-      let availableDates: string[] = [];
-      let unavailableDates: string[] = [];
-
-      if (availability.storedAsAvailable) {
-        availableDates = availability.storedDates;
-        unavailableDates = allDatesInPrep.filter(date => !availableDates.includes(date));
-      } else {
-        unavailableDates = availability.storedDates;
-        availableDates = allDatesInPrep.filter(date => !unavailableDates.includes(date));
-      }
-      return { success: true, availability: { ...availability, availableDates, unavailableDates } };
-    }
-    return { success: true, availability: undefined };
+    return { success: true, availability: availability ? reconstructAvailability(availability, getUpcomingPrepDates(prep)) : undefined };
   } catch (error) {
-    console.error("getParticipantAvailabilityAction Error:", error);
-    const errorMessage = error instanceof Error ? error.message : '참석 가능 여부 조회에 실패했습니다.';
-    return { success: false, error: errorMessage };
+    console.error('getParticipantAvailabilityAction Error:', error);
+    return { success: false, error: '참석 가능 여부 조회에 실패했습니다.' };
   }
 }
 
-export async function getAllParticipantAvailabilitiesAction(meetingPrepId: string, currentUserId?: string | null) {
+export async function getAllParticipantAvailabilitiesAction(meetingPrepId: string, currentUserId?: string | null, shareToken?: string) {
   try {
-    const meetingPrepResult = await getMeetingPrepByIdAction(meetingPrepId, currentUserId);
-    if (!meetingPrepResult.success || !meetingPrepResult.meetingPrep) {
-      return { success: false, error: meetingPrepResult.error || "모임 준비를 찾을 수 없거나 접근 권한이 없습니다." };
-    }
-    const meetingPrep = meetingPrepResult.meetingPrep;
-
+    const prepResult = await getMeetingPrepByIdAction(meetingPrepId, currentUserId, shareToken);
+    if (!prepResult.success || !prepResult.meetingPrep) return { success: false, error: prepResult.error || '모임 준비에 접근할 수 없습니다.' };
+    const prep = prepResult.meetingPrep;
     const availabilities = await dbGetAllParticipantAvailabilities(meetingPrepId);
-
-    const allDatesInPrep: string[] = [];
-    const today = new Date();
-    meetingPrep.selectedMonths.forEach(monthStr => {
-      const [year, month] = monthStr.split('-').map(Number);
-      const daysInMonth = getDaysInMonth(new Date(year, month - 1));
-      for (let i = 1; i <= daysInMonth; i++) {
-        const date = new Date(year, month - 1, i);
-        if (date >= today || isSameDay(date, today)) {
-          allDatesInPrep.push(format(date, 'yyyy-MM-dd'));
-        }
-      }
-    });
-
-    const reconstructedAvailabilities = availabilities.map(avail => {
-      let availableDates: string[] = [];
-      let unavailableDates: string[] = [];
-
-      if (avail.storedAsAvailable) {
-        availableDates = avail.storedDates;
-        unavailableDates = allDatesInPrep.filter(date => !availableDates.includes(date));
-      } else {
-        unavailableDates = avail.storedDates;
-        availableDates = allDatesInPrep.filter(date => !unavailableDates.includes(date));
-      }
-      return { ...avail, availableDates, unavailableDates };
-    });
-
-    return { success: true, availabilities: reconstructedAvailabilities };
+    const dates = getUpcomingPrepDates(prep);
+    return {
+      success: true,
+      availabilities: availabilities.filter(availability => prep.participantFriendIds.includes(availability.selectedFriendId))
+        .map(availability => reconstructAvailability(availability, dates)),
+    };
   } catch (error) {
-    console.error("getAllParticipantAvailabilitiesAction Error:", error);
-    const errorMessage = error instanceof Error ? error.message : '모든 참석 가능 여부 조회에 실패했습니다.';
-    return { success: false, error: errorMessage };
+    console.error('getAllParticipantAvailabilitiesAction Error:', error);
+    return { success: false, error: '참석 가능 여부 목록 조회에 실패했습니다.' };
   }
 }

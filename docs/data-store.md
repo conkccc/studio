@@ -1,35 +1,41 @@
-# Data Store Usage
+# Data Store
 
-## 목적
-- 서버 전용 Firebase Admin/Firestore 로직과 클라이언트 Firebase SDK 사용을 분리합니다.
-- 잘못된 번들링(예: firebase-admin이 브라우저로 포함되는 문제)을 방지합니다.
+브라우저는 Firestore를 직접 읽거나 수정하지 않습니다. 기능별 서버 액션을 사용합니다.
 
-## 모듈 구성
-- `src/lib/data-store/server.ts`
-  - 서버 전용 구현
-  - `server-only` 적용
-  - Next.js 서버 컴포넌트, 서버 액션, Route Handler에서 사용
+- `src/lib/auth/session.ts`: 검증된 Firebase 세션에서 요청자 확인
+- `src/lib/services/access.ts`: 그룹·모임별 조회 및 관리 권한
+- `src/lib/actions`: 서버 입력 검증과 기능 흐름
+- `src/lib/data-store/{users,friends,meetings,meeting-prep,reserve-fund}.ts`: Firebase Admin SDK 저장소
+- `src/lib/data-store/shared.ts`: Timestamp → Date 변환과 저장 값 정리
 
-- `src/lib/data-store/client.ts`
-  - 클라이언트 전용 구현
-  - 브라우저에서 실행되는 컴포넌트/훅에서 사용
+서버에서 `@/lib/data-store`를 사용합니다. 브라우저용 데이터 저장소는 제거했습니다.
 
-- `src/lib/data-store/index.ts`
-  - 서버 전용 re-export
-  - 서버 코드에서 `@/lib/data-store`로 사용
+## 모임 목록
 
-## 사용 규칙
-- 서버 코드: `@/lib/data-store`
-- 클라이언트 코드: `@/lib/data-store/client`
+날짜 + 문서 ID로 안정적인 커서 페이지를 조회합니다. 생성자와 접근 가능한 그룹 쿼리 결과를 중복 제거하고 병합합니다. viewer는 명시적으로 할당된 그룹만 조회합니다.
 
-## 예시
+연도 선택은 전체 내역을 읽지 않고, 가장 오래된 날짜와 최신 날짜의 범위에서 제공합니다. 기록이 없는 중간 연도도 선택할 수 있습니다.
 
-### 서버 (Server Component / Server Action)
-```ts
-import { getUsers } from '@/lib/data-store';
-```
+기존 문서의 누락된 boolean 필드와 이름 부분 검색은 서버의 제한된 조회 구간에서 필터링합니다. 한 구간에 결과가 없어도 `hasMore`와 `nextCursor`로 다음 구간을 조회할 수 있습니다. 목록은 전체 개수를 계산하지 않습니다.
 
-### 클라이언트 (Client Component)
-```ts
-import { getReserveFundBalance } from '@/lib/data-store/client';
-```
+새 복합 인덱스는 `firestore.indexes.json`에 정의되어 있습니다. 기존 Firebase 프로젝트의 설정과 합친 뒤 배포해야 합니다. 이 저장소 변경은 클라우드 인덱스나 규칙을 자동 배포하지 않습니다.
+
+커서 쿼리의 `dateTime`은 Firestore Timestamp를 기준으로 정렬합니다. 기존 ISO 문자열 날짜는 상세 표시에서 계속 변환하지만, 목록 조회를 사용하기 전에 `npm run migrate:dates`로 점검하고 필요한 경우 검토 후 `-- --apply`로 정규화합니다. 스크립트는 기본적으로 읽기만 수행합니다.
+
+## 과거 기록
+
+모임 목록의 연도·그룹·종류·정산 상태·검색어는 사용자별 브라우저 저장소에 기억합니다. 명시적인 URL 조건과 뒤로/앞으로 이동이 우선하며, 오래된 페이지 커서는 저장하지 않습니다. 필터 초기화도 기억합니다.
+
+친구 문서와 저장된 이름이 모두 없는 참여자 ID는 현재 참가자 표에서 제외합니다. 다만 실제 지출이나 확정 정산에서 참조하는 사람은 금액 보존을 위해 유지하고 ‘이름 확인 필요’로 표시합니다. 조회 과정에서 원본 ID를 자동 삭제하지 않습니다. 그룹 선택은 오래된 `memberIds` 배열 대신 실제로 조회한 친구를 사용합니다.
+
+친구·그룹 삭제는 `isArchived: true`로 현재 목록에서 제외합니다. 과거 모임의 참여자 ID, 이름 스냅샷, 지출은 유지합니다.
+
+정산 확정 시 원 단위 결과와 송금 내역을 모임의 `settlementSnapshot`에 저장합니다. 수정하려면 명시적으로 정산을 다시 열어야 합니다. `revision`과 Firestore 트랜잭션으로 동시 지출 수정과 정산 확정을 검사합니다.
+
+기존 확정 문서는 덮어쓰거나 일괄 변환하지 않습니다. 저장된 스냅샷이 없는 과거 정산 화면은 새 원 단위 정책으로 재구성하며, 기록된 회비 사용액과 재구성 안내를 표시합니다. 새로운 회비 적용은 원래 분담 비율을 유지하고, 미참가자 환급은 참여자 회비 지원액에 추가됩니다.
+
+`reserveFundCoverAll: true`인 일반 모임은 회비 지원 대상자의 실제 지출 분담액 전부를 지원합니다. 지출 추가·수정·삭제와 회비 제외 설정에 따라 조회와 정산 확정 시 같은 계산 함수를 사용합니다. 생성 시 지출이 없어도 설정할 수 있으며, 필드가 없는 기존 모임은 수동 지원 예산을 그대로 사용합니다. 미참가자 환급은 참가자 지원액에 추가합니다. 정산 확정 후에는 저장한 스냅샷을 표시합니다.
+
+정산 요약의 참여자 부담 합계는 최종 비용이며 추가 송금 총액과 다릅니다. 송금 안내는 참여자 간 송금, 회비의 결제자 지급, 미참가자 환급 순서입니다. 같은 송금인의 내역은 묶어 표시하고, 한 건인 묶음은 제목과 합계를 생략합니다. 화면에서 송금 순서만 바꾸며 저장된 정산 금액이나 송금 대상을 변경하지 않습니다.
+
+기존 참석 응답의 평문 비밀번호는 응답에 노출하지 않고, 올바른 비밀번호로 저장할 때 scrypt 해시로 교체합니다.

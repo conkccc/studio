@@ -1,14 +1,13 @@
 'use client';
-import { useEffect, useState, useCallback, useMemo } from 'react';
+import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import {
   createFriendGroupAction,
   deleteFriendGroupAction,
   getFriendGroupsForUserAction,
   getFriendsByGroupAction,
-  deleteFriendAction,
-  getAllUsersAction
+  deleteFriendAction
 } from '@/lib/actions';
-import type { FriendGroup, User, Friend } from '@/lib/types';
+import type { FriendGroup, Friend } from '@/lib/types';
 import { useToast } from '@/hooks/use-toast';
 import { Loader2, Trash2, PlusCircle, ChevronDown, ChevronRight, UserPlus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -24,7 +23,8 @@ type DisplayFriendGroup = FriendGroup & {
 export default function FriendGroupListClient() {
   const { currentUser, appUser, loading: authLoading } = useAuth();
   const [groups, setGroups] = useState<DisplayFriendGroup[]>([]);
-  const [allUsers, setAllUsers] = useState<User[]>([]);
+  const requestSequence = useRef(0);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [newGroupName, setNewGroupName] = useState('');
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -49,36 +49,28 @@ export default function FriendGroupListClient() {
     if (authLoading || !currentUser?.uid || !appUser?.id) {
       setIsLoading(false);
       setGroups([]);
-      setAllUsers([]);
       return;
     }
+    const sequence = ++requestSequence.current;
     setIsLoading(true);
+    setLoadError(null);
     try {
-      const [groupsRes, usersRes] = await Promise.all([
-        getFriendGroupsForUserAction(appUser.id),
-        getAllUsersAction()
-      ]);
+      const groupsRes = await getFriendGroupsForUserAction(appUser.id);
+      if (sequence !== requestSequence.current) return;
 
       if (groupsRes.success && groupsRes.groups) {
         setGroups(groupsRes.groups as DisplayFriendGroup[]);
       } else {
-        toast({ title: '오류', description: groupsRes.error || '그룹 목록을 불러오는데 실패했습니다.', variant: 'destructive' });
+        setLoadError(groupsRes.error || '그룹 목록을 불러오지 못했습니다.');
         setGroups([]);
       }
 
-      if (usersRes.success && usersRes.users) {
-        setAllUsers(usersRes.users);
-      } else {
-        toast({ title: '오류', description: usersRes.error || '사용자 목록을 불러오는데 실패했습니다.', variant: 'destructive' });
-        setAllUsers([]);
-      }
-
     } catch {
-      toast({ title: '오류', description: '데이터를 불러오는 중 예기치 않은 오류가 발생했습니다.', variant: 'destructive' });
+      if (sequence !== requestSequence.current) return;
+      setLoadError('그룹 목록을 불러오지 못했습니다.');
       setGroups([]);
-      setAllUsers([]);
     } finally {
-      setIsLoading(false);
+      if (sequence === requestSequence.current) setIsLoading(false);
     }
   }, [currentUser?.uid, appUser, authLoading, toast]);
 
@@ -107,7 +99,7 @@ export default function FriendGroupListClient() {
 
   const handleDeleteGroup = async (groupId: string) => {
     if (!appUser?.id) return;
-    const confirmed = window.confirm('정말로 이 그룹을 삭제하시겠습니까? 그룹 내 모든 친구 정보는 삭제되지 않으며, 그룹만 삭제됩니다.');
+    const confirmed = window.confirm('이 그룹을 현재 목록에서 제외하시겠습니까? 과거 모임과 정산 기록은 유지됩니다.');
     if (!confirmed) return;
     setIsSubmitting(true);
     try {
@@ -130,6 +122,7 @@ export default function FriendGroupListClient() {
   // };
 
   const handleSelectGroup = (groupId: string) => {
+    setFriendsInSelectedGroup([]);
     if (selectedGroupId === groupId) {
       setSelectedGroupId(null);
       setFriendsInSelectedGroup([]);
@@ -139,14 +132,17 @@ export default function FriendGroupListClient() {
   };
 
   useEffect(() => {
+    let active = true;
     const fetchFriendsForGroup = async () => {
       if (!selectedGroupId) {
         setFriendsInSelectedGroup([]);
+        setIsLoadingFriends(false);
         return;
       }
       setIsLoadingFriends(true);
       try {
         const response = await getFriendsByGroupAction(selectedGroupId);
+        if (!active) return;
         if (response.success && response.friends) {
           setFriendsInSelectedGroup(response.friends);
         } else {
@@ -154,15 +150,17 @@ export default function FriendGroupListClient() {
           toast({ title: "오류", description: response.error || "선택된 그룹의 친구 목록을 가져오지 못했습니다.", variant: "destructive" });
         }
       } catch (error) {
+        if (!active) return;
         setFriendsInSelectedGroup([]);
         toast({ title: "오류", description: "친구 목록 조회 중 예외가 발생했습니다.", variant: "destructive" });
         console.error("Error fetching friends by group:", error);
       } finally {
-        setIsLoadingFriends(false);
+        if (active) setIsLoadingFriends(false);
       }
     };
 
-    fetchFriendsForGroup();
+    void fetchFriendsForGroup();
+    return () => { active = false; };
   }, [selectedGroupId, toast]);
 
   const handleDeleteFriend = async (friendId: string, friendName: string) => {
@@ -170,7 +168,7 @@ export default function FriendGroupListClient() {
       toast({ title: "오류", description: "필수 정보가 누락되었습니다.", variant: "destructive" });
       return;
     }
-    const confirmed = window.confirm(`'${friendName}' 친구를 이 그룹에서 정말 삭제하시겠습니까? 친구 정보는 다른 그룹에 남아있을 수 있습니다.`);
+    const confirmed = window.confirm(`'${friendName}' 친구를 현재 그룹 목록에서 제외하시겠습니까? 과거 모임과 정산 기록은 유지됩니다.`);
     if (!confirmed) return;
     setIsDeletingFriend(friendId);
     try {
@@ -263,6 +261,7 @@ export default function FriendGroupListClient() {
                 <div className="flex items-center justify-between">
                   <button
                     onClick={() => handleSelectGroup(group.id)}
+                    aria-expanded={selectedGroupId === group.id}
                     className="flex-1 text-left font-medium hover:text-primary transition-colors flex items-center"
                   >
                     {selectedGroupId === group.id ? <ChevronDown className="h-4 w-4 mr-1" /> : <ChevronRight className="h-4 w-4 mr-1" />}
@@ -271,7 +270,7 @@ export default function FriendGroupListClient() {
                   <div className="flex items-center space-x-1">
                     {appUser?.role === 'admin' && !group.isOwned && (
                       <span className="text-xs text-muted-foreground mr-2">
-                        (소유자: {allUsers.find(u => u.id === group.ownerUserId)?.name || group.ownerUserId.substring(0,6) + '...'})
+                        (소유자: {group.ownerName || '그룹 소유자'})
                       </span>
                     )}
                     {(group.isOwned || appUser?.role === 'admin') && (
@@ -281,13 +280,13 @@ export default function FriendGroupListClient() {
                         className="h-7 w-7"
                         onClick={(e) => { e.stopPropagation(); handleOpenAddFriendDialog(group.id, group.name);}}
                         disabled={isSubmitting}
-                        aria-label="Add friend to group"
+                        aria-label="그룹에 친구 추가"
                       >
                         <UserPlus className="h-4 w-4 text-muted-foreground hover:text-primary" />
                       </Button>
                     )}
                     {(group.isOwned || appUser?.role === 'admin') && (
-                      <Button variant="ghost" size="icon" className="h-7 w-7" onClick={(e) => { e.stopPropagation(); handleDeleteGroup(group.id);}} disabled={isSubmitting}>
+                      <Button variant="ghost" size="icon" className="h-7 w-7" aria-label={`${group.name} 그룹 제외`} onClick={(e) => { e.stopPropagation(); handleDeleteGroup(group.id);}} disabled={isSubmitting}>
                         {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4 text-destructive" />}
                       </Button>
                     )}
@@ -306,10 +305,10 @@ export default function FriendGroupListClient() {
                               <Button
                                 variant="ghost"
                                 size="icon"
-                                className="h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity"
+                                className="h-8 w-8 md:opacity-0 md:group-hover:opacity-100 focus-visible:opacity-100 transition-opacity"
                                 onClick={() => handleDeleteFriend(friend.id, friend.name)}
                                 disabled={isDeletingFriend === friend.id}
-                                aria-label={`Delete ${friend.name}`}
+                                aria-label={`${friend.name} 친구 제외`}
                               >
                                 {isDeletingFriend === friend.id ? <Loader2 className="h-4 w-4 animate-spin"/> : <Trash2 className="h-4 w-4 text-destructive" />}
                               </Button>
@@ -335,6 +334,7 @@ export default function FriendGroupListClient() {
                 <div className="flex items-center justify-between">
                    <button
                     onClick={() => handleSelectGroup(group.id)}
+                    aria-expanded={selectedGroupId === group.id}
                     className="flex-1 text-left font-medium hover:text-primary transition-colors flex items-center"
                   >
                     {selectedGroupId === group.id ? <ChevronDown className="h-4 w-4 mr-1" /> : <ChevronRight className="h-4 w-4 mr-1" />}
@@ -343,7 +343,7 @@ export default function FriendGroupListClient() {
                   <div className="flex items-center space-x-1">
                     {appUser?.role === 'admin' && (
                       <span className="text-xs text-muted-foreground mr-2">
-                        (소유자: {allUsers.find(u => u.id === group.ownerUserId)?.name || group.ownerUserId.substring(0,6) + '...'})
+                        (소유자: {group.ownerName || '그룹 소유자'})
                       </span>
                     )}
                     {appUser?.role === 'admin' && (
@@ -353,13 +353,13 @@ export default function FriendGroupListClient() {
                         className="h-7 w-7"
                         onClick={(e) => { e.stopPropagation(); handleOpenAddFriendDialog(group.id, group.name);}}
                         disabled={isSubmitting}
-                        aria-label="Add friend to group"
+                        aria-label="그룹에 친구 추가"
                       >
                         <UserPlus className="h-4 w-4 text-muted-foreground hover:text-primary" />
                       </Button>
                     )}
                     {appUser?.role === 'admin' && (
-                      <Button variant="ghost" size="icon" className="h-7 w-7" onClick={(e) => { e.stopPropagation(); handleDeleteGroup(group.id);}} disabled={isSubmitting}>
+                      <Button variant="ghost" size="icon" className="h-7 w-7" aria-label={`${group.name} 그룹 제외`} onClick={(e) => { e.stopPropagation(); handleDeleteGroup(group.id);}} disabled={isSubmitting}>
                         {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4 text-destructive" />}
                       </Button>
                     )}
@@ -381,10 +381,10 @@ export default function FriendGroupListClient() {
                               <Button
                                 variant="ghost"
                                 size="icon"
-                                className="h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity"
+                                className="h-8 w-8 md:opacity-0 md:group-hover:opacity-100 focus-visible:opacity-100 transition-opacity"
                                 onClick={() => handleDeleteFriend(friend.id, friend.name)}
                                 disabled={isDeletingFriend === friend.id}
-                                aria-label={`Delete ${friend.name}`}
+                                aria-label={`${friend.name} 친구 제외`}
                               >
                                 {isDeletingFriend === friend.id ? <Loader2 className="h-4 w-4 animate-spin"/> : <Trash2 className="h-4 w-4 text-destructive" />}
                               </Button>
@@ -401,7 +401,8 @@ export default function FriendGroupListClient() {
         </div>
       )}
 
-      {groups.length === 0 && !isLoading && (
+      {loadError && <div role="alert" className="space-y-3 py-6 text-center"><p>{loadError}</p><Button variant="outline" onClick={() => void fetchData()}>다시 시도</Button></div>}
+      {groups.length === 0 && !isLoading && !loadError && (
         <p className="text-center text-muted-foreground">표시할 그룹이 없습니다. 새 그룹을 만들어 보세요!</p>
       )}
     </div>

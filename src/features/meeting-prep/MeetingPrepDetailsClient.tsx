@@ -60,7 +60,7 @@ export function MeetingPrepDetailsClient({ meetingPrepId, shareToken }: MeetingP
     setLoading(true);
     setError(null);
     try {
-      const prepResult = await getMeetingPrepByIdAction(meetingPrepId, currentUser?.uid);
+      const prepResult = await getMeetingPrepByIdAction(meetingPrepId, shareToken ? undefined : currentUser?.uid, shareToken);
       if (!prepResult.success || !prepResult.meetingPrep) {
         setError(prepResult.error || '모임 준비 정보를 불러오는데 실패했습니다.');
         setLoading(false);
@@ -76,7 +76,7 @@ export function MeetingPrepDetailsClient({ meetingPrepId, shareToken }: MeetingP
       }
 
       // Fetch all participant availabilities
-      const availResult = await getAllParticipantAvailabilitiesAction(meetingPrepId, currentUser?.uid);
+      const availResult = await getAllParticipantAvailabilitiesAction(meetingPrepId, shareToken ? undefined : currentUser?.uid, shareToken);
       if (availResult.success && availResult.availabilities) {
         setAllAvailabilities(availResult.availabilities);
       }
@@ -87,7 +87,7 @@ export function MeetingPrepDetailsClient({ meetingPrepId, shareToken }: MeetingP
     } finally {
       setLoading(false);
     }
-  }, [meetingPrepId, currentUser]);
+  }, [meetingPrepId, currentUser, shareToken]);
 
   useEffect(() => {
     if (!authLoading && (currentUser || isPublicShare)) {
@@ -101,13 +101,14 @@ export function MeetingPrepDetailsClient({ meetingPrepId, shareToken }: MeetingP
       const friendAvailability = allAvailabilities.find(avail => avail.selectedFriendId === selectedFriendId);
       if (friendAvailability) {
         setCurrentAvailability(new Set(friendAvailability.availableDates));
-        setPassword(friendAvailability.password || ''); // Load saved password if exists
       } else {
         setCurrentAvailability(new Set());
         setPassword('');
       }
     }
   }, [selectedFriendId, allAvailabilities]);
+
+  useEffect(() => { setPassword(''); }, [selectedFriendId]);
 
   const handleDateToggle = (date: Date) => {
     const dateString = format(date, 'yyyy-MM-dd');
@@ -226,11 +227,12 @@ export function MeetingPrepDetailsClient({ meetingPrepId, shareToken }: MeetingP
         password: password,
         availableDates,
         unavailableDates,
-      }, currentUser?.uid);
+      }, shareToken ? undefined : currentUser?.uid, shareToken);
 
       if (result.success) {
         toast({ title: "제출 완료", description: "참석 가능 날짜가 성공적으로 저장되었습니다." });
-        const availResult = await getAllParticipantAvailabilitiesAction(meetingPrepId, currentUser?.uid);
+        setPassword('');
+        const availResult = await getAllParticipantAvailabilitiesAction(meetingPrepId, shareToken ? undefined : currentUser?.uid, shareToken);
         if (availResult.success && availResult.availabilities) {
           setAllAvailabilities(availResult.availabilities);
         }
@@ -478,8 +480,8 @@ export function MeetingPrepDetailsClient({ meetingPrepId, shareToken }: MeetingP
             생성일: {format(meetingPrep.createdAt, 'yyyy년 MM월 dd일', { locale: ko })}
           </p>
           <p className="text-sm text-muted-foreground">
-            참여자: {meetingPrep.participantFriends && meetingPrep.participantFriends.length > 0 
-              ? `${meetingPrep.participantFriends.length}명 (${meetingPrep.participantFriends.map(f => f.name).join(', ')})` 
+            참여자: {meetingPrep.participantFriends && meetingPrep.participantFriends.length > 0
+              ? `${meetingPrep.participantFriends.length}명 (${meetingPrep.participantFriends.map(f => f.name).join(', ')})`
               : '없음'}
           </p>
           <p className="text-sm text-muted-foreground">
@@ -580,11 +582,13 @@ export function MeetingPrepDetailsClient({ meetingPrepId, shareToken }: MeetingP
             </div>
             {selectedFriendId && (
               <div>
-                <Label htmlFor="password">수정용 비밀번호 (숫자)</Label>
+                <Label htmlFor="password">수정용 비밀번호</Label>
                 <Input
                   id="password"
-                  type="number"
-                  placeholder="비밀번호 (숫자)"
+                  type="password"
+                  autoComplete="off"
+                  maxLength={256}
+                  placeholder="처음 저장할 때 정한 비밀번호"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   disabled={isSubmitting}

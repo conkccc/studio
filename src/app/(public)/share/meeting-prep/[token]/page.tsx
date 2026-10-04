@@ -1,5 +1,5 @@
 import { Metadata } from 'next';
-import { MeetingPrepDetailsClient } from '@/features/meeting-prep';
+import { MeetingPrepDetailsClient } from '@/features/meeting-prep/MeetingPrepDetailsClient';
 import { dbGetMeetingPrepByShareToken } from '@/lib/data-store';
 
 type ShareMeetingPrepPageProps = {

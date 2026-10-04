@@ -1,9 +1,9 @@
 'use client';
 
-import React, { useState, useTransition, useEffect } from 'react';
+import React, { useRef, useState, useEffect } from 'react';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useForm, Controller } from 'react-hook-form';
-import * as z from 'zod';
+import { createExpenseSchema, type ExpenseFormData } from '@/lib/expense-schema';
 import type { Friend, Expense } from '@/lib/types';
 import { updateExpenseAction } from '@/lib/actions';
 import { useToast } from '@/hooks/use-toast';
@@ -23,43 +23,6 @@ import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, Command
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
 
-const expenseSchema = z.object({
-  description: z.string().min(1, '설명을 입력해주세요.').max(100, '설명은 100자 이내여야 합니다.'),
-  totalAmount: z.preprocess(
-    (val) => (typeof val === 'string' ? parseFloat(val.replace(/,/g, '')) : val),
-    z.number().positive('금액은 0보다 커야 합니다.')
-  ),
-  paidById: z.string().min(1, '결제자를 선택해주세요.'),
-  splitType: z.enum(['equally', 'custom'], { required_error: '분배 방식을 선택해주세요.' }),
-  splitAmongIds: z.array(z.string()).optional(),
-  customSplits: z.array(z.object({
-    friendId: z.string(),
-    amount: z.preprocess(
-      (val) => (typeof val === 'string' ? parseFloat(val.replace(/,/g, '')) : val),
-      z.number().min(0, '금액은 0 이상이어야 합니다.')
-    ),
-  })).optional(),
-}).refine(data => {
-  if (data.splitType === 'equally' && (!data.splitAmongIds || data.splitAmongIds.length === 0)) {
-    return false;
-  }
-  return true;
-}, {
-  message: '균등 분배 시 최소 1명의 참여자를 선택해야 합니다.',
-  path: ['splitAmongIds'],
-}).refine(data => {
-  if (data.splitType === 'custom') {
-    if (!data.customSplits || data.customSplits.length === 0) return false;
-    const sum = data.customSplits.reduce((acc, split) => acc + split.amount, 0);
-    return Math.abs(sum - data.totalAmount) < 0.01;
-  }
-  return true;
-}, {
-  message: '개별 금액의 총합이 전체 금액과 일치해야 합니다.',
-  path: ['customSplits'],
-});
-
-type ExpenseFormData = z.infer<typeof expenseSchema>;
 
 interface EditExpenseDialogProps {
   expenseToEdit: Expense;
@@ -81,15 +44,16 @@ export function EditExpenseDialog({
   isMeetingSettled,
 }: EditExpenseDialogProps) {
   const [open, setOpen] = useState(false);
-  const [isPending, startTransition] = useTransition();
+  const [isPending, setIsPending] = useState(false);
+  const submitInFlight = useRef(false);
   const { toast } = useToast();
   const [payerSearchOpen, setPayerSearchOpen] = useState(false);
   const { currentUser } = useAuth();
 
   const form = useForm<ExpenseFormData>({
-    resolver: zodResolver(expenseSchema),
+    resolver: zodResolver(createExpenseSchema(participants.map(participant => participant.id))),
   });
-  
+
   useEffect(() => {
     if (open) {
       form.reset({
@@ -118,10 +82,13 @@ export function EditExpenseDialog({
     customSplitsError?.message ||
     (customSplitsError && typeof customSplitsError === 'object' && 'root' in customSplitsError
       ? (customSplitsError as { root?: { message?: string } }).root?.message
-      : undefined);
+      : undefined) || (customSplitsError ? '개별 금액은 0 이상인 정수 원으로 입력해주세요.' : undefined);
 
-  const onSubmit = (data: ExpenseFormData) => {
-    startTransition(async () => {
+  const onSubmit = async (data: ExpenseFormData) => {
+    if (submitInFlight.current || !canManage || isMeetingSettled) return;
+    submitInFlight.current = true;
+    setIsPending(true);
+    try {
       const payload: Partial<Omit<Expense, 'id' | 'createdAt' | 'meetingId'>> = {
         description: data.description,
         totalAmount: data.totalAmount,
@@ -142,19 +109,24 @@ export function EditExpenseDialog({
           variant: 'destructive',
         });
       }
-    });
+    } catch {
+      toast({ title: '오류', description: '지출을 수정하지 못했습니다. 입력한 내용을 확인하고 다시 시도해주세요.', variant: 'destructive' });
+    } finally {
+      submitInFlight.current = false;
+      setIsPending(false);
+    }
   };
-  
+
   const formatNumber = (value: number | string): string => {
     if (typeof value === 'number') return value.toLocaleString();
     if (value === '' || value === null || value === undefined) return '';
-    const num = parseFloat(String(value).replace(/,/g, ''));
+    const num = Number(String(value).replace(/,/g, ''));
     return isNaN(num) ? String(value) : num.toLocaleString();
   };
 
   return (
     <Dialog open={open} onOpenChange={(isOpen) => {
-        setOpen(isOpen);
+        if (!submitInFlight.current) setOpen(isOpen);
     }}>
       <DialogTrigger asChild>
         {triggerButton ? (
@@ -170,7 +142,7 @@ export function EditExpenseDialog({
           <DialogTitle>지출 항목 수정</DialogTitle>
           <DialogDescription>지출 내역을 수정하고 정산 방식을 선택하세요.</DialogDescription>
         </DialogHeader>
-        <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+        <form onSubmit={form.handleSubmit(onSubmit)} aria-busy={isPending} className="space-y-4">
           <ScrollArea className="h-[60vh] p-1 pr-3">
             <div className="space-y-4 p-2">
               <div>
@@ -180,21 +152,21 @@ export function EditExpenseDialog({
               </div>
 
               <div>
-                <Label htmlFor="edit-totalAmount">총 금액 <span className="text-destructive">*</span></Label>
+                <Label htmlFor="edit-totalAmount">총 금액 (원, 정수) <span className="text-destructive">*</span></Label>
                  <Controller
                     name="totalAmount"
                     control={form.control}
                     render={({ field }) => (
-                      <Input 
-                        id="edit-totalAmount" 
-                        type="text" 
+                      <Input
+                        id="edit-totalAmount"
+                        type="text" inputMode="numeric"
                         value={formatNumber(field.value)}
                         onChange={(e) => {
                           const rawValue = e.target.value.replace(/,/g, '');
-                          field.onChange(rawValue === '' ? 0 : parseFloat(rawValue));
+                          field.onChange(rawValue);
                         }}
                         onBlur={field.onBlur}
-                        disabled={isPending} 
+                        disabled={isPending}
                       />
                     )}
                   />
@@ -229,7 +201,7 @@ export function EditExpenseDialog({
                               {participants.map((participant) => (
                                 <CommandItem
                                   key={participant.id}
-                                  value={participant.name}
+                                  value={`${participant.name} ${participant.id}`}
                                   onSelect={() => {
                                     field.onChange(participant.id);
                                     setPayerSearchOpen(false);
@@ -308,19 +280,14 @@ export function EditExpenseDialog({
                           name={`customSplits.${index}.amount`}
                           control={form.control}
                           render={({ field }) => (
-                             <Input 
-                                type="text" 
-                                id={`edit-custom-${participant.id}`} 
-                                className="w-32 h-8 text-right" 
+                             <Input
+                                type="text" inputMode="numeric"
+                                id={`edit-custom-${participant.id}`}
+                                className="w-32 h-8 text-right"
                                 value={formatNumber(field.value)}
                                 onChange={(e) => {
                                   const rawValue = e.target.value.replace(/,/g, '');
-                                  const newAmount = rawValue === '' ? 0 : parseFloat(rawValue);
-                                  const currentCustomSplits = form.getValues('customSplits') || [];
-                                  const updatedSplits = currentCustomSplits.map((cs, i) => 
-                                    i === index ? {...cs, friendId: participant.id, amount: newAmount } : cs
-                                  );
-                                  form.setValue('customSplits', updatedSplits, { shouldValidate: true });
+                                  field.onChange(rawValue);
                                 }}
                                 onBlur={field.onBlur}
                                 disabled={isPending}

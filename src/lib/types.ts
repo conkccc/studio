@@ -1,4 +1,4 @@
-﻿export type User = {
+export type User = {
   id: string; // Firebase UID
   name?: string | null;
   email?: string | null;
@@ -8,6 +8,8 @@
 };
 
 export type FriendGroup = {
+  isArchived?: boolean;
+  ownerName?: string;
   id: string;
   name: string;
   ownerUserId: string; // 洹몃９ ?뚯쑀???좎?)
@@ -16,6 +18,7 @@ export type FriendGroup = {
 };
 
 export type Friend = {
+  isArchived?: boolean;
   id: string;
   name: string; // ?대쫫(?꾩닔)
   description?: string; // ?ㅻ챸(?좏깮)
@@ -41,6 +44,11 @@ export type Expense = {
 };
 
 export type Meeting = {
+  revision?: number;
+  creatorName?: string;
+  participantNames?: Record<string, string>;
+  participantSnapshot?: { id: string; name: string; description?: string }[];
+  settlementSnapshot?: import('./settlement').SettlementSnapshot;
   id: string;
   name: string;
   dateTime: Date;
@@ -52,6 +60,8 @@ export type Meeting = {
   participantIds: string[]; // Friend IDs
   createdAt: Date;
   useReserveFund: boolean;
+  /** Automatically cover all eligible participant expenses as expenses change. */
+  reserveFundCoverAll?: boolean;
   partialReserveFundAmount?: number;
   nonReserveFundParticipants: string[];
   refundReserveFundToNonParticipants?: boolean;
@@ -65,7 +75,7 @@ export type Meeting = {
   memo?: string;
   groupId: string; // ?뚯냽 移쒓뎄 洹몃９
   isTemporary?: boolean;
-  temporaryParticipants?: { name: string }[];
+  temporaryParticipants?: { id?: string; name: string }[];
   totalFee?: number;
   feePerPerson?: number;
   expenses?: Expense[]; // Added to track expenses within a meeting
@@ -87,6 +97,7 @@ export type MeetingPrep = {
 };
 
 export type ParticipantAvailability = {
+  passwordHash?: string;
   id: string; // Unique ID for each submission (e.g., meetingPrepId_selectedFriendId)
   meetingPrepId: string;
   selectedFriendId: string; // The ID of the friend who is submitting their availability

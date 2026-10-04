@@ -7,6 +7,8 @@ import { ensureUserPermission } from './permissions';
 
 // 모든 사용자 목록 가져오기
 export async function getAllUsersAction() {
+  const permissionCheck = await ensureUserPermission(undefined, { requiredRole: 'admin', entityName: '사용자 목록 조회' });
+  if (!permissionCheck.success) return { success: false, error: permissionCheck.error, users: [] };
   try {
     const users = await dbGetUsers();
     return { success: true, users };
@@ -32,6 +34,10 @@ export async function assignFriendGroupsToUserAction(payload: {
     return { success: false, error: "할당할 그룹 목록 정보가 필요합니다 (빈 배열일 수 있음)." };
   }
 
+  if (!Array.isArray(friendGroupIds) || friendGroupIds.length > 200 || friendGroupIds.some(id => typeof id !== 'string' || !id || id.length > 200)) {
+    return { success: false, error: '할당할 친구 그룹 목록 형식이 올바르지 않습니다.' };
+  }
+
   const permissionCheck = await ensureUserPermission(payload.adminUserId, {
     requiredRole: 'admin',
     entityName: '친구 그룹 할당'
@@ -42,7 +48,7 @@ export async function assignFriendGroupsToUserAction(payload: {
   }
 
   try {
-    const validFriendGroupIds = Array.isArray(friendGroupIds) ? friendGroupIds : [];
+    const validFriendGroupIds = [...new Set(friendGroupIds)];
 
     const updatedUser = await dbUpdateUser(targetUserId, { friendGroupIds: validFriendGroupIds });
     if (!updatedUser) {
@@ -62,10 +68,6 @@ export async function assignFriendGroupsToUserAction(payload: {
 
 // 사용자 역할 관리 액션
 export async function updateUserRoleAction(userIdToUpdate: string, newRole: User['role'], currentAdminId?: string | null) {
-  if (userIdToUpdate === currentAdminId) {
-    return { success: false, error: "자신의 역할은 변경할 수 없습니다." };
-  }
-
   const permissionCheck = await ensureUserPermission(currentAdminId, {
     requiredRole: 'admin',
     entityName: '사용자 역할 변경'
@@ -73,6 +75,13 @@ export async function updateUserRoleAction(userIdToUpdate: string, newRole: User
 
   if (!permissionCheck.success) {
     return { success: false, error: permissionCheck.error };
+  }
+
+  if (userIdToUpdate === permissionCheck.user?.id) {
+    return { success: false, error: '자신의 역할은 변경할 수 없습니다.' };
+  }
+  if (!['admin', 'user', 'viewer', 'none'].includes(newRole)) {
+    return { success: false, error: '유효하지 않은 사용자 역할입니다.' };
   }
 
   try {

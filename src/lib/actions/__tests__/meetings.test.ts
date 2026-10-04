@@ -1,383 +1,152 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import {
-  createMeetingAction,
-  deleteMeetingAction,
-  getMeetingByIdAction,
-  getMeetingsForUserAction,
-  updateMeetingAction
-} from '../meetings';
-import {
-  addMeeting,
-  deleteMeeting,
-  getMeetingById,
-  getMeetings,
-  getFriendGroupsByUser,
-  getUserById,
-  updateMeeting
-} from '../../data-store';
+import { createMeetingAction, updateMeetingAction, deleteMeetingAction, getMeetingDetailsAction, getMeetingsForUserAction, getDashboardAction } from '../meetings';
+import { addMeeting, updateMeeting, deleteMeeting, getMeetings, getUserById, getMeetingFriends, getExpensesByMeetingId, getFriendsByIds } from '../../data-store';
 import { ensureUserPermission } from '../permissions';
-import { revalidatePath } from 'next/cache';
-import { makeAdmin, makeMeeting, makeUser } from './fixtures';
+import { ensureMeetingAccess, ensureGroupAccess, accessibleGroupIds } from '../../services/access';
+import { makeUser, makeAdmin, makeMeeting, makeFriend, makeFriendGroup } from './fixtures';
 
-vi.mock('next/cache', () => ({
-  revalidatePath: vi.fn()
-}));
+vi.mock('next/cache', () => ({ revalidatePath: vi.fn() }));
+vi.mock('../../data-store', () => ({ addMeeting: vi.fn(), updateMeeting: vi.fn(), deleteMeeting: vi.fn(), getMeetings: vi.fn(), getUserById: vi.fn(), getMeetingFriends: vi.fn(), getExpensesByMeetingId: vi.fn(), getFriendsByIds: vi.fn() }));
+vi.mock('../permissions', () => ({ ensureUserPermission: vi.fn() }));
+vi.mock('../../services/access', () => ({ ensureMeetingAccess: vi.fn(), ensureGroupAccess: vi.fn(), accessibleGroupIds: vi.fn() }));
 
-vi.mock('../permissions', () => ({
-  ensureUserPermission: vi.fn()
-}));
+const user = makeUser({ id: 'owner', name: '모임장' });
+const meeting = makeMeeting({ creatorId: user.id, groupId: 'g1', participantIds: ['f1', 'f2'] });
+const friends = [makeFriend({ id: 'f1', groupId: 'g1' }), makeFriend({ id: 'f2', groupId: 'g1' })];
+const emptyPage = { meetings: [], totalCount: 0, availableYears: [2026], nextCursor: null, hasMore: false };
+const payload = { name: '모임', dateTime: new Date('2026-10-01T00:00:00Z'), locationName: '', participantIds: ['f1','f2'], groupId: 'g1', nonReserveFundParticipants: [], useReserveFund: false };
 
-vi.mock('../../data-store', () => ({
-  addMeeting: vi.fn(),
-  updateMeeting: vi.fn(),
-  deleteMeeting: vi.fn(),
-  getMeetingById: vi.fn(),
-  getMeetings: vi.fn(),
-  getFriendGroupsByUser: vi.fn(),
-  getUserById: vi.fn()
-}));
+beforeEach(() => {
+  vi.resetAllMocks();
+  vi.mocked(ensureUserPermission).mockResolvedValue({ success: true, user });
+  vi.mocked(ensureMeetingAccess).mockResolvedValue({ success: true, user, meeting });
+  vi.mocked(ensureGroupAccess).mockResolvedValue({ success: true, user, group: makeFriendGroup({ id:'g1', ownerUserId:user.id }) });
+  vi.mocked(accessibleGroupIds).mockResolvedValue(['g1']);
+  vi.mocked(getFriendsByIds).mockResolvedValue(friends);
+  vi.mocked(getMeetingFriends).mockResolvedValue(friends);
+  vi.mocked(getUserById).mockResolvedValue(user);
+  vi.mocked(getExpensesByMeetingId).mockResolvedValue([]);
+  vi.mocked(addMeeting).mockResolvedValue(meeting);
+  vi.mocked(updateMeeting).mockResolvedValue(meeting);
+  vi.mocked(getMeetings).mockResolvedValue(emptyPage);
+});
 
-const mockEnsureUserPermission = vi.mocked(ensureUserPermission);
-const mockAddMeeting = vi.mocked(addMeeting);
-const mockUpdateMeeting = vi.mocked(updateMeeting);
-const mockDeleteMeeting = vi.mocked(deleteMeeting);
-const mockGetMeetingById = vi.mocked(getMeetingById);
-const mockGetMeetings = vi.mocked(getMeetings);
-const mockGetFriendGroupsByUser = vi.mocked(getFriendGroupsByUser);
-const mockGetUserById = vi.mocked(getUserById);
-const mockRevalidatePath = vi.mocked(revalidatePath);
-
-describe('getMeetingByIdAction', () => {
-  beforeEach(() => {
-    mockGetMeetingById.mockReset();
+describe('meeting access and input boundary', () => {
+  it('persists automatic full support without requiring a manual amount on creation', async () => {
+    expect((await createMeetingAction({ ...payload, useReserveFund: true, reserveFundCoverAll: true }, user.id)).success).toBe(true);
+    expect(addMeeting).toHaveBeenCalledWith(expect.objectContaining({ useReserveFund: true, reserveFundCoverAll: true }));
+  });
+  it('preserves automatic mode on unrelated edits and allows explicitly switching to a manual amount', async () => {
+    vi.mocked(ensureMeetingAccess).mockResolvedValue({ success: true, user, meeting: { ...meeting, useReserveFund: true, reserveFundCoverAll: true } });
+    expect((await updateMeetingAction(meeting.id, { name: '변경한 모임' }, user.id)).success).toBe(true);
+    expect(updateMeeting).toHaveBeenLastCalledWith(meeting.id, expect.objectContaining({ reserveFundCoverAll: true }), 0);
+    expect((await updateMeetingAction(meeting.id, { reserveFundCoverAll: false, partialReserveFundAmount: 1000 }, user.id)).success).toBe(true);
+    expect(updateMeeting).toHaveBeenLastCalledWith(meeting.id, expect.objectContaining({ reserveFundCoverAll: false, partialReserveFundAmount: 1000 }), 0);
+  });
+  it('clears automatic mode if reserve-fund use is disabled', async () => {
+    expect((await createMeetingAction({ ...payload, reserveFundCoverAll: true }, user.id)).success).toBe(true);
+    expect(addMeeting).toHaveBeenCalledWith(expect.objectContaining({ useReserveFund: false, reserveFundCoverAll: false }));
+  });
+  it('denies private details before reading participant or expense data', async () => {
+    vi.mocked(ensureMeetingAccess).mockResolvedValue({ success:false, error:'권한 없음' });
+    expect((await getMeetingDetailsAction('private')).success).toBe(false);
+    expect(getMeetingFriends).not.toHaveBeenCalled();
+    expect(getExpensesByMeetingId).not.toHaveBeenCalled();
+  });
+  it('returns only the meeting references and creator name', async () => {
+    const result = await getMeetingDetailsAction(meeting.id);
+    expect(result.success).toBe(true);
+    if (!('meeting' in result)) throw new Error('details absent');
+    expect(result.meeting?.creatorName).toBe(user.name);
+    expect(result.friends).toEqual(friends);
+    expect(result).not.toHaveProperty('users');
+  });
+  it('uses the verified creator rather than a supplied creator/settlement fields', async () => {
+    await createMeetingAction({ ...payload, creatorId:'impostor', isSettled:true } as typeof payload, user.id);
+    expect(addMeeting).toHaveBeenCalledWith(expect.objectContaining({creatorId:user.id, participantSnapshot:expect.any(Array)}));
+    expect(vi.mocked(addMeeting).mock.calls[0][0]).not.toHaveProperty('isSettled');
+  });
+  it.each([NaN, -1, 1.5])('rejects invalid reserve amount %s on the server', async amount => {
+    expect((await createMeetingAction({ ...payload, useReserveFund:true, partialReserveFundAmount:amount },user.id)).success).toBe(false);
+    expect(addMeeting).not.toHaveBeenCalled();
+  });
+  it('rejects outside-group participants', async () => {
+    vi.mocked(getFriendsByIds).mockResolvedValue([friends[0], {...friends[1],groupId:'other'}]);
+    expect((await createMeetingAction(payload,user.id)).success).toBe(false);
+    expect(addMeeting).not.toHaveBeenCalled();
+  });
+  it('rejects archived participants in a new meeting', async () => {
+    vi.mocked(getFriendsByIds).mockResolvedValue([{...friends[0],isArchived:true},friends[1]]);
+    expect((await createMeetingAction(payload,user.id)).success).toBe(false);
+  });
+  it('prevents deleting a finalized meeting until explicit reopen', async () => {
+    vi.mocked(ensureMeetingAccess).mockResolvedValue({success:true,user,meeting:{...meeting,isSettled:true}});
+    expect((await deleteMeetingAction(meeting.id,user.id)).success).toBe(false);
+    expect(deleteMeeting).not.toHaveBeenCalled();
+  });
+  it('rejects direct changes to finalized contents', async () => {
+    vi.mocked(ensureMeetingAccess).mockResolvedValue({success:true,user,meeting:{...meeting,isSettled:true}});
+    expect((await updateMeetingAction(meeting.id,{name:'changed'},user.id)).success).toBe(false);
+    expect(updateMeeting).not.toHaveBeenCalled();
+  });
+  it('saves exactly four selected participants when editing a five-person meeting with no expenses', async () => {
+    const five = ['a', 'b', 'c', 'd', 'e'];
+    vi.mocked(ensureMeetingAccess).mockResolvedValue({ success: true, user, meeting: { ...meeting, participantIds: five } });
+    vi.mocked(getFriendsByIds).mockResolvedValue(five.slice(0, 4).map(id => makeFriend({ id, groupId: 'g1' })));
+    const result = await updateMeetingAction(meeting.id, { participantIds: five.slice(0, 4) }, user.id);
+    expect(result.success).toBe(true);
+    expect(updateMeeting).toHaveBeenCalledWith(meeting.id, expect.objectContaining({ participantIds: ['a', 'b', 'c', 'd'] }), 0);
   });
 
-  it('returns error when meeting is not found', async () => {
-    mockGetMeetingById.mockResolvedValue(null);
-    const result = await getMeetingByIdAction('m1');
-    expect(result.success).toBe(false);
-    expect(result.error).toContain('모임을 찾을 수 없습니다');
+  it('allows removing an unreferenced stale ID even when other participants have expenses', async () => {
+    vi.mocked(ensureMeetingAccess).mockResolvedValue({ success: true, user, meeting: { ...meeting, participantIds: ['f1', 'f2', 'missing'] } });
+    vi.mocked(getExpensesByMeetingId).mockResolvedValue([{ id: 'expense', meetingId: meeting.id, description: '식사', totalAmount: 1000, paidById: 'f1', splitType: 'equally', splitAmongIds: ['f1', 'f2'], createdAt: new Date() }]);
+    expect((await updateMeetingAction(meeting.id, { participantIds: ['f1', 'f2'] }, user.id)).success).toBe(true);
+    expect(updateMeeting).toHaveBeenCalledWith(meeting.id, expect.objectContaining({ participantIds: ['f1', 'f2'] }), 0);
   });
 
-  it('returns error when data-store throws', async () => {
-    mockGetMeetingById.mockRejectedValue(new Error('boom'));
-    const result = await getMeetingByIdAction('m1');
-    expect(result.success).toBe(false);
-    expect(result.error).toBe('boom');
+  it('rejects removing a participant whose historical expense share is still referenced', async () => {
+    vi.mocked(getExpensesByMeetingId).mockResolvedValue([{ id: 'expense', meetingId: meeting.id, description: '식사', totalAmount: 1000, paidById: 'f1', splitType: 'equally', splitAmongIds: ['f1', 'f2'], createdAt: new Date() }]);
+    expect((await updateMeetingAction(meeting.id, { participantIds: ['f1'] }, user.id)).success).toBe(false);
+    expect(updateMeeting).not.toHaveBeenCalled();
   });
 });
 
-describe('createMeetingAction', () => {
-  beforeEach(() => {
-    mockEnsureUserPermission.mockReset();
-    mockAddMeeting.mockReset();
-    mockRevalidatePath.mockReset();
+describe('meeting list query', () => {
+  it('does not read records after session denial', async () => {
+    vi.mocked(ensureUserPermission).mockResolvedValue({success:false,error:'로그인 필요'});
+    expect((await getMeetingsForUserAction({requestingUserId:'admin'})).success).toBe(false);
+    expect(getMeetings).not.toHaveBeenCalled();
   });
-
-  it('rejects missing groupId for non-temporary meeting', async () => {
-    mockEnsureUserPermission.mockResolvedValue({
-      success: true,
-      user: makeUser({ id: 'u1' })
-    });
-
-    const result = await createMeetingAction(
-      {
-        name: '모임',
-        dateTime: new Date(),
-        groupId: '',
-        locationName: '장소',
-        participantIds: [],
-        nonReserveFundParticipants: [],
-        useReserveFund: false,
-        isTemporary: false
-      },
-      'u1'
-    );
-
-    expect(result.success).toBe(false);
-    expect(result.error).toContain('친구 그룹을 선택');
+  it('applies every filter and cursor together with verified access scope', async () => {
+    await getMeetingsForUserAction({year:2026,groupId:'g1',type:'regular',status:'pending',search:'저녁',cursor:'cursor',limitParam:9});
+    expect(getMeetings).toHaveBeenCalledWith(expect.objectContaining({userId:user.id,userFriendGroupIds:['g1'],year:2026,groupId:'g1',type:'regular',status:'pending',search:'저녁',cursor:'cursor'}));
   });
-
-  it('creates temporary meeting without reserve fields', async () => {
-    mockEnsureUserPermission.mockResolvedValue({
-      success: true,
-      user: makeUser({ id: 'u1' })
-    });
-    mockAddMeeting.mockResolvedValue({ id: 'm1' });
-
-    await createMeetingAction(
-      {
-        name: '임시 모임',
-        dateTime: new Date(),
-        groupId: '',
-        locationName: '장소',
-        participantIds: ['f1'],
-        nonReserveFundParticipants: ['f1'],
-        useReserveFund: true,
-        partialReserveFundAmount: 1000,
-        isTemporary: true,
-        temporaryParticipants: [{ name: '임시' }],
-        totalFee: 20000
-      },
-      'u1'
-    );
-
-    const payload = mockAddMeeting.mock.calls[0][0];
-    expect(payload.isTemporary).toBe(true);
-    expect(payload.participantIds).toBeUndefined();
-    expect(payload.useReserveFund).toBeUndefined();
-    expect(payload.partialReserveFundAmount).toBeUndefined();
-    expect(payload.nonReserveFundParticipants).toBeUndefined();
+  it('supports a legitimate administrator scope', async () => {
+    vi.mocked(ensureUserPermission).mockResolvedValue({success:true,user:makeAdmin()});
+    await getMeetingsForUserAction({limitParam:9});
+    expect(getMeetings).toHaveBeenCalledWith(expect.objectContaining({userId:undefined,userFriendGroupIds:undefined}));
   });
-
-  it('returns error when data-store throws', async () => {
-    mockEnsureUserPermission.mockResolvedValue({
-      success: true,
-      user: makeUser({ id: 'u1' })
-    });
-    mockAddMeeting.mockRejectedValue(new Error('failed'));
-
-    const result = await createMeetingAction(
-      {
-        name: '모임',
-        dateTime: new Date(),
-        groupId: 'g1',
-        locationName: '장소',
-        participantIds: [],
-        nonReserveFundParticipants: [],
-        useReserveFund: false,
-        isTemporary: false
-      },
-      'u1'
-    );
-
-    expect(result.success).toBe(false);
-    expect(result.error).toBe('failed');
+  it('a viewer receives only assigned groups, excluding previously created meetings', async () => {
+    vi.mocked(ensureUserPermission).mockResolvedValue({success:true,user:makeUser({role:'viewer',friendGroupIds:['g1']})});
+    await getMeetingsForUserAction({limitParam:9});
+    expect(getMeetings).toHaveBeenCalledWith(expect.objectContaining({includeCreated:false,userFriendGroupIds:['g1']}));
+    await getDashboardAction();
+    expect(vi.mocked(getMeetings).mock.calls.every(([params])=>params?.includeCreated===false)).toBe(true);
   });
-});
-
-describe('updateMeetingAction', () => {
-  beforeEach(() => {
-    mockEnsureUserPermission.mockReset();
-    mockGetMeetingById.mockReset();
-    mockUpdateMeeting.mockReset();
-    mockRevalidatePath.mockReset();
+  it('preserves continuation when no matches are in the scan window', async () => {
+    vi.mocked(getMeetings).mockResolvedValue({...emptyPage,hasMore:true,nextCursor:'next'});
+    expect(await getMeetingsForUserAction({search:'rare'})).toMatchObject({success:true,meetings:[],hasMore:true,nextCursor:'next'});
   });
-
-  it('returns error when meeting does not exist', async () => {
-    mockGetMeetingById.mockResolvedValue(null);
-    const result = await updateMeetingAction('m1', { name: '수정' }, 'u1');
-    expect(result.success).toBe(false);
-    expect(result.error).toContain('수정할 모임을 찾을 수 없습니다');
+  it('rejects invalid search input before querying records', async () => {
+    expect((await getMeetingsForUserAction({year:NaN,search:'x'.repeat(101)})).success).toBe(false);
+    expect(getMeetings).not.toHaveBeenCalled();
   });
-
-  it('unsettles meeting when settled meeting reserve settings change', async () => {
-    mockGetMeetingById.mockResolvedValue(
-      makeMeeting({
-        creatorId: 'u1',
-        useReserveFund: true,
-        partialReserveFundAmount: 1000,
-        isSettled: true
-      })
-    );
-    mockEnsureUserPermission.mockResolvedValue({
-      success: true,
-      user: makeUser({ id: 'u1' })
-    });
-    mockUpdateMeeting.mockResolvedValue({ id: 'm1' });
-
-    const result = await updateMeetingAction('m1', { useReserveFund: false }, 'u1');
-
+  it('bounds each dashboard section independently', async () => {
+    const result=await getDashboardAction();
     expect(result.success).toBe(true);
-    expect(mockUpdateMeeting).toHaveBeenCalledWith('m1', expect.objectContaining({
-      isSettled: false,
-      settledReserveFundAmount: undefined,
-      settledReserveFundAt: undefined,
-    }));
-  });
-
-  it('returns error when updateMeeting returns null', async () => {
-    mockGetMeetingById.mockResolvedValue(makeMeeting({ creatorId: 'u1' }));
-    mockEnsureUserPermission.mockResolvedValue({
-      success: true,
-      user: makeUser({ id: 'u1' })
-    });
-    mockUpdateMeeting.mockResolvedValue(null);
-
-    const result = await updateMeetingAction('m1', { name: '수정' }, 'u1');
-
-    expect(result.success).toBe(false);
-    expect(result.error).toContain('모임 업데이트에 실패했습니다');
-  });
-});
-
-describe('deleteMeetingAction', () => {
-  beforeEach(() => {
-    mockEnsureUserPermission.mockReset();
-    mockGetMeetingById.mockReset();
-    mockDeleteMeeting.mockReset();
-    mockRevalidatePath.mockReset();
-  });
-
-  it('returns error when meeting does not exist', async () => {
-    mockGetMeetingById.mockResolvedValue(null);
-    const result = await deleteMeetingAction('m1', 'u1');
-    expect(result.success).toBe(false);
-    expect(result.error).toContain('삭제할 모임을 찾을 수 없습니다');
-  });
-
-  it('deletes meeting when authorized', async () => {
-    mockGetMeetingById.mockResolvedValue({
-      id: 'm1',
-      creatorId: 'u1'
-    });
-    mockEnsureUserPermission.mockResolvedValue({
-      success: true,
-      user: makeUser({ id: 'u1' })
-    });
-
-    const result = await deleteMeetingAction('m1', 'u1');
-
-    expect(result.success).toBe(true);
-    expect(mockDeleteMeeting).toHaveBeenCalledWith('m1');
-    expect(mockRevalidatePath).toHaveBeenCalledWith('/meetings');
-    expect(mockRevalidatePath).toHaveBeenCalledWith('/');
-  });
-
-  it('returns error when deleteMeeting throws', async () => {
-    mockGetMeetingById.mockResolvedValue({ id: 'm1', creatorId: 'u1' });
-    mockEnsureUserPermission.mockResolvedValue({
-      success: true,
-      user: makeUser({ id: 'u1' })
-    });
-    mockDeleteMeeting.mockRejectedValue(new Error('nope'));
-
-    const result = await deleteMeetingAction('m1', 'u1');
-
-    expect(result.success).toBe(false);
-    expect(result.error).toBe('nope');
-  });
-});
-
-describe('getMeetingsForUserAction', () => {
-  beforeEach(() => {
-    mockGetUserById.mockReset();
-    mockGetMeetings.mockReset();
-    mockGetFriendGroupsByUser.mockReset();
-    mockGetFriendGroupsByUser.mockResolvedValue([]);
-  });
-
-  it('returns error when user is not found', async () => {
-    mockGetUserById.mockResolvedValue(null);
-    const result = await getMeetingsForUserAction({ requestingUserId: 'missing' });
-    expect(result.success).toBe(false);
-    expect(result.error).toContain('User not found');
-  });
-
-  it('passes no filters for admin', async () => {
-    mockGetUserById.mockResolvedValue({
-      ...makeAdmin()
-    });
-    mockGetMeetings.mockResolvedValue({ meetings: [], totalCount: 0, availableYears: [] });
-
-    const result = await getMeetingsForUserAction({ requestingUserId: 'admin-1' });
-
-    expect(result.success).toBe(true);
-    expect(mockGetMeetings).toHaveBeenCalledWith({
-      year: undefined,
-      page: undefined,
-      limitParam: undefined,
-      userId: undefined,
-      userFriendGroupIds: undefined
-    });
-  });
-
-  it('passes user filters for non-admin', async () => {
-    mockGetUserById.mockResolvedValue({
-      ...makeUser({ id: 'u1', friendGroupIds: ['g1'] })
-    });
-    mockGetMeetings.mockResolvedValue({ meetings: [], totalCount: 0, availableYears: [] });
-
-    const result = await getMeetingsForUserAction({ requestingUserId: 'u1' });
-
-    expect(result.success).toBe(true);
-    expect(mockGetMeetings).toHaveBeenCalledWith({
-      year: undefined,
-      page: undefined,
-      limitParam: undefined,
-      userId: 'u1',
-      userFriendGroupIds: ['g1']
-    });
-  });
-
-  it('includes owned or accessible groups for non-admin meeting filters', async () => {
-    mockGetUserById.mockResolvedValue({
-      ...makeUser({ id: 'u1', friendGroupIds: [] })
-    });
-    mockGetFriendGroupsByUser.mockResolvedValue([
-      {
-        id: 'owned-g1',
-        name: 'Owned group',
-        ownerUserId: 'u1',
-        memberIds: [],
-        createdAt: new Date()
-      }
-    ]);
-    mockGetMeetings.mockResolvedValue({ meetings: [], totalCount: 0, availableYears: [] });
-
-    const result = await getMeetingsForUserAction({ requestingUserId: 'u1' });
-
-    expect(result.success).toBe(true);
-    expect(mockGetMeetings).toHaveBeenCalledWith({
-      year: undefined,
-      page: undefined,
-      limitParam: undefined,
-      userId: 'u1',
-      userFriendGroupIds: ['owned-g1']
-    });
-  });
-
-  it('keeps viewer meeting filters limited to referenced groups', async () => {
-    mockGetUserById.mockResolvedValue({
-      ...makeUser({ id: 'u1', role: 'viewer', friendGroupIds: ['referenced-g1'] })
-    });
-    mockGetFriendGroupsByUser.mockResolvedValue([
-      {
-        id: 'owned-g1',
-        name: 'Owned group',
-        ownerUserId: 'u1',
-        memberIds: [],
-        createdAt: new Date()
-      },
-      {
-        id: 'referenced-g1',
-        name: 'Referenced group',
-        ownerUserId: 'admin-1',
-        memberIds: [],
-        createdAt: new Date()
-      }
-    ]);
-    mockGetMeetings.mockResolvedValue({ meetings: [], totalCount: 0, availableYears: [] });
-
-    const result = await getMeetingsForUserAction({ requestingUserId: 'u1' });
-
-    expect(result.success).toBe(true);
-    expect(mockGetMeetings).toHaveBeenCalledWith({
-      year: undefined,
-      page: undefined,
-      limitParam: undefined,
-      userId: 'u1',
-      userFriendGroupIds: ['referenced-g1']
-    });
-  });
-
-  it('returns error when data-store throws', async () => {
-    mockGetUserById.mockResolvedValue(makeUser({ id: 'u1' }));
-    mockGetMeetings.mockRejectedValue(new Error('db error'));
-
-    const result = await getMeetingsForUserAction({ requestingUserId: 'u1' });
-
-    expect(result.success).toBe(false);
-    expect(result.error).toBe('db error');
+    expect(getMeetings).toHaveBeenCalledTimes(3);
+    expect(vi.mocked(getMeetings).mock.calls.every(([params])=>params?.limitParam===3)).toBe(true);
+    expect(getMeetings).toHaveBeenCalledWith(expect.objectContaining({ascending:true,after:expect.any(Date)}));
   });
 });

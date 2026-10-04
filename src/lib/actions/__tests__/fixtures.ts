@@ -1,4 +1,4 @@
-import type { Expense, FriendGroup, Meeting, User } from '../../types';
+import type { Expense, Friend, FriendGroup, Meeting, User } from '../../types';
 
 export const makeUser = (overrides: Partial<User> = {}): User => ({
   id: 'u1',
@@ -9,6 +9,10 @@ export const makeUser = (overrides: Partial<User> = {}): User => ({
 
 export const makeAdmin = (overrides: Partial<User> = {}): User =>
   makeUser({ id: 'admin-1', role: 'admin', ...overrides });
+
+export const makeFriend = (overrides: Partial<Friend> = {}): Friend => ({
+  id: 'f1', name: '친구', groupId: 'g1', createdAt: new Date(), ...overrides,
+});
 
 export const makeMeeting = (overrides: Partial<Meeting> = {}): Meeting => ({
   id: 'm1',

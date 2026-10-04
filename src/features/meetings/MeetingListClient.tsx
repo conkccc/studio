@@ -1,44 +1,18 @@
 'use client';
 
-import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
-import type { Meeting, Friend, FriendGroup, User } from '@/lib/types';
-import { MeetingCard } from './MeetingCard';
-import { useRouter, usePathname, useSearchParams } from 'next/navigation';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { ChevronLeft, ChevronRight, PlusCircle, Loader2 } from 'lucide-react';
-import { useAuth } from '@/contexts/AuthContext';
-import { getMeetingsForUserAction, getAllUsersAction } from '@/lib/actions';
-import { useToast } from '@/hooks/use-toast';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
+import type { Friend, FriendGroup, Meeting } from '@/lib/types';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-
-const MEETINGS_PER_PAGE = 9;
-const FILTER_STORAGE_KEY = 'meetings:filters:v2';
-const MEETINGS_DATA_TIMEOUT_MS = 15000;
-
-const withTimeout = async <T,>(promise: Promise<T>, label: string): Promise<T> => {
-  let timeoutId: ReturnType<typeof setTimeout> | undefined;
-  const timeoutPromise = new Promise<never>((_, reject) => {
-    timeoutId = setTimeout(() => {
-      reject(new Error(`${label} timed out.`));
-    }, MEETINGS_DATA_TIMEOUT_MS);
-  });
-
-  try {
-    return await Promise.race([promise, timeoutPromise]);
-  } finally {
-    if (timeoutId) {
-      clearTimeout(timeoutId);
-    }
-  }
-};
+import { useAuth } from '@/contexts/AuthContext';
+import { getMeetingsForUserAction } from '@/lib/actions';
+import { MeetingCard } from './MeetingCard';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { ChevronLeft, ChevronRight, Loader2, PlusCircle, Search, RotateCcw } from 'lucide-react';
+import { useMeetingListPreferences } from '@/hooks/use-meeting-list-preferences';
 
 interface MeetingListClientProps {
   allFriends: Friend[];
@@ -46,301 +20,151 @@ interface MeetingListClientProps {
   filtersReady: boolean;
 }
 
+// Preserve actual cursors so navigation works even on a page without matches.
+function readHistory(value: string | null): string[] {
+  try {
+    const parsed: unknown = JSON.parse(value || '[]');
+    return Array.isArray(parsed) && parsed.every(item => typeof item === 'string') ? parsed.slice(-100) : [];
+  } catch { return []; }
+}
+
 export function MeetingListClient({ allFriends, friendGroups, filtersReady }: MeetingListClientProps) {
   const { currentUser, loading: authLoading, appUser } = useAuth();
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const { toast } = useToast();
-
   const [meetings, setMeetings] = useState<Meeting[]>([]);
-  const [allUsers, setAllUsers] = useState<User[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
   const [availableYears, setAvailableYears] = useState<number[]>([]);
-  const [totalPages, setTotalPages] = useState(0);
-  const inFlightKeyRef = useRef<string | null>(null);
-  const requestSeqRef = useRef(0);
-  const usersInFlightRef = useRef(false);
-  const usersLoadedRef = useRef(false);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [retry, setRetry] = useState(0);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [hasMore, setHasMore] = useState(false);
+  const [search, setSearch] = useState(searchParams.get('search') || '');
+  const requestSequence = useRef(0);
+  const query = searchParams.toString();
+  const preferences = useMeetingListPreferences(authLoading ? undefined : currentUser?.uid, query, pathname, router.replace);
+  const year = searchParams.get('year') || 'all';
+  const type = searchParams.get('type') || 'all';
+  const groupId = searchParams.get('groupId') || 'all';
+  const status = searchParams.get('status') || 'all';
+  const history = readHistory(searchParams.get('history'));
+  const hasFilters = [year, type, groupId, status].some(value => value !== 'all') || Boolean(searchParams.get('search'));
 
-  const selectedYearParam = searchParams.get('year');
-  const currentPageParam = searchParams.get('page');
-
-  const activeYear = useMemo(() => selectedYearParam ?? "all", [selectedYearParam]);
-  const currentPage = useMemo(() => parseInt(currentPageParam || "1", 10), [currentPageParam]);
-
-  const [filterType, setFilterType] = useState<'all' | 'regular' | 'temporary'>('all');
-  const [selectedGroupId, setSelectedGroupId] = useState<string>('all');
-  const [hydrated, setHydrated] = useState(false);
-  const [pendingYear, setPendingYear] = useState<string | null>(null);
-
-  const handleYearChange = useCallback((year: string) => {
-    const current = new URLSearchParams(Array.from(searchParams.entries()));
-    if (year === "all" || !year) {
-      current.delete("year");
-    } else {
-      current.set("year", year);
-    }
-    current.set("page", "1");
-    router.push(`${pathname}?${current.toString()}`);
-  }, [pathname, router, searchParams]);
+  useEffect(() => { setSearch(searchParams.get('search') || ''); }, [searchParams]);
 
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem(FILTER_STORAGE_KEY);
-      if (raw) {
-        const stored = JSON.parse(raw) as {
-          year?: string;
-          type?: 'all' | 'regular' | 'temporary';
-          groupId?: string;
-        };
-        if (stored.type) setFilterType(stored.type);
-        if (stored.groupId) setSelectedGroupId(stored.groupId);
-        if (stored.year && !searchParams.get('year')) {
-          setPendingYear(stored.year);
-        }
-      }
-    } catch {
-      // ignore corrupted storage
-    } finally {
-      setHydrated(true);
-    }
-  }, [searchParams]);
-
-  useEffect(() => {
-    if (!pendingYear) return;
-    handleYearChange(pendingYear);
-    setPendingYear(null);
-  }, [handleYearChange, pendingYear]);
-
-  useEffect(() => {
-    if (!hydrated) return;
-    try {
-      const value = JSON.stringify({
-        year: activeYear,
-        type: filterType,
-        groupId: selectedGroupId,
-      });
-      localStorage.setItem(FILTER_STORAGE_KEY, value);
-    } catch {
-      // ignore storage errors
-    }
-  }, [activeYear, filterType, selectedGroupId, hydrated]);
-
-  const fetchMeetings = useCallback(async () => {
-    if (authLoading || !filtersReady || !hydrated || pendingYear) {
-      return;
-    }
-    if (!currentUser?.uid) {
+    if (authLoading) return;
+    const sequence = ++requestSequence.current;
+    if (!currentUser) {
       setMeetings([]);
-      setTotalPages(0);
-      setAvailableYears([]);
       setIsLoading(false);
       return;
     }
-    const yearToFetch = activeYear === "all" ? undefined : parseInt(activeYear, 10);
-    const requestKey = `${currentUser.uid}|${yearToFetch ?? 'all'}|${currentPage}`;
-    if (inFlightKeyRef.current === requestKey) {
-      return;
-    }
-    inFlightKeyRef.current = requestKey;
-    const requestSeq = requestSeqRef.current + 1;
-    requestSeqRef.current = requestSeq;
+    if (!preferences.ready) return;
+    let active = true;
     setIsLoading(true);
-    try {
-      const meetingsResult = await withTimeout(
-        getMeetingsForUserAction({
-          requestingUserId: currentUser.uid,
-          year: yearToFetch,
-          page: currentPage,
-          limitParam: MEETINGS_PER_PAGE,
-        }),
-        'Meetings fetch'
-      );
-      if (requestSeqRef.current !== requestSeq) return;
-      if (meetingsResult.success) {
-        setMeetings(meetingsResult.meetings || []);
-        setTotalPages(Math.ceil((meetingsResult.totalCount || 0) / MEETINGS_PER_PAGE));
-        setAvailableYears(meetingsResult.availableYears || []);
-      } else {
-        toast({ title: "오류", description: meetingsResult.error || "모임 목록을 불러오는데 실패했습니다.", variant: "destructive" });
-        setMeetings([]);
-        setTotalPages(0);
+    setError(null);
+    const params = new URLSearchParams(query);
+    const numericYear = Number(params.get('year'));
+    const fetchData = async () => {
+      let timeout: ReturnType<typeof setTimeout> | undefined;
+      try {
+        const result = await Promise.race([
+          getMeetingsForUserAction({
+            year: Number.isInteger(numericYear) && numericYear > 1900 ? numericYear : undefined,
+            limitParam: 9,
+            groupId: params.get('groupId') || undefined,
+            type: params.get('type') === 'regular' ? 'regular' : params.get('type') === 'temporary' ? 'temporary' : undefined,
+            status: params.get('status') === 'pending' ? 'pending' : params.get('status') === 'finalized' ? 'finalized' : undefined,
+            search: params.get('search') || undefined,
+            cursor: params.get('cursor') || undefined,
+          }),
+          new Promise<never>((_, reject) => { timeout = setTimeout(() => reject(new Error('목록 조회 시간이 초과되었습니다. 다시 시도해주세요.')), 15000); }),
+        ]);
+        if (!active || requestSequence.current !== sequence) return;
+        if (!result.success) throw new Error(('error' in result && result.error) || '모임 목록을 불러오지 못했습니다.');
+        setMeetings(result.meetings || []);
+        setAvailableYears(result.availableYears || []);
+        setNextCursor(result.nextCursor || null);
+        setHasMore(Boolean(result.hasMore));
+      } catch (cause) {
+        if (!active || requestSequence.current !== sequence) return;
+        setError(cause instanceof Error ? cause.message : '모임 목록을 불러오지 못했습니다.');
+      } finally {
+        clearTimeout(timeout);
+        if (active && requestSequence.current === sequence) setIsLoading(false);
       }
-    } catch {
-      if (requestSeqRef.current !== requestSeq) return;
-      toast({ title: "오류", description: "데이터 로딩 중 예기치 않은 오류 발생.", variant: "destructive" });
-      setMeetings([]);
-      setTotalPages(0);
-    } finally {
-      if (requestSeqRef.current === requestSeq) {
-        setIsLoading(false);
-        inFlightKeyRef.current = null;
-      }
-    }
-  }, [currentUser, authLoading, activeYear, currentPage, toast, filtersReady, hydrated, pendingYear]);
+    };
+    void fetchData();
+    return () => { active = false; };
+  }, [authLoading, currentUser?.uid, query, retry, preferences.ready]);
 
-  const fetchUsers = useCallback(async () => {
-    if (authLoading || !currentUser?.uid || usersLoadedRef.current || usersInFlightRef.current) {
-      return;
-    }
-    usersInFlightRef.current = true;
-    try {
-      const usersResult = await withTimeout(getAllUsersAction(), 'Users fetch');
-      if (usersResult.success) {
-        setAllUsers(usersResult.users || []);
-      } else {
-        toast({ title: "오류", description: usersResult.error || "사용자 목록을 불러오는데 실패했습니다.", variant: "destructive" });
-        setAllUsers([]);
-      }
-    } catch {
-      toast({ title: "오류", description: "사용자 목록 로딩 중 예기치 않은 오류 발생.", variant: "destructive" });
-      setAllUsers([]);
-    } finally {
-      usersLoadedRef.current = true;
-      usersInFlightRef.current = false;
-    }
-  }, [currentUser, authLoading, toast]);
-
-  useEffect(() => {
-    fetchMeetings();
-  }, [fetchMeetings]);
-
-  useEffect(() => {
-    fetchUsers();
-  }, [fetchUsers]);
-
-  const handlePageChange = (newPage: number) => {
-    if (newPage < 1 || newPage > totalPages) return;
-    const current = new URLSearchParams(Array.from(searchParams.entries()));
-    current.set("page", newPage.toString());
-    router.push(`${pathname}?${current.toString()}`);
+  const navigate = (params: URLSearchParams) => router.push(`${pathname}${params.size ? `?${params}` : ''}`, { scroll: false });
+  const changeFilter = (key: string, value: string) => {
+    const params = new URLSearchParams(query);
+    if (!value || value === 'all') params.delete(key); else params.set(key, value);
+    ['cursor', 'history', 'page'].forEach(key => params.delete(key));
+    navigate(params);
   };
-
-  const clientFilteredMeetings = useMemo(() => {
-    if (filterType === 'regular') {
-      return meetings.filter(meeting => !meeting.isTemporary);
-    }
-    if (filterType === 'temporary') {
-      return meetings.filter(meeting => meeting.isTemporary);
-    }
-    return meetings;
-  }, [meetings, filterType]);
-
-  const groupFilteredMeetings = useMemo(() => {
-    if (selectedGroupId === 'all') return clientFilteredMeetings;
-    if (selectedGroupId === 'none') {
-      return clientFilteredMeetings.filter(meeting => meeting.isTemporary || !meeting.groupId);
-    }
-    return clientFilteredMeetings.filter(meeting => meeting.groupId === selectedGroupId);
-  }, [clientFilteredMeetings, selectedGroupId]);
-
-  useEffect(() => {
-    if (!filtersReady || !hydrated) return;
-    if (selectedGroupId === 'all' || selectedGroupId === 'none') return;
-    const exists = friendGroups.some(group => group.id === selectedGroupId);
-    if (!exists) setSelectedGroupId('all');
-  }, [friendGroups, selectedGroupId, filtersReady, hydrated]);
-
-  const canCreateMeeting = appUser && (appUser.role === 'user' || appUser.role === 'admin');
+  const submitSearch = (event: FormEvent) => { event.preventDefault(); changeFilter('search', search.trim()); };
+  const nextPage = () => {
+    if (!nextCursor) return;
+    const params = new URLSearchParams(query);
+    params.set('history', JSON.stringify([...history, params.get('cursor') || '']));
+    params.set('cursor', nextCursor);
+    navigate(params);
+  };
+  const previousPage = () => {
+    const params = new URLSearchParams(query);
+    const previous = [...history];
+    const cursor = previous.pop();
+    if (cursor) params.set('cursor', cursor); else params.delete('cursor');
+    if (previous.length) params.set('history', JSON.stringify(previous)); else params.delete('history');
+    navigate(params);
+  };
 
   return (
     <Card>
-      <CardHeader className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <CardTitle>모임 목록 {activeYear !== "all" && `(${activeYear}년)`}</CardTitle>
-        <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
-          {canCreateMeeting && (
-            <Button asChild className="w-full sm:w-auto">
-              <Link href="/meetings/new">
-                <PlusCircle className="h-4 w-4 mr-2" /> 새 모임 만들기
-              </Link>
-            </Button>
-          )}
-           <div className="w-full sm:w-auto sm:min-w-[150px]">
-            <Select onValueChange={handleYearChange} value={activeYear}>
-              <SelectTrigger id="year-filter" aria-label="연도 필터">
-                <SelectValue placeholder="연도 선택..." />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">전체 연도</SelectItem>
-                {availableYears.map(year => (
-                  <SelectItem key={year} value={year.toString()}>{year}년</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="w-full sm:w-auto sm:min-w-[150px]">
-            <Select value={filterType} onValueChange={(value: 'all' | 'regular' | 'temporary') => setFilterType(value)}>
-              <SelectTrigger id="type-filter" aria-label="모임 종류 필터">
-                <SelectValue placeholder="모임 종류 선택" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">전체 종류</SelectItem>
-                <SelectItem value="regular">일반 모임</SelectItem>
-                <SelectItem value="temporary">임시 모임</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="w-full sm:w-auto sm:min-w-[180px]">
-            <Select value={selectedGroupId} onValueChange={setSelectedGroupId}>
-              <SelectTrigger id="group-filter" aria-label="친구 그룹 필터">
-                <SelectValue placeholder="친구 그룹 선택" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">전체 그룹</SelectItem>
-                <SelectItem value="none">미지정/임시</SelectItem>
-                {friendGroups.map(group => (
-                  <SelectItem key={group.id} value={group.id}>{group.name}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
+      <CardHeader className="space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <CardTitle>모임 목록</CardTitle>
+          {appUser && ['admin', 'user'].includes(appUser.role) && <Button asChild><Link href="/meetings/new"><PlusCircle className="mr-2 h-4 w-4" />새 모임</Link></Button>}
         </div>
+        <form className="flex gap-2" onSubmit={submitSearch} role="search">
+          <Input aria-label="모임 이름 검색" placeholder="모임 이름으로 검색" value={search} onChange={event => setSearch(event.target.value)} maxLength={100} />
+          <Button type="submit" variant="outline"><Search className="mr-2 h-4 w-4" />검색</Button>
+        </form>
+        <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
+          <Select value={year} onValueChange={value => changeFilter('year', value)}>
+            <SelectTrigger aria-label="연도"><SelectValue /></SelectTrigger>
+            <SelectContent><SelectItem value="all">전체 연도</SelectItem>{Array.from(new Set([...availableYears, ...(year !== 'all' ? [Number(year)] : [])])).filter(Number.isFinite).map(value => <SelectItem key={value} value={String(value)}>{value}년</SelectItem>)}</SelectContent>
+          </Select>
+          <Select value={type} onValueChange={value => changeFilter('type', value)}>
+            <SelectTrigger aria-label="모임 종류"><SelectValue /></SelectTrigger>
+            <SelectContent><SelectItem value="all">전체 종류</SelectItem><SelectItem value="regular">일반 모임</SelectItem><SelectItem value="temporary">임시 모임</SelectItem></SelectContent>
+          </Select>
+          <Select value={groupId} onValueChange={value => changeFilter('groupId', value)} disabled={!filtersReady}>
+            <SelectTrigger aria-label="친구 그룹"><SelectValue placeholder="그룹 불러오는 중" /></SelectTrigger>
+            <SelectContent><SelectItem value="all">전체 그룹</SelectItem><SelectItem value="none">미지정 / 임시</SelectItem>{friendGroups.map(group => <SelectItem key={group.id} value={group.id}>{group.name}</SelectItem>)}</SelectContent>
+          </Select>
+          <Select value={status} onValueChange={value => changeFilter('status', value)}>
+            <SelectTrigger aria-label="정산 상태"><SelectValue /></SelectTrigger>
+            <SelectContent><SelectItem value="all">전체 정산 상태</SelectItem><SelectItem value="pending">정산 미확정</SelectItem><SelectItem value="finalized">정산 확정</SelectItem></SelectContent>
+          </Select>
+        </div>
+        {hasFilters && <Button variant="ghost" size="sm" className="self-start" onClick={() => { preferences.resetRememberedSelection(); navigate(new URLSearchParams()); }}><RotateCcw className="mr-2 h-4 w-4" />필터 초기화</Button>}
       </CardHeader>
-      <CardContent>
-        {isLoading ? (
-          <div className="flex justify-center items-center h-64"><Loader2 className="h-12 w-12 animate-spin text-primary" /></div>
-        ) : groupFilteredMeetings.length > 0 ? (
-          <>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 pt-4">
-              {groupFilteredMeetings.map((meeting) => (
-                <MeetingCard key={meeting.id} meeting={meeting} allFriends={allFriends} allUsers={allUsers} />
-              ))}
-            </div>
-            {totalPages > 1 && (
-              <div className="flex items-center justify-center space-x-2 pt-8">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => handlePageChange(currentPage - 1)}
-                  disabled={currentPage === 1}
-                >
-                  <ChevronLeft className="h-4 w-4" />
-                  이전
-                </Button>
-                <span className="text-sm text-muted-foreground">
-                  {currentPage} / {totalPages}
-                </span>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => handlePageChange(currentPage + 1)}
-                  disabled={currentPage === totalPages}
-                >
-                  다음
-                  <ChevronRight className="h-4 w-4" />
-                </Button>
-              </div>
-            )}
-          </>
-        ) : (
-          <div className="text-center py-12 text-muted-foreground">
-            <p className="text-lg mb-2">
-              {activeYear !== "all" ? `${activeYear}년에는 해당하는 모임이 없습니다.` : '표시할 모임이 없습니다.'}
-            </p>
-            {canCreateMeeting && <p>새로운 모임을 만들어 친구들과의 추억을 기록해보세요!</p>}
-          </div>
-        )}
+      <CardContent aria-busy={isLoading}>
+        {isLoading ? <div role="status" className="flex h-48 items-center justify-center gap-2 text-muted-foreground"><Loader2 className="h-6 w-6 animate-spin" />모임을 불러오고 있습니다.</div>
+          : error ? <div role="alert" className="space-y-3 py-10 text-center"><p>{error}</p><Button variant="outline" onClick={() => setRetry(value => value + 1)}>다시 시도</Button></div>
+          : meetings.length ? <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">{meetings.map(meeting => <MeetingCard key={meeting.id} meeting={meeting} allFriends={allFriends} />)}</div>
+          : <div className="space-y-2 py-10 text-center text-muted-foreground"><p>{hasFilters ? '조건에 맞는 모임이 없습니다.' : '등록된 모임이 없습니다.'}</p>{hasMore && <p className="text-sm">다음 목록에서도 같은 조건으로 찾아볼 수 있습니다.</p>}</div>}
+        {!isLoading && !error && (history.length > 0 || hasMore) && <div className="flex items-center justify-center gap-4 pt-6">
+          <Button variant="outline" onClick={previousPage} disabled={!history.length}><ChevronLeft className="mr-1 h-4 w-4" />이전</Button>
+          <span className="text-sm text-muted-foreground">{history.length + 1}번째 목록</span>
+          <Button variant="outline" onClick={nextPage} disabled={!hasMore || !nextCursor}>다음<ChevronRight className="ml-1 h-4 w-4" /></Button>
+        </div>}
       </CardContent>
     </Card>
   );

@@ -1,91 +1,28 @@
 'use client';
 
-import React, { useState, useTransition, useEffect, useCallback, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useForm, Controller, useWatch } from 'react-hook-form';
-import * as z from 'zod';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { CalendarIcon, Check, ChevronsUpDown, Loader2, MapPinIcon, Eye, ExternalLink } from 'lucide-react';
-import { Calendar } from '@/components/ui/calendar';
+import { Check, ChevronsUpDown, Loader2, MapPinIcon, Eye, ExternalLink } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { format } from 'date-fns';
-import { ko } from 'date-fns/locale';
 import type { Expense, Friend, Meeting, FriendGroup } from '@/lib/types';
 import { createMeetingAction, updateMeetingAction } from '@/lib/actions';
 import { useToast } from '@/hooks/use-toast';
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { Switch } from '@/components/ui/switch';
-import { Checkbox } from "@/components/ui/checkbox";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
-import { Loader } from '@googlemaps/js-api-loader';
-import usePlacesAutocomplete, { getGeocode, getLatLng } from 'use-places-autocomplete';
+import { useGoogleMaps } from '@/hooks/use-google-maps';
+import { meetingSchema, type MeetingFormData } from './meeting-form-schema';
+import { SelectDate } from './MeetingDateInput';
+import { LocationSearchInput } from './MeetingLocationInput';
+import { MeetingReserveFundSection } from './MeetingReserveFundSection';
+import { useMeetingDraft } from './use-meeting-draft';
 import { calculateReserveFundBreakdown } from '@/lib/reserve-fund-settlement';
-
-const meetingSchemaBase = z.object({
-  name: z.string().min(1, '모임 이름을 입력해주세요.').max(100, '모임 이름은 100자 이내여야 합니다.'),
-  dateTime: z.date({ required_error: '시작 날짜와 시간을 선택해주세요.' }),
-  endTime: z.date().optional(),
-  locationName: z.string().max(100, '장소 이름은 100자 이내여야 합니다.').optional(),
-  locationCoordinates: z.object({ lat: z.number(), lng: z.number() }).optional(),
-  participantIds: z.array(z.string()).optional(),
-  useReserveFund: z.boolean().optional(),
-  isTemporary: z.boolean().optional(),
-  temporaryParticipants: z.array(z.object({ name: z.string().min(1, '임시 참여자 이름은 비워둘 수 없습니다.') })).optional(),
-  totalFee: z.number().min(0, '총 회비는 0 이상이어야 합니다.').optional(),
-  feePerPerson: z.number().min(0, '1인당 회비는 0 이상이어야 합니다.').optional(),
-  partialReserveFundAmount: z.preprocess(
-    (val) => (val === '' || val === undefined || val === null ? undefined : Number(String(val).replace(/,/g, ''))),
-    z.number().min(0, '금액은 0 이상이어야 합니다.').optional()
-  ),
-  nonReserveFundParticipants: z.array(z.string()).optional(),
-  refundReserveFundToNonParticipants: z.boolean().optional(),
-  reserveFundRefundRecipientIds: z.array(z.string()).optional(),
-  memo: z.string().max(2000, '메모는 2000자 이내여야 합니다.').optional(),
-});
-
-const meetingSchema = meetingSchemaBase
-  .refine(data => {
-    if (!data.isTemporary && data.useReserveFund && (data.partialReserveFundAmount === undefined || data.partialReserveFundAmount <= 0)) {
-      return false;
-    }
-    return true;
-  }, {
-    message: '회비 사용 시, 사용할 회비 금액을 0보다 크게 입력해야 합니다.',
-    path: ['partialReserveFundAmount'],
-  })
-  .refine(data => {
-    if (data.endTime && data.dateTime && data.dateTime >= data.endTime) {
-      return false;
-    }
-    return true;
-  }, {
-    message: '종료 시간은 시작 시간보다 이후여야 합니다.',
-    path: ['endTime'],
-  })
-  .refine(data => {
-    if (!data.isTemporary && (!data.participantIds || data.participantIds.length === 0)) {
-      return false;
-    }
-    return true;
-  }, {
-    message: '기존 모임에는 참여자를 최소 1명 선택해주세요.',
-    path: ['participantIds'],
-  })
-  .refine(data => {
-    if (data.isTemporary && (!data.temporaryParticipants || data.temporaryParticipants.length === 0)) {
-      return false;
-    }
-    return true;
-  }, {
-    message: '임시 모임에는 참여자를 최소 1명 추가해주세요.',
-    path: ['temporaryParticipants'],
-  });
-
-type MeetingFormData = z.infer<typeof meetingSchema>;
 
 interface MeetingFormProps {
   friends: Friend[];
@@ -100,190 +37,6 @@ interface MeetingFormProps {
   onGroupChange?: (id: string | null) => void;
 }
 
-const googleMapsLibrariesForSearch: ("places" | "maps" | "marker")[] = ["places", "maps", "marker"];
-
-interface LocationSearchInputProps {
-  form: ReturnType<typeof useForm<MeetingFormData>>;
-  isPending: boolean;
-  isMapsLoaded: boolean;
-  mapsLoadError: Error | null;
-  onLocationSelected: (coords: { lat: number; lng: number } | undefined, name: string) => void;
-}
-
-function LocationSearchInput({ form, isPending, isMapsLoaded, mapsLoadError, onLocationSelected }: LocationSearchInputProps) {
-  const {
-    ready,
-    value: placesValue,
-    suggestions: { status: placesStatus, data: placesData },
-    setValue: setPlacesValue,
-    clearSuggestions: clearPlacesSuggestions,
-  } = usePlacesAutocomplete({
-    requestOptions: {},
-    debounce: 300,
-  });
-
-  const { toast } = useToast();
-  const [inputFocused, setInputFocused] = useState(false);
-  
-  useEffect(() => {
-    const formLocationName = form.getValues('locationName');
-    if (formLocationName !== placesValue && !inputFocused) {
-      setPlacesValue(formLocationName || '', false);
-    }
-  }, [form, placesValue, setPlacesValue, inputFocused]);
-
-  const handlePlaceSelect = async (suggestion: google.maps.places.AutocompletePrediction) => {
-    setPlacesValue(suggestion.description, false);
-    clearPlacesSuggestions();
-    form.setValue('locationName', suggestion.description, { shouldValidate: true });
-
-    try {
-      const results = await getGeocode({ address: suggestion.description });
-      const { lat, lng } = await getLatLng(results[0]);
-      form.setValue('locationCoordinates', { lat, lng }, { shouldValidate: true });
-      onLocationSelected({lat, lng}, suggestion.description);
-      toast({ title: "장소 선택됨", description: `${suggestion.description}` });
-    } catch (error) {
-      console.error("Error getting coordinates for selected place: ", error);
-      toast({ title: "오류", description: "장소의 좌표를 가져오는 데 실패했습니다.", variant: "destructive" });
-      form.setValue('locationCoordinates', undefined, { shouldValidate: true });
-      onLocationSelected(undefined, suggestion.description);
-    }
-  };
-
-  return (
-    <div className="relative">
-      <div className="relative flex items-center">
-        <MapPinIcon className="absolute left-2 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-        <Input
-          id="locationNameInput"
-          value={placesValue}
-          onChange={(e) => {
-            setPlacesValue(e.target.value);
-            form.setValue('locationName', e.target.value, { shouldValidate: true });
-             if (!e.target.value) {
-                form.setValue('locationCoordinates', undefined, { shouldValidate: true });
-                onLocationSelected(undefined, '');
-            }
-          }}
-          onFocus={() => setInputFocused(true)}
-          onBlur={() => {
-            setInputFocused(false);
-          }}
-          disabled={!ready || isPending}
-          className="pl-8"
-          placeholder={!isMapsLoaded ? "지도 API 로딩 중..." : mapsLoadError ? `지도 API 로드 실패: ${mapsLoadError.message.substring(0,30)}...` : "장소 검색..."}
-          autoComplete="off"
-        />
-      </div>
-      {form.formState.errors.locationName && <p className="text-sm text-destructive mt-1">{form.formState.errors.locationName.message}</p>}
-      {form.formState.errors.locationCoordinates && <p className="text-sm text-destructive mt-1">{form.formState.errors.locationCoordinates.message}</p>}
-
-      {ready && isMapsLoaded && !mapsLoadError && placesStatus === 'OK' && placesData.length > 0 && (
-        <ul className="absolute z-10 w-full bg-background border border-border rounded-md shadow-lg mt-1 max-h-60 overflow-y-auto">
-          {placesData.map((suggestion) => {
-            const {
-              place_id,
-              structured_formatting: { main_text, secondary_text },
-            } = suggestion;
-            return (
-              <li
-                key={place_id}
-                onClick={() => handlePlaceSelect(suggestion)}
-                className="p-2 hover:bg-accent cursor-pointer"
-              >
-                <strong>{main_text}</strong> <small>{secondary_text}</small>
-              </li>
-            );
-          })}
-        </ul>
-      )}
-    </div>
-  );
-}
-
-interface SelectDateProps {
-  isEditMode: boolean;
-  isPending: boolean;
-  initialData?: Meeting;
-  timeValue?: Date;
-  checkStartTimeValue?: Date;
-  varName: string;
-  titleNode: React.ReactNode;
-  openState: boolean;
-  openStateFunc: (state: boolean) => void;
-  onDateChanged: (date: Date | undefined) => void;
-}
-function SelectDate(props: SelectDateProps) {
-  return (
-    <div>
-        <Label htmlFor={props.varName} className={cn((props.isEditMode && props.initialData?.isSettled) && "text-muted-foreground")}>{props.titleNode}</Label>
-        <Popover open={props.openState} onOpenChange={props.openStateFunc}>
-          <PopoverTrigger asChild>
-            <Button
-              variant="outline"
-              className={cn(
-                'w-full justify-start text-left font-normal',
-                !props.timeValue && 'text-muted-foreground',
-                (props.isEditMode && props.initialData?.isSettled) && "bg-muted/50 cursor-not-allowed"
-              )}
-              disabled={props.isPending || (props.isEditMode && props.initialData?.isSettled)}
-            >
-              <CalendarIcon className="mr-2 h-4 w-4" />
-              {
-                (() => {
-                  const val = props.timeValue;
-                  return val instanceof Date && !isNaN(val.getTime())
-                    ? format(val, 'PPP HH:mm', { locale: ko })
-                    : <span>날짜 및 시간 선택</span>;
-                })()
-              }
-            </Button>
-          </PopoverTrigger>
-          <PopoverContent className="w-auto p-0">
-            <Calendar
-              mode="single"
-              selected={props.timeValue}
-              onSelect={(date) => {
-                if (date) {
-                  const currentTime = props.timeValue || props.checkStartTimeValue || (() => { const t = new Date(); t.setHours(11, 0, 0, 0); return t; })();
-                  const newDateTime = new Date(date);
-                  newDateTime.setHours(currentTime.getHours(), currentTime.getMinutes(), 0, 0);
-                  props.onDateChanged(newDateTime);
-                } else if (props.checkStartTimeValue) {
-                  props.onDateChanged(undefined);
-                }
-              }}
-              initialFocus
-              disabled={props.isPending || (props.isEditMode && props.initialData?.isSettled)}
-              fromDate={props.checkStartTimeValue ? new Date(props.checkStartTimeValue) : undefined}
-            />
-            <div className="p-3 border-t border-border space-y-2">
-              <Label htmlFor="startTime">시간</Label>
-              <Input
-                type="time"
-                id="startTime"
-                defaultValue={props.timeValue ? format(props.timeValue, "HH:mm") : (props.checkStartTimeValue ? format(props.checkStartTimeValue, "HH:mm") : "11:00")}
-                onChange={(e) => {
-                  const newTime = e.target.value;
-                  const currentDateTime = props.timeValue || new Date();
-                  const [hours, minutes] = newTime.split(':').map(Number);
-                  const newDate = new Date(currentDateTime);
-                  newDate.setHours(hours, minutes, 0, 0);
-                  props.onDateChanged(newDate);
-                }}
-                className="w-full"
-                disabled={props.isPending || (props.isEditMode && props.initialData?.isSettled)}
-              />
-              <Button size="sm" onClick={() => props.openStateFunc(false)} className="w-full" type="button" disabled={(props.isEditMode && props.initialData?.isSettled)}>확인</Button>
-            </div>
-          </PopoverContent>
-        </Popover>
-      </div>
-  );
-}
-
-
 export function CreateMeetingForm({
   friends,
   expenses = [],
@@ -296,28 +49,29 @@ export function CreateMeetingForm({
   onGroupChange,
 }: MeetingFormProps) {
   const router = useRouter();
-  const [isPending, startTransition] = useTransition();
+  const [isPending, setIsPending] = useState(false);
   const { toast } = useToast();
   const [participantSearchOpen, setParticipantSearchOpen] = useState(false);
   const [startDateOpen, setStartDateOpen] = useState(false);
   const [endDateOpen, setEndDateOpen] = useState(false);
 
-  const [temporaryParticipants, setTemporaryParticipants] = useState<{ name: string }[]>([]);
-  const [addedTempParticipantsOnEdit, setAddedTempParticipantsOnEdit] = useState<{ name: string }[]>([]);
+  const [temporaryParticipants, setTemporaryParticipants] = useState<{ id?: string; name: string }[]>([]);
+  const [addedTempParticipantsOnEdit, setAddedTempParticipantsOnEdit] = useState<{ id?: string; name: string }[]>([]);
   const [currentTempParticipantName, setCurrentTempParticipantName] = useState('');
   const [tempMeetingFeeType, setTempMeetingFeeType] = useState<'total' | 'perPerson'>('total');
   const [tempMeetingTotalFee, setTempMeetingTotalFee] = useState<number | undefined>(undefined);
   const [tempMeetingFeePerPerson, setTempMeetingFeePerPerson] = useState<number | undefined>(undefined);
 
-  const [isMapsLoaded, setIsMapsLoaded] = useState(false);
-  const [mapsLoadError, setMapsLoadError] = useState<Error | null>(null);
   const [showMap, setShowMap] = useState(false);
+  const [placeSearchEnabled, setPlaceSearchEnabled] = useState(false);
+  const { isMapsLoaded, mapsLoadError, retryMaps } = useGoogleMaps(showMap || placeSearchEnabled);
 
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<google.maps.Map | null>(null);
   const markerInstanceRef = useRef<google.maps.marker.AdvancedMarkerElement | null>(null);
 
   const [groupPopoverOpen, setGroupPopoverOpen] = useState(false);
+  const pendingGroupSelection = useRef<{ id: string; sawLoading: boolean } | null>(null);
 
   const form = useForm<MeetingFormData>({
     resolver: zodResolver(meetingSchema),
@@ -329,6 +83,7 @@ export function CreateMeetingForm({
       locationCoordinates: initialData.locationCoordinates,
       participantIds: initialData.participantIds || [],
       useReserveFund: initialData.useReserveFund || false,
+      reserveFundCoverAll: initialData.reserveFundCoverAll || false,
       partialReserveFundAmount: initialData.partialReserveFundAmount === undefined ? undefined : Number(initialData.partialReserveFundAmount),
       nonReserveFundParticipants: initialData.nonReserveFundParticipants || [],
       refundReserveFundToNonParticipants: initialData.refundReserveFundToNonParticipants || false,
@@ -346,6 +101,7 @@ export function CreateMeetingForm({
       locationCoordinates: undefined,
       participantIds: friends.map(f => f.id),
       useReserveFund: false,
+      reserveFundCoverAll: false,
       partialReserveFundAmount: undefined,
       nonReserveFundParticipants: [],
       refundReserveFundToNonParticipants: false,
@@ -358,8 +114,37 @@ export function CreateMeetingForm({
     },
   });
 
+  const { draft, saved, dismissDraft, discardDraft, completeDraft } = useMeetingDraft(form, currentUserId, !isEditMode, currentMeetingGroupId);
+
+  const restoreDraft = () => {
+    if (!draft) return;
+    if (draft.groupId && !draft.values.isTemporary && !groups.some(group => group.id === draft.groupId)) {
+      toast({ title: '그룹 확인 필요', description: '임시 저장한 그룹을 사용할 수 없습니다. 그룹을 다시 선택해주세요.', variant: 'destructive' });
+    }
+    const validGroupId = groups.some(group => group.id === draft.groupId) ? draft.groupId : null;
+    onGroupChange?.(validGroupId);
+    form.reset({ ...form.getValues(), ...draft.values });
+    setTemporaryParticipants(draft.values.temporaryParticipants || []);
+    setTempMeetingTotalFee(draft.values.totalFee);
+    setTempMeetingFeePerPerson(draft.values.feePerPerson);
+    setTempMeetingFeeType(draft.values.feePerPerson !== undefined ? 'perPerson' : 'total');
+    dismissDraft();
+  };
+
   const watchUseReserveFund = useWatch({ control: form.control, name: 'useReserveFund' });
+  const watchReserveFundCoverAll = useWatch({ control: form.control, name: 'reserveFundCoverAll' });
   const watchParticipantIds = useWatch({ control: form.control, name: 'participantIds' });
+
+  useEffect(() => {
+    const pending = pendingGroupSelection.current;
+    if (!pending || pending.id !== currentMeetingGroupId) return;
+    if (isLoadingFriends) { pending.sawLoading = true; return; }
+    if (friends.some(friend => friend.groupId !== pending.id)) return;
+    if (!friends.length && !pending.sawLoading) return;
+    form.setValue('participantIds', friends.filter(friend => !friend.isArchived).map(friend => friend.id), { shouldValidate: true, shouldDirty: true });
+    form.setValue('nonReserveFundParticipants', [], { shouldValidate: true });
+    pendingGroupSelection.current = null;
+  }, [currentMeetingGroupId, friends, isLoadingFriends, form]);
   const watchedLocationCoordinates = useWatch({ control: form.control, name: 'locationCoordinates' });
   const watchLocationName = useWatch({ control: form.control, name: 'locationName' });
   const watchedIsTemporary = useWatch({ control: form.control, name: 'isTemporary' });
@@ -390,6 +175,7 @@ export function CreateMeetingForm({
       calculateReserveFundBreakdown({
         settings: {
           useReserveFund: watchUseReserveFund || false,
+          reserveFundCoverAll: watchReserveFundCoverAll || false,
           partialReserveFundAmount: watchPartialReserveFundAmount,
           nonReserveFundParticipants: watchNonReserveFundParticipants || [],
           refundReserveFundToNonParticipants: watchRefundReserveFundToNonParticipants || false,
@@ -405,49 +191,15 @@ export function CreateMeetingForm({
       watchRefundReserveFundToNonParticipants,
       watchReserveFundRefundRecipientIds,
       watchUseReserveFund,
+      watchReserveFundCoverAll,
       selectedParticipantIds,
     ]
   );
 
   useEffect(() => {
-    const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
-    if (!apiKey) {
-      const errorMsg = "Google Maps API key is not configured. Please set NEXT_PUBLIC_GOOGLE_MAPS_API_KEY.";
-      console.error(errorMsg);
-      setMapsLoadError(new Error(errorMsg));
-      setIsMapsLoaded(false);
-      return;
-    }
-
-    const loader = new Loader({
-      apiKey: apiKey,
-      version: "weekly",
-      libraries: googleMapsLibrariesForSearch,
-    });
-
-    loader.load()
-      .then(() => {
-        if (!window.google || !window.google.maps || !window.google.maps.places || !window.google.maps.marker || !window.google.maps.marker.AdvancedMarkerElement) {
-          const errorMsg = "Google Maps API 또는 필수 라이브러리(places, maps, marker) 로드 실패. API 키 제한 또는 GCP 콘솔 설정을 확인하세요.";
-          console.error(errorMsg);
-          setMapsLoadError(new Error(errorMsg));
-          setIsMapsLoaded(false);
-          return;
-        }
-        setIsMapsLoaded(true);
-        setMapsLoadError(null);
-      })
-      .catch(e => {
-        console.error("Google Maps API 로드 실패. 오류 상세:", e);
-        setMapsLoadError(e as Error);
-        setIsMapsLoaded(false);
-      });
-  }, []);
-
-  useEffect(() => {
     if (showMap && isMapsLoaded && !mapsLoadError && mapContainerRef.current && window.google?.maps?.Map && window.google?.maps?.marker?.AdvancedMarkerElement) {
         const { AdvancedMarkerElement } = window.google.maps.marker;
-        
+
         const defaultCenter = { lat: 37.5665, lng: 126.9780 };
         const currentCoords = watchedLocationCoordinates || defaultCenter;
         const zoomLevel = watchedLocationCoordinates ? 15 : 10;
@@ -458,7 +210,7 @@ export function CreateMeetingForm({
                 zoom: zoomLevel,
                 disableDefaultUI: true,
                 zoomControl: true,
-                mapId: 'NBBANG_MAP_ID_CREATE_FORM', 
+                mapId: 'NBBANG_MAP_ID_CREATE_FORM',
             });
         } else {
             mapInstanceRef.current.setCenter(currentCoords);
@@ -483,7 +235,7 @@ export function CreateMeetingForm({
             }
         }
     } else if (!showMap && markerInstanceRef.current) {
-        markerInstanceRef.current.map = null; 
+        markerInstanceRef.current.map = null;
     }
 
     return () => {
@@ -499,11 +251,11 @@ export function CreateMeetingForm({
       if (initialData.isTemporary) {
         if (initialData.totalFee !== undefined) {
           setTempMeetingFeeType('total');
-          setTempMeetingTotalFee(initialData.totalFee || undefined);
+          setTempMeetingTotalFee(initialData.totalFee);
           setTempMeetingFeePerPerson(undefined);
         } else if (initialData.feePerPerson !== undefined) {
           setTempMeetingFeeType('perPerson');
-          setTempMeetingFeePerPerson(initialData.feePerPerson || undefined);
+          setTempMeetingFeePerPerson(initialData.feePerPerson);
           setTempMeetingTotalFee(undefined);
         } else {
           setTempMeetingFeeType('total');
@@ -542,6 +294,7 @@ export function CreateMeetingForm({
   }, [form, watchRefundReserveFundToNonParticipants, watchReserveFundRefundRecipientIds, watchUseReserveFund]);
 
   useEffect(() => {
+    if (isLoadingFriends || !friends.length) return;
     const validRecipientIds = (watchReserveFundRefundRecipientIds || []).filter(
       id => !(watchParticipantIds || []).includes(id) && friends.some(friend => friend.id === id)
     );
@@ -549,7 +302,7 @@ export function CreateMeetingForm({
     if (validRecipientIds.length !== (watchReserveFundRefundRecipientIds || []).length) {
       form.setValue('reserveFundRefundRecipientIds', validRecipientIds, { shouldValidate: true });
     }
-  }, [form, friends, watchParticipantIds, watchReserveFundRefundRecipientIds]);
+  }, [form, friends, isLoadingFriends, watchParticipantIds, watchReserveFundRefundRecipientIds]);
 
   const handleApplyTotalReserveFundAmount = useCallback(() => {
     form.setValue('partialReserveFundAmount', reserveFundPreview.applicableContributionTotal, {
@@ -558,7 +311,8 @@ export function CreateMeetingForm({
     });
   }, [form, reserveFundPreview.applicableContributionTotal]);
 
-  const onSubmit = (data: MeetingFormData) => {
+  const onSubmit = async (data: MeetingFormData) => {
+    if (isPending) return;
     const resolvedGroupId = currentMeetingGroupId || (initialData?.groupId ?? '');
     if (!data.isTemporary && (!resolvedGroupId || !resolvedGroupId.trim())) {
       toast({
@@ -569,7 +323,8 @@ export function CreateMeetingForm({
       return;
     }
 
-    startTransition(async () => {
+    setIsPending(true);
+    try {
       type PayloadType = Omit<Meeting, 'id' | 'createdAt' | 'isSettled' | 'isShareEnabled' | 'shareToken' | 'shareExpiryDate'> & { creatorId: string };
       let payloadForDb: PayloadType;
 
@@ -589,6 +344,7 @@ export function CreateMeetingForm({
           feePerPerson: data.feePerPerson,
           participantIds: [],
           useReserveFund: false,
+          reserveFundCoverAll: false,
           partialReserveFundAmount: undefined,
           nonReserveFundParticipants: [],
           refundReserveFundToNonParticipants: false,
@@ -604,6 +360,7 @@ export function CreateMeetingForm({
           participantIds: data.participantIds || [],
           creatorId: currentUserId,
           useReserveFund: data.useReserveFund || false,
+          reserveFundCoverAll: Boolean(data.useReserveFund && data.reserveFundCoverAll),
           partialReserveFundAmount:
             data.useReserveFund && typeof data.partialReserveFundAmount === 'number' && !isNaN(data.partialReserveFundAmount)
               ? data.partialReserveFundAmount
@@ -643,6 +400,7 @@ export function CreateMeetingForm({
         }
         const result = await createMeetingAction(payloadForDb, currentUserId);
         if (result.success && result.meeting) {
+          completeDraft();
           toast({ title: '성공', description: '새로운 모임이 생성되었습니다.' });
           router.push(`/meetings/${result.meeting.id}`);
         } else {
@@ -653,7 +411,9 @@ export function CreateMeetingForm({
           });
         }
       }
-    });
+    } catch (cause) {
+      toast({ title: '저장 실패', description: cause instanceof Error ? cause.message : '모임 저장 중 오류가 발생했습니다. 작성 내용은 유지됩니다.', variant: 'destructive' });
+    } finally { setIsPending(false); }
   };
 
   const handleLocationSelected = useCallback((coords: { lat: number; lng: number } | undefined, name: string) => {
@@ -682,12 +442,13 @@ export function CreateMeetingForm({
         toast({title: "알림", description: "이미 추가된 참여자입니다.", variant: "default"});
         return;
       }
-      const newList = [...temporaryParticipants, { name: participant }];
+      const newParticipant = { id: crypto.randomUUID(), name: participant };
+      const newList = [...temporaryParticipants, newParticipant];
       setTemporaryParticipants(newList);
       form.setValue('temporaryParticipants', newList, { shouldValidate: true });
       setCurrentTempParticipantName('');
 
-      setAddedTempParticipantsOnEdit([...addedTempParticipantsOnEdit, { name: participant }]);
+      setAddedTempParticipantsOnEdit(previous => [...previous, newParticipant]);
     }
   };
 
@@ -706,16 +467,15 @@ export function CreateMeetingForm({
       onSubmit={form.handleSubmit(
         onSubmit,
         (formErrors) => {
-          const firstKey = Object.keys(formErrors)[0];
           const firstError = Object.values(formErrors)[0];
           if (firstError) {
-            const msg = 
+            const msg =
               typeof firstError.message === 'string'
                 ? firstError.message
                 : '입력값을 확인해주세요.';
             toast({
               title: '입력 오류',
-              description: `${firstKey}: ${msg}`,
+              description: msg,
               variant: 'destructive',
             });
           }
@@ -723,6 +483,11 @@ export function CreateMeetingForm({
       )}
       className="space-y-6"
     >
+      {!isEditMode && draft && <div className="space-y-2 rounded-lg border bg-secondary/30 p-4" role="status">
+        <p className="text-sm">이전에 작성하던 모임이 있습니다.</p>
+        <div className="flex flex-wrap gap-2"><Button type="button" size="sm" onClick={restoreDraft}>작성 내용 복원</Button><Button type="button" variant="ghost" size="sm" onClick={discardDraft}>저장 내용 지우기</Button></div>
+      </div>}
+      {!isEditMode && !draft && saved && <p className="text-xs text-muted-foreground" role="status">작성 내용이 이 브라우저에 임시 저장되었습니다.</p>}
       <div>
         <Label htmlFor="name" className={cn((isEditMode && initialData?.isSettled) && "text-muted-foreground")}>모임 이름 <span className="text-destructive">*</span></Label>
         <Input id="name" {...form.register('name')} disabled={isPending || (isEditMode && initialData?.isSettled)} />
@@ -754,8 +519,10 @@ export function CreateMeetingForm({
           <Popover open={groupPopoverOpen} onOpenChange={setGroupPopoverOpen}>
             <PopoverTrigger asChild>
               <Button
+                type="button"
                 variant="outline"
                 role="combobox"
+                aria-label="친구 그룹 선택"
                 aria-expanded={groupPopoverOpen}
                 className="w-full justify-between"
                 onClick={() => setGroupPopoverOpen((prev) => !prev)}
@@ -777,10 +544,12 @@ export function CreateMeetingForm({
                         key={group.id}
                         value={group.name}
                         onSelect={() => {
+                          if (group.id !== currentMeetingGroupId) {
+                            pendingGroupSelection.current = { id: group.id, sawLoading: false };
+                            form.setValue('participantIds', [], { shouldValidate: true, shouldDirty: true });
+                          }
                           if (onGroupChange) onGroupChange(group.id);
                           setGroupPopoverOpen(false);
-                          const groupFriends = Array.isArray(group.memberIds) ? group.memberIds : [];
-                          form.setValue('participantIds', groupFriends, { shouldValidate: true });
                         }}
                       >
                         <Check className={cn("mr-2 h-4 w-4", currentMeetingGroupId === group.id ? "opacity-100" : "opacity-0")} />
@@ -823,430 +592,8 @@ export function CreateMeetingForm({
           openStateFunc={setEndDateOpen}
           onDateChanged={date => form.setValue('endTime', date, { shouldValidate: true })}
         />
-        {form.formState.errors.dateTime && <p className="text-sm text-destructive mt-1">{form.formState.errors.dateTime.message}</p>}
+        {form.formState.errors.endTime && <p className="text-sm text-destructive mt-1">{form.formState.errors.endTime.message}</p>}
       </div>
-
-      <div className="space-y-2">
-        <Label htmlFor="locationNameInput" className={cn((isEditMode && initialData?.isSettled) && "text-muted-foreground")}>장소</Label>
-        {isMapsLoaded && !mapsLoadError ? (
-          <LocationSearchInput
-            form={form}
-            isPending={isPending || (isEditMode && (initialData?.isSettled ?? false))}
-            isMapsLoaded={isMapsLoaded}
-            mapsLoadError={mapsLoadError}
-            onLocationSelected={handleLocationSelected}
-          />
-        ) : (
-            <div className="relative flex items-center">
-                <MapPinIcon className="absolute left-2 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                <Input
-                    id="locationNameFallbackInput"
-                    value={watchLocationName}
-                    onChange={(e) => form.setValue('locationName', e.target.value, {shouldValidate: true})}
-                    disabled={isPending || (isEditMode && initialData?.isSettled)}
-                    className={cn("pl-8", (isEditMode && initialData?.isSettled) && "bg-muted/50 cursor-not-allowed")}
-                    placeholder={mapsLoadError ? `지도 API 로드 실패: ${mapsLoadError.message.substring(0,30)}...` : "지도 API 로딩 중..."}
-                />
-            </div>
-        )}
-        {form.formState.errors.locationName && <p className="text-sm text-destructive mt-1">{form.formState.errors.locationName.message}</p>}
-
-        <div className="flex flex-wrap gap-2 mt-2">
-            <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={handleToggleMap}
-                className="sm:w-auto"
-                disabled={isPending || (isEditMode && initialData?.isSettled) || !watchedLocationCoordinates}
-            >
-                <Eye className="mr-2 h-4 w-4" />
-                {showMap ? '지도 숨기기' : '지도 보기'}
-            </Button>
-            {(watchLocationName || watchedLocationCoordinates) && (
-                <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={() => {
-                    const placeName = watchLocationName;
-                    let url = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(placeName || '')}`;
-                    if (watchedLocationCoordinates) {
-                        url = `https://www.google.com/maps/place/${encodeURIComponent(placeName || '')}/@${watchedLocationCoordinates.lat},${watchedLocationCoordinates.lng},15z/data=!3m1!4b1!4m6!3m5!1s0x0:0x0!7e2!8m2!3d${watchedLocationCoordinates.lat}!4d${watchedLocationCoordinates.lng}`;
-                        if (placeName && watchedLocationCoordinates) {
-                             url = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(placeName)}&ll=${watchedLocationCoordinates.lat},${watchedLocationCoordinates.lng}`;
-                        } else if (placeName) {
-                             url = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(placeName)}`;
-                        } else if (watchedLocationCoordinates) {
-                             url = `https://www.google.com/maps?q=${watchedLocationCoordinates.lat},${watchedLocationCoordinates.lng}`;
-                        }
-                    }
-                    window.open(url, '_blank', 'noopener,noreferrer');
-                    }}
-                    className="sm:w-auto"
-                    disabled={isPending || (isEditMode && initialData?.isSettled) || (!watchLocationName && !watchedLocationCoordinates)}
-                >
-                    <ExternalLink className="mr-2 h-4 w-4" />
-                    외부 지도에서 보기
-                </Button>
-            )}
-        </div>
-      </div>
-
-      <div
-        ref={mapContainerRef}
-        className={cn(
-            "mt-1 h-64 w-full rounded-md border",
-            (showMap && isMapsLoaded && !mapsLoadError && watchedLocationCoordinates) ? 'block' : 'hidden'
-        )}
-      >
-            {(!watchedLocationCoordinates && showMap && isMapsLoaded) && <p className="flex items-center justify-center h-full text-muted-foreground">표시할 좌표가 없습니다. 장소를 선택해주세요.</p>}
-            {(isPending && showMap) && <p className="flex items-center justify-center h-full text-muted-foreground">로딩 중...</p>}
-            {(!isMapsLoaded && showMap) && <p className="flex items-center justify-center h-full text-muted-foreground">지도 API 로딩 중...</p>}
-            {(mapsLoadError && showMap) && <p className="flex items-center justify-center h-full text-muted-foreground">지도 API 로드 실패: {mapsLoadError.message}</p>}
-      </div>
-
-      {!watchedIsTemporary && (
-        <div className="space-y-2">
-          <div className="flex items-center space-x-2">
-            <Controller
-              control={form.control}
-              name="useReserveFund"
-              render={({ field }) => (
-                <Switch
-                  id="useReserveFund"
-                  checked={field.value || false}
-                  onCheckedChange={field.onChange}
-                  disabled={isPending || (isEditMode && initialData?.isSettled) || watchedIsTemporary}
-                />
-              )}
-            />
-            <Label
-              htmlFor="useReserveFund"
-              className={cn(
-                "cursor-pointer",
-                (isEditMode && initialData?.isSettled) && "text-muted-foreground cursor-not-allowed",
-                watchedIsTemporary && "text-muted-foreground cursor-not-allowed"
-              )}
-            >
-              모임 회비 사용 {(isEditMode && initialData?.isSettled) && "(정산 완료됨 - 수정 불가)"}
-            </Label>
-          </div>
-
-          {watchUseReserveFund && !watchedIsTemporary && (
-            <div className="space-y-4 mt-4 pl-2 border-l-2 ml-2">
-	              <div>
-	                <Label
-	                  htmlFor="partialReserveFundAmount"
-	                  className={cn((isEditMode && initialData?.isSettled) && "text-muted-foreground")}
-	                >
-	                  사용할 회비 금액 (원) <span className="text-destructive">*</span>
-	                </Label>
-		                {isEditMode && (
-		                  <div className="mt-2 flex flex-col gap-2 sm:flex-row sm:items-center">
-		                    <Button
-		                      type="button"
-		                      variant="outline"
-		                      size="sm"
-		                      onClick={handleApplyTotalReserveFundAmount}
-		                      disabled={isPending || (isEditMode && initialData?.isSettled) || watchedIsTemporary || reserveFundPreview.applicableContributionTotal <= 0}
-		                    >
-		                      전체 금액 회비 사용
-		                    </Button>
-		                    <p className="text-xs text-muted-foreground">
-		                      회비 사용 제외 멤버를 뺀 현재 지출 부담 총액 {reserveFundPreview.applicableContributionTotal.toLocaleString(undefined, { maximumFractionDigits: 0 })}원을 자동 입력합니다.
-		                    </p>
-		                  </div>
-		                )}
-	                <Controller
-	                  name="partialReserveFundAmount"
-	                  control={form.control}
-                  render={({ field }) => (
-                    <Input
-                      id="partialReserveFundAmount"
-                      type="text"
-                      value={reserveFundInput}
-                      onChange={e => {
-                        let raw = e.target.value.replace(/[^0-9]/g, '');
-                        if (raw.startsWith('0') && raw.length > 1) raw = raw.replace(/^0+/, '');
-                        if (raw === '') {
-                          setReserveFundInput('');
-                          field.onChange(undefined);
-                        } else {
-                          const formatted = Number(raw).toLocaleString();
-                          setReserveFundInput(formatted);
-                          field.onChange(Number(raw));
-                        }
-                      }}
-                      onBlur={e => {
-                        const raw = e.target.value.replace(/[^0-9]/g, '');
-                        if (raw === '') {
-                          setReserveFundInput('');
-                          field.onChange(undefined);
-                        } else {
-                          const formatted = Number(raw).toLocaleString();
-                          setReserveFundInput(formatted);
-                          field.onChange(Number(raw));
-                        }
-                      }}
-                      disabled={isPending || (isEditMode && initialData?.isSettled) || watchedIsTemporary}
-                      placeholder="0"
-                      autoComplete="off"
-                    />
-                  )}
-                />
-                {form.formState.errors.partialReserveFundAmount && <p className="text-sm text-destructive mt-1">{form.formState.errors.partialReserveFundAmount.message}</p>}
-              </div>
-
-              <div>
-                <Label className={cn("font-medium", (isEditMode && initialData?.isSettled) && "text-muted-foreground", watchedIsTemporary && "text-muted-foreground")}>회비 사용 제외 멤버</Label>
-                <p className={cn("text-xs", (isEditMode && initialData?.isSettled) ? "text-muted-foreground/70" : "text-muted-foreground", watchedIsTemporary && "text-muted-foreground/70" )}>
-                  선택된 멤버는 이 모임에서 회비 사용 혜택을 받지 않습니다.
-                </p>
-	                <div className="grid gap-2 mt-2">
-                  {selectedParticipants.length > 0 ? (
-                      selectedParticipants.map(participant => (
-                        <div key={participant.id} className="flex items-center space-x-2">
-                          <Controller
-                            control={form.control}
-                            name="nonReserveFundParticipants"
-                            render={({ field }) => (
-                              <Checkbox
-                                id={`nonReserveFund-${participant.id}`}
-                                checked={field.value?.includes(participant.id)}
-                                onCheckedChange={(checked) => {
-                                  const currentNonParticipants = field.value || [];
-                                  const newNonParticipants = checked
-                                    ? [...currentNonParticipants, participant.id]
-                                    : currentNonParticipants.filter(id => id !== participant.id);
-                                  field.onChange(newNonParticipants);
-                                }}
-                                disabled={isPending || (isEditMode && initialData?.isSettled) || watchedIsTemporary}
-                              />
-                            )}
-                          />
-                          <Label
-                            htmlFor={`nonReserveFund-${participant.id}`}
-                            className={cn(
-                              "font-normal",
-                              (isEditMode && initialData?.isSettled) && "text-muted-foreground cursor-not-allowed",
-                              watchedIsTemporary && "text-muted-foreground cursor-not-allowed"
-                            )}
-                          >
-                            {participant.name}
-                            {participant.description && (
-                              <span className="ml-1 text-xs text-muted-foreground">({participant.description})</span>
-                            )}
-                            {participant.id === currentUserId && " (나)"}
-                          </Label>
-                        </div>
-                      ))
-                  ) : (
-                    <p className={cn("text-sm", (isEditMode && initialData?.isSettled) ? "text-muted-foreground/70" : "text-mutedForeground", watchedIsTemporary && "text-muted-foreground/70" )}>참여자를 먼저 선택해주세요.</p>
-                  )}
-	                </div>
-	                {form.formState.errors.nonReserveFundParticipants && <p className="text-sm text-destructive mt-1">{form.formState.errors.nonReserveFundParticipants.message}</p>}
-	              </div>
-
-                <div className="space-y-2 rounded-md border border-dashed p-3">
-                  <div className="flex items-center space-x-2">
-                    <Controller
-                      control={form.control}
-                      name="refundReserveFundToNonParticipants"
-                      render={({ field }) => (
-                        <Switch
-                          id="refundReserveFundToNonParticipants"
-                          checked={field.value || false}
-                          onCheckedChange={(checked) => {
-                            field.onChange(checked);
-                            if (!checked) {
-                              form.setValue('reserveFundRefundRecipientIds', [], { shouldValidate: true });
-                            }
-                          }}
-                          disabled={isPending || (isEditMode && initialData?.isSettled) || watchedIsTemporary}
-                        />
-                      )}
-                    />
-                    <Label
-                      htmlFor="refundReserveFundToNonParticipants"
-                      className={cn(
-                        "cursor-pointer",
-                        (isEditMode && initialData?.isSettled) && "text-muted-foreground cursor-not-allowed",
-                        watchedIsTemporary && "text-muted-foreground cursor-not-allowed"
-                      )}
-                    >
-                      미참가자 회비 돌려주기
-                    </Label>
-                  </div>
-                  <p className="text-xs text-muted-foreground">
-                    체크하면 회비 적용 참여자 1인당 사용 회비를 선택한 미참가자에게 동일 금액으로 환급합니다.
-                  </p>
-
-                  {watchRefundReserveFundToNonParticipants && (
-                    <div className="space-y-3 pt-1">
-                      <div className="rounded-md bg-secondary/40 p-3 text-xs text-muted-foreground space-y-1">
-                        <p>
-                          현재 1인당 사용 회비: {reserveFundPreview.perApplicableFundShare.toLocaleString(undefined, { maximumFractionDigits: 0 })}원
-                        </p>
-                        <p>
-                          환급 예상 총액: {reserveFundPreview.refundTotal.toLocaleString(undefined, { maximumFractionDigits: 0 })}원
-                        </p>
-                        <p>
-                          총 회비 사용 예정: {reserveFundPreview.totalFundUsed.toLocaleString(undefined, { maximumFractionDigits: 0 })}원
-                        </p>
-                      </div>
-
-                      <div>
-                        <Label className={cn("font-medium", (isEditMode && initialData?.isSettled) && "text-muted-foreground")}>
-                          회비 돌려받을 친구
-                        </Label>
-                        <p className="text-xs text-muted-foreground">
-                          현재 모임 참여자가 아닌 친구만 선택할 수 있습니다.
-                        </p>
-                        <div className="grid gap-2 mt-2">
-                          {refundableNonParticipants.length > 0 ? (
-                            refundableNonParticipants.map(friend => (
-                              <div key={friend.id} className="flex items-center space-x-2">
-                                <Controller
-                                  control={form.control}
-                                  name="reserveFundRefundRecipientIds"
-                                  render={({ field }) => (
-                                    <Checkbox
-                                      id={`reserveFundRefundRecipient-${friend.id}`}
-                                      checked={field.value?.includes(friend.id)}
-                                      onCheckedChange={(checked) => {
-                                        const currentRecipientIds = field.value || [];
-                                        const nextRecipientIds = checked
-                                          ? [...currentRecipientIds, friend.id]
-                                          : currentRecipientIds.filter(id => id !== friend.id);
-                                        field.onChange(nextRecipientIds);
-                                      }}
-                                      disabled={isPending || (isEditMode && initialData?.isSettled) || watchedIsTemporary}
-                                    />
-                                  )}
-                                />
-                                <Label
-                                  htmlFor={`reserveFundRefundRecipient-${friend.id}`}
-                                  className={cn(
-                                    "font-normal",
-                                    (isEditMode && initialData?.isSettled) && "text-muted-foreground cursor-not-allowed",
-                                    watchedIsTemporary && "text-muted-foreground cursor-not-allowed"
-                                  )}
-                                >
-                                  {friend.name}
-                                  {friend.description && (
-                                    <span className="ml-1 text-xs text-muted-foreground">({friend.description})</span>
-                                  )}
-                                  {friend.id === currentUserId && " (나)"}
-                                </Label>
-                              </div>
-                            ))
-                          ) : (
-                            <p className="text-sm text-muted-foreground">현재 선택 가능한 미참가 친구가 없습니다.</p>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                </div>
-	            </div>
-	          )}
-	        </div>
-	      )}
-
-      {watchedIsTemporary && (
-        <div className="space-y-4 border p-4 rounded-md mt-4">
-          <h3 className="text-lg font-medium">임시 모임 정보</h3>
-          <div className="space-y-4">
-            <div>
-              <Label htmlFor="tempParticipantName">임시 참여자 이름 <span className="text-destructive">*</span></Label>
-              <div className="flex space-x-2">
-                <Input
-                  id="tempParticipantName"
-                  value={currentTempParticipantName}
-                  onChange={(e) => setCurrentTempParticipantName(e.target.value)}
-                  placeholder="참여자 이름"
-                  disabled={isPending || (isEditMode && initialData?.isSettled)}
-                />
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => handleAddTemporaryParticipant(currentTempParticipantName)}
-                  disabled={isPending || initialData?.isSettled}
-                >
-                  추가
-                </Button>
-              </div>
-              {form.formState.errors.temporaryParticipants && !temporaryParticipants.length && <p className="text-sm text-destructive mt-1">{form.formState.errors.temporaryParticipants.message}</p>}
-              <ul className="mt-2 space-y-1">
-                {temporaryParticipants.map((p, index) => (
-                  <li key={index} className="text-sm flex justify-between items-center p-1 bg-secondary rounded-md">
-                    {p.name}
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => handleRemoveTemporaryParticipant(p.name)}
-                      disabled={isPending || initialData?.isSettled || (isEditMode && isAddedTempParticipantsOnEdit(p.name) != true)}
-                    >
-                      삭제
-                    </Button>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          </div>
-          <div className="space-y-2">
-            <Label>회비 설정 (임시 모임) <span className="text-xs text-muted-foreground">(선택 사항)</span></Label>
-            <RadioGroup
-              value={tempMeetingFeeType}
-              onValueChange={(value: 'total' | 'perPerson') => {
-                 if (!(isEditMode && initialData?.isSettled)) setTempMeetingFeeType(value);
-              }}
-              className="flex space-x-4"
-            >
-              <div className="flex items-center space-x-2">
-                <RadioGroupItem value="total" id="tempFeeTotal" disabled={isPending || (isEditMode && initialData?.isSettled)} />
-                <Label htmlFor="tempFeeTotal" className={cn((isPending || (isEditMode && initialData?.isSettled)) && "text-muted-foreground cursor-not-allowed")}>총액</Label>
-              </div>
-              <div className="flex items-center space-x-2">
-                <RadioGroupItem value="perPerson" id="tempFeePerPerson" disabled={isPending || (isEditMode && initialData?.isSettled)} />
-                <Label htmlFor="tempFeePerPerson" className={cn((isPending || (isEditMode && initialData?.isSettled)) && "text-muted-foreground cursor-not-allowed")}>1인당</Label>
-              </div>
-            </RadioGroup>
-            {tempMeetingFeeType === 'total' ? (
-              <div>
-                <Label htmlFor="tempTotalFee" className={cn((isPending || (isEditMode && initialData?.isSettled)) && "text-muted-foreground")}>총 회비 <span className="text-xs text-muted-foreground">(선택 사항)</span></Label>
-                <Input
-                  id="tempTotalFee"
-                  type="number"
-                  placeholder="전체 회비 금액"
-                  value={tempMeetingTotalFee === undefined ? '' : tempMeetingTotalFee}
-                  onChange={(e) => setTempMeetingTotalFee(e.target.value === '' ? undefined : Number(e.target.value))}
-                  disabled={isPending || (isEditMode && initialData?.isSettled)}
-                />
-              </div>
-            ) : (
-              <div>
-                <Label htmlFor="tempFeePerPersonInput" className={cn((isPending || (isEditMode && initialData?.isSettled)) && "text-muted-foreground")}>1인당 회비 <span className="text-xs text-muted-foreground">(선택 사항)</span></Label>
-                <Input
-                  id="tempFeePerPersonInput"
-                  type="number"
-                  placeholder="1인당 회비 금액"
-                  value={tempMeetingFeePerPerson === undefined ? '' : tempMeetingFeePerPerson}
-                  onChange={(e) => setTempMeetingFeePerPerson(e.target.value === '' ? undefined : Number(e.target.value))}
-                  disabled={isPending || (isEditMode && initialData?.isSettled)}
-                />
-              </div>
-            )}
-            {form.formState.errors.totalFee && tempMeetingFeeType === 'total' && <p className="text-sm text-destructive mt-1">{form.formState.errors.totalFee.message}</p>}
-            {form.formState.errors.feePerPerson && tempMeetingFeeType === 'perPerson' && <p className="text-sm text-destructive mt-1">{form.formState.errors.feePerPerson.message}</p>}
-            {form.formState.errors.totalFee && form.formState.errors.totalFee.type === 'custom' && <p className="text-sm text-destructive mt-1">{form.formState.errors.totalFee.message}</p>}
-
-          </div>
-        </div>
-      )}
-
 
       {!watchedIsTemporary && (
         <div>
@@ -1256,8 +603,10 @@ export function CreateMeetingForm({
           <Popover open={participantSearchOpen} onOpenChange={setParticipantSearchOpen}>
             <PopoverTrigger asChild>
               <Button
+                type="button"
                 variant="outline"
                 role="combobox"
+                aria-label="참여자 선택"
                 aria-expanded={participantSearchOpen}
                 className={cn(
                   "w-full justify-between",
@@ -1340,6 +689,200 @@ export function CreateMeetingForm({
       )}
 
       <div className="space-y-2">
+        <Label htmlFor="locationNameInput" className={cn((isEditMode && initialData?.isSettled) && "text-muted-foreground")}>장소</Label>
+        {isMapsLoaded && !mapsLoadError ? (
+          <LocationSearchInput
+            form={form}
+            isPending={isPending || (isEditMode && (initialData?.isSettled ?? false))}
+            isMapsLoaded={isMapsLoaded}
+            mapsLoadError={mapsLoadError}
+            onLocationSelected={handleLocationSelected}
+          />
+        ) : (
+            <div className="relative flex items-center">
+                <MapPinIcon className="absolute left-2 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                    id="locationNameInput"
+                    value={watchLocationName}
+                    onChange={(e) => {
+                      form.setValue('locationName', e.target.value, { shouldDirty: true, shouldValidate: true });
+                      form.setValue('locationCoordinates', undefined, { shouldDirty: true });
+                    }}
+                    disabled={isPending || (isEditMode && initialData?.isSettled)}
+                    className={cn("pl-8", (isEditMode && initialData?.isSettled) && "bg-muted/50 cursor-not-allowed")}
+                    placeholder="장소 이름을 직접 입력하거나 장소 검색을 사용하세요."
+                />
+            </div>
+        )}
+        {form.formState.errors.locationName && <p className="text-sm text-destructive mt-1">{form.formState.errors.locationName.message}</p>}
+        {placeSearchEnabled && !isMapsLoaded && !mapsLoadError && <p role="status" className="mt-2 text-sm text-muted-foreground">장소 검색을 불러오는 중입니다.</p>}
+        {mapsLoadError && <div className="mt-2 text-sm text-muted-foreground" role="alert">{mapsLoadError.message} <Button type="button" variant="ghost" size="sm" onClick={retryMaps}>다시 시도</Button></div>}
+
+        <div className="flex flex-wrap gap-2 mt-2">
+            {!placeSearchEnabled && <Button type="button" variant="outline" size="sm" onClick={() => setPlaceSearchEnabled(true)} disabled={isFormDisabled}><MapPinIcon className="mr-2 h-4 w-4" />장소 검색</Button>}
+            <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={handleToggleMap}
+                className="sm:w-auto"
+                disabled={isPending || (isEditMode && initialData?.isSettled) || !watchedLocationCoordinates}
+            >
+                <Eye className="mr-2 h-4 w-4" />
+                {showMap ? '지도 숨기기' : '지도 보기'}
+            </Button>
+            {(watchLocationName || watchedLocationCoordinates) && (
+                <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                    const placeName = watchLocationName;
+                    let url = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(placeName || '')}`;
+                    if (watchedLocationCoordinates) {
+                        url = `https://www.google.com/maps/place/${encodeURIComponent(placeName || '')}/@${watchedLocationCoordinates.lat},${watchedLocationCoordinates.lng},15z/data=!3m1!4b1!4m6!3m5!1s0x0:0x0!7e2!8m2!3d${watchedLocationCoordinates.lat}!4d${watchedLocationCoordinates.lng}`;
+                        if (placeName && watchedLocationCoordinates) {
+                             url = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(placeName)}&ll=${watchedLocationCoordinates.lat},${watchedLocationCoordinates.lng}`;
+                        } else if (placeName) {
+                             url = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(placeName)}`;
+                        } else if (watchedLocationCoordinates) {
+                             url = `https://www.google.com/maps?q=${watchedLocationCoordinates.lat},${watchedLocationCoordinates.lng}`;
+                        }
+                    }
+                    window.open(url, '_blank', 'noopener,noreferrer');
+                    }}
+                    className="sm:w-auto"
+                    disabled={isPending || (isEditMode && initialData?.isSettled) || (!watchLocationName && !watchedLocationCoordinates)}
+                >
+                    <ExternalLink className="mr-2 h-4 w-4" />
+                    외부 지도에서 보기
+                </Button>
+            )}
+        </div>
+      </div>
+
+      <div
+        ref={mapContainerRef}
+        className={cn(
+            "mt-1 h-64 w-full rounded-md border",
+            (showMap && isMapsLoaded && !mapsLoadError && watchedLocationCoordinates) ? 'block' : 'hidden'
+        )}
+      >
+            {(!watchedLocationCoordinates && showMap && isMapsLoaded) && <p className="flex items-center justify-center h-full text-muted-foreground">표시할 좌표가 없습니다. 장소를 선택해주세요.</p>}
+            {(isPending && showMap) && <p className="flex items-center justify-center h-full text-muted-foreground">로딩 중...</p>}
+            {(!isMapsLoaded && showMap) && <p className="flex items-center justify-center h-full text-muted-foreground">지도 API 로딩 중...</p>}
+            {(mapsLoadError && showMap) && <p className="flex items-center justify-center h-full text-muted-foreground">지도 API 로드 실패: {mapsLoadError.message}</p>}
+      </div>
+
+      {!watchedIsTemporary && <MeetingReserveFundSection
+        form={form} isPending={isPending} isEditMode={isEditMode} initialData={initialData}
+        watchUseReserveFund={watchUseReserveFund} watchedIsTemporary={watchedIsTemporary}
+        reserveFundPreview={reserveFundPreview} handleApplyTotalReserveFundAmount={handleApplyTotalReserveFundAmount}
+        reserveFundInput={reserveFundInput} setReserveFundInput={setReserveFundInput}
+        selectedParticipants={selectedParticipants} currentUserId={currentUserId}
+        watchRefundReserveFundToNonParticipants={watchRefundReserveFundToNonParticipants}
+        refundableNonParticipants={refundableNonParticipants}
+      />}
+
+      {watchedIsTemporary && (
+        <div className="space-y-4 border p-4 rounded-md mt-4">
+          <h3 className="text-lg font-medium">임시 모임 정보</h3>
+          <div className="space-y-4">
+            <div>
+              <Label htmlFor="tempParticipantName">임시 참여자 이름 <span className="text-destructive">*</span></Label>
+              <div className="flex space-x-2">
+                <Input
+                  id="tempParticipantName"
+                  value={currentTempParticipantName}
+                  onChange={(e) => setCurrentTempParticipantName(e.target.value)}
+                  placeholder="참여자 이름"
+                  disabled={isPending || (isEditMode && initialData?.isSettled)}
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => handleAddTemporaryParticipant(currentTempParticipantName)}
+                  disabled={isPending || initialData?.isSettled}
+                >
+                  추가
+                </Button>
+              </div>
+              {form.formState.errors.temporaryParticipants && !temporaryParticipants.length && <p className="text-sm text-destructive mt-1">{form.formState.errors.temporaryParticipants.message}</p>}
+              <ul className="mt-2 space-y-1">
+                {temporaryParticipants.map((p, index) => (
+                  <li key={p.id || `${p.name}-${index}`} className="text-sm flex justify-between items-center p-1 bg-secondary rounded-md">
+                    {p.name}
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => handleRemoveTemporaryParticipant(p.name)}
+                      disabled={isPending || initialData?.isSettled || (isEditMode && isAddedTempParticipantsOnEdit(p.name) != true)}
+                    >
+                      삭제
+                    </Button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </div>
+          <div className="space-y-2">
+            <Label>회비 설정 (임시 모임) <span className="text-xs text-muted-foreground">(선택 사항)</span></Label>
+            <RadioGroup
+              value={tempMeetingFeeType}
+              onValueChange={(value: 'total' | 'perPerson') => {
+                 if (!(isEditMode && initialData?.isSettled)) {
+                   setTempMeetingFeeType(value);
+                   form.setValue('totalFee', value === 'total' ? tempMeetingTotalFee : undefined, { shouldDirty: true });
+                   form.setValue('feePerPerson', value === 'perPerson' ? tempMeetingFeePerPerson : undefined, { shouldDirty: true });
+                 }
+              }}
+              className="flex space-x-4"
+            >
+              <div className="flex items-center space-x-2">
+                <RadioGroupItem value="total" id="tempFeeTotal" disabled={isPending || (isEditMode && initialData?.isSettled)} />
+                <Label htmlFor="tempFeeTotal" className={cn((isPending || (isEditMode && initialData?.isSettled)) && "text-muted-foreground cursor-not-allowed")}>총액</Label>
+              </div>
+              <div className="flex items-center space-x-2">
+                <RadioGroupItem value="perPerson" id="tempFeePerPerson" disabled={isPending || (isEditMode && initialData?.isSettled)} />
+                <Label htmlFor="tempFeePerPerson" className={cn((isPending || (isEditMode && initialData?.isSettled)) && "text-muted-foreground cursor-not-allowed")}>1인당</Label>
+              </div>
+            </RadioGroup>
+            {tempMeetingFeeType === 'total' ? (
+              <div>
+                <Label htmlFor="tempTotalFee" className={cn((isPending || (isEditMode && initialData?.isSettled)) && "text-muted-foreground")}>총 회비 <span className="text-xs text-muted-foreground">(선택 사항)</span></Label>
+                <Input
+                  id="tempTotalFee"
+                  type="number"
+                  placeholder="전체 회비 금액"
+                  value={tempMeetingTotalFee === undefined ? '' : tempMeetingTotalFee}
+                  onChange={(e) => { const value = e.target.value === '' ? undefined : Number(e.target.value); setTempMeetingTotalFee(value); form.setValue('totalFee', value, { shouldDirty: true, shouldValidate: true }); }}
+                  disabled={isPending || (isEditMode && initialData?.isSettled)}
+                />
+              </div>
+            ) : (
+              <div>
+                <Label htmlFor="tempFeePerPersonInput" className={cn((isPending || (isEditMode && initialData?.isSettled)) && "text-muted-foreground")}>1인당 회비 <span className="text-xs text-muted-foreground">(선택 사항)</span></Label>
+                <Input
+                  id="tempFeePerPersonInput"
+                  type="number"
+                  placeholder="1인당 회비 금액"
+                  value={tempMeetingFeePerPerson === undefined ? '' : tempMeetingFeePerPerson}
+                  onChange={(e) => { const value = e.target.value === '' ? undefined : Number(e.target.value); setTempMeetingFeePerPerson(value); form.setValue('feePerPerson', value, { shouldDirty: true, shouldValidate: true }); }}
+                  disabled={isPending || (isEditMode && initialData?.isSettled)}
+                />
+              </div>
+            )}
+            {form.formState.errors.totalFee && tempMeetingFeeType === 'total' && <p className="text-sm text-destructive mt-1">{form.formState.errors.totalFee.message}</p>}
+            {form.formState.errors.feePerPerson && tempMeetingFeeType === 'perPerson' && <p className="text-sm text-destructive mt-1">{form.formState.errors.feePerPerson.message}</p>}
+            {form.formState.errors.totalFee && form.formState.errors.totalFee.type === 'custom' && <p className="text-sm text-destructive mt-1">{form.formState.errors.totalFee.message}</p>}
+
+          </div>
+        </div>
+      )}
+
+
+      <div className="space-y-2">
         <Label htmlFor="memo" className={cn((isEditMode && initialData?.isSettled) && "text-muted-foreground")}>메모</Label>
         <Controller
           name="memo"
@@ -1367,7 +910,7 @@ export function CreateMeetingForm({
         </Button>
         <Button type="submit" disabled={isPending || (isEditMode && initialData?.isSettled)}>
           {isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-          {isEditMode ? (initialData?.isSettled ? '정산 완료됨' : '모임 수정') : '모임 만들기'}
+          {isEditMode ? (initialData?.isSettled ? '정산 확정됨' : '모임 수정') : '모임 만들기'}
         </Button>
       </div>
     </form>

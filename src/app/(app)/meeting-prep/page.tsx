@@ -1,5 +1,5 @@
 import { Metadata } from 'next';
-import { MeetingPrepListClient } from '@/features/meeting-prep';
+import { MeetingPrepListClient } from '@/features/meeting-prep/MeetingPrepListClient';
 
 export const metadata: Metadata = {
   title: '모임 준비',

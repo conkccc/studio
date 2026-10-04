@@ -4,7 +4,7 @@ import React, { useEffect, useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { getAllFriendGroupsAction, getAllUsersAction } from '@/lib/actions';
 import type { User, FriendGroup } from '@/lib/types';
-import { UserListClient } from '@/features/users';
+import { UserListClient } from '@/features/users/UserListClient';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
@@ -63,7 +63,7 @@ export default function UsersPage() {
     );
   }
 
-  if (!isAdmin) { 
+  if (!isAdmin) {
     return (
       <div className="container mx-auto py-8 text-center">
         <h1 className="text-2xl font-bold mb-4">접근 권한 없음</h1>

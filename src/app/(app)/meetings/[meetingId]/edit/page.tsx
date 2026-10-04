@@ -8,7 +8,7 @@ import {
   getFriendGroupsForUserAction,
   getExpensesByMeetingIdAction,
 } from '@/lib/actions';
-import { CreateMeetingForm } from '@/features/meetings';
+import { CreateMeetingForm } from '@/features/meetings/CreateMeetingForm';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
 import { useAuth } from '@/contexts/AuthContext';
 import Link from 'next/link';
@@ -77,7 +77,7 @@ export default function EditMeetingPage() {
         } else {
             setFriendsForForm([]);
         }
-        
+
         const isAdmin = appUser.role === 'admin';
         const isCreator = fetchedMeeting.creatorId === appUser.id;
 
@@ -172,7 +172,7 @@ export default function EditMeetingPage() {
       </div>
     );
   }
-  
+
   if (!appUser?.id) {
      return (
       <div className="flex justify-center items-center min-h-[calc(100vh-150px)]">
