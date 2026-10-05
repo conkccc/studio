@@ -5,7 +5,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { useForm, Controller } from 'react-hook-form';
 import { createExpenseSchema, type ExpenseFormData } from '@/lib/expense-schema';
 import type { Friend, Expense } from '@/lib/types';
-import { updateExpenseAction } from '@/lib/actions';
+import { updateExpenseAction } from '@/lib/client-actions';
 import { useToast } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
 import {
@@ -117,7 +117,7 @@ export function EditExpenseDialog({
     }
   };
 
-  const formatNumber = (value: number | string): string => {
+  const formatNumber = (value: number | string | null | undefined): string => {
     if (typeof value === 'number') return value.toLocaleString();
     if (value === '' || value === null || value === undefined) return '';
     const num = Number(String(value).replace(/,/g, ''));

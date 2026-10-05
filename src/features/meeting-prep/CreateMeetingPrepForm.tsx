@@ -14,7 +14,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Check, ChevronsUpDown, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useToast } from '@/hooks/use-toast';
-import { createMeetingPrepAction, getFriendGroupsForUserAction, getFriendsByGroupAction } from '@/lib/actions';
+import { createMeetingPrepAction, getFriendGroupsForUserAction, getFriendsByGroupAction } from '@/lib/client-actions';
 import { useAuth } from '@/contexts/AuthContext';
 import type { FriendGroup, Friend } from '@/lib/types';
 import { useEffect, useTransition } from 'react';

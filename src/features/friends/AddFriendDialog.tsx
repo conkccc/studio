@@ -16,7 +16,7 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { createFriendAction } from '@/lib/actions';
+import { createFriendAction } from '@/lib/client-actions';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/AuthContext';
 import { Loader2 } from 'lucide-react';

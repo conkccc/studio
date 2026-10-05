@@ -4,7 +4,12 @@ import { useEffect, useRef, useState } from 'react';
 import { defaultMeetingListSelection, meetingListSelectionFromQuery, readMeetingListSelection, restoreMeetingListQuery, saveMeetingListSelection } from '@/lib/meeting-list-preferences';
 
 export function useMeetingListPreferences(userId: string | undefined, query: string, pathname: string, replace: (url: string, options: { scroll: boolean }) => void) {
-  const [readyUser, setReadyUser] = useState<string | null>(null);
+  const [readyUser, setReadyUser] = useState<string | null>(() => {
+    if (!userId || typeof window === 'undefined') return null;
+    try {
+      return restoreMeetingListQuery(query, readMeetingListSelection(window.localStorage, userId)) === query ? userId : null;
+    } catch { return userId; }
+  });
   const initializedUser = useRef<string | undefined>();
   const pendingRestore = useRef<{ from: string; to: string } | null>(null);
   const ready = !!userId && readyUser === userId;

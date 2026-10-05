@@ -1,12 +1,11 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useState } from 'react';
+import { useAppData } from '@/hooks/use-app-data';
 import { format, isValid } from 'date-fns';
 import { ko } from 'date-fns/locale';
 import { CalendarCheck, CheckCircle2, Clock3, PlusCircle, ArrowRight, UsersRound, Loader2 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
-import { getDashboardAction } from '@/lib/actions';
 import type { Meeting } from '@/lib/types';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -39,30 +38,10 @@ function MeetingSection({ title, description, icon: Icon, meetings, empty, href 
 
 export default function DashboardPage() {
   const { appUser, loading: authLoading } = useAuth();
-  const [data, setData] = useState<DashboardData>(emptyData);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [retry, setRetry] = useState(0);
-
-  useEffect(() => {
-    if (authLoading) return;
-    let active = true;
-    if (!appUser?.id || appUser.role === 'none') { setLoading(false); setData(emptyData); return; }
-    setLoading(true);
-    setError(null);
-    const fetchData = async () => {
-      try {
-        const result = await getDashboardAction();
-        if (!active) return;
-        if (!result.success) throw new Error(result.error || '홈 화면을 불러오지 못했습니다.');
-        setData({ recentMeetings: result.recentMeetings || [], upcomingMeetings: result.upcomingMeetings || [], pendingMeetings: result.pendingMeetings || [] });
-      } catch (cause) {
-        if (active) setError(cause instanceof Error ? cause.message : '홈 화면을 불러오지 못했습니다.');
-      } finally { if (active) setLoading(false); }
-    };
-    void fetchData();
-    return () => { active = false; };
-  }, [authLoading, appUser?.id, appUser?.role, retry]);
+  const dashboard = useAppData('dashboard');
+  const data = dashboard.data || emptyData;
+  const loading = dashboard.isLoading;
+  const error = dashboard.error?.message;
 
   const canCreate = appUser && ['admin', 'user'].includes(appUser.role);
   return <div className="mx-auto max-w-6xl space-y-6 px-4 py-6 md:px-6 md:py-8">
@@ -76,7 +55,7 @@ export default function DashboardPage() {
       <Button asChild variant="outline"><Link href="/meetings">모든 모임<ArrowRight className="ml-2 h-4 w-4" /></Link></Button>
     </nav>
     {loading || authLoading ? <div role="status" className="flex min-h-48 items-center justify-center gap-2 text-muted-foreground"><Loader2 className="h-6 w-6 animate-spin" />모임 요약을 불러오고 있습니다.</div>
-      : error ? <Card><CardContent className="space-y-4 py-10 text-center" role="alert"><p>{error}</p><Button variant="outline" onClick={() => setRetry(value => value + 1)}>다시 시도</Button></CardContent></Card>
+      : error && !dashboard.data ? <Card><CardContent className="space-y-4 py-10 text-center" role="alert"><p>{error}</p><Button variant="outline" onClick={() => void dashboard.refetch()}>다시 시도</Button></CardContent></Card>
       : <div className="grid gap-4 lg:grid-cols-3">
         <MeetingSection title="정산할 모임" description="아직 정산을 확정하지 않은 지난 모임" icon={CheckCircle2} meetings={data.pendingMeetings} empty="마무리할 정산이 없습니다." href="/meetings?status=pending" />
         <MeetingSection title="다가오는 모임" description="장소와 참여자를 미리 확인하세요." icon={CalendarCheck} meetings={data.upcomingMeetings} empty="예정된 모임이 없습니다." href="/meetings" />

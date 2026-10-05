@@ -4,7 +4,7 @@ import type { Expense, Friend } from '@/lib/types';
 import React, { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/hooks/use-toast';
-import { deleteExpenseAction } from '@/lib/actions';
+import { deleteExpenseAction } from '@/lib/client-actions';
 import { UserCircle, Users, Edit3, Trash2, Loader2 } from 'lucide-react';
 import { format, isValid } from 'date-fns';
 import { ko } from 'date-fns/locale';

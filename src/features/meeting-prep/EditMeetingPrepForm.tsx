@@ -13,7 +13,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Check, ChevronsUpDown, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useToast } from '@/hooks/use-toast';
-import { updateMeetingPrepAction, getFriendsByGroupAction } from '@/lib/actions';
+import { updateMeetingPrepAction, getFriendsByGroupAction } from '@/lib/client-actions';
 import { useAuth } from '@/contexts/AuthContext';
 import type { MeetingPrep, Friend } from '@/lib/types';
 import { Skeleton } from '@/components/ui/skeleton';

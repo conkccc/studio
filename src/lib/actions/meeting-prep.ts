@@ -131,9 +131,9 @@ export async function getMeetingPrepByIdAction(meetingPrepId: string, currentUse
       }
       const user = permissionCheck.user!;
 
-      const isCreator = meetingPrep.creatorId === user.id;
+      const isCreator = user.role !== 'viewer' && meetingPrep.creatorId === user.id;
       const isAdmin = user.role === 'admin';
-      const userFriends = await dbGetFriendsByUserFriendGroupIds(user.friendGroupIds || []);
+      const userFriends = isCreator || isAdmin ? [] : await dbGetFriendsByUserFriendGroupIds(user.friendGroupIds || []);
       const isParticipant = userFriends.some((userFriend: Friend) => meetingPrep.participantFriendIds?.includes(userFriend.id));
 
       if (!isCreator && !isAdmin && !isParticipant) {

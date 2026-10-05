@@ -5,6 +5,14 @@ import type { User } from '../types';
 
 let csrfRequest: Promise<string> | undefined;
 let pendingSession: { uid: string; request: Promise<User> } | undefined;
+let pendingLogout: Promise<void> | undefined;
+let sessionWrites: Promise<void> = Promise.resolve();
+
+function enqueueSessionWrite<T>(write: () => Promise<T>): Promise<T> {
+  const request = sessionWrites.then(write);
+  sessionWrites = request.then(() => undefined, () => undefined);
+  return request;
+}
 
 async function getCsrfToken(): Promise<string> {
   if (!csrfRequest) {
@@ -23,9 +31,9 @@ async function getCsrfToken(): Promise<string> {
 
 export async function establishServerSession(user: FirebaseUser): Promise<User> {
   if (pendingSession?.uid === user.uid) return pendingSession.request;
-  const request = (async () => {
-    const csrfToken = await getCsrfToken();
-    const idToken = await user.getIdToken();
+  pendingLogout = undefined;
+  const request = enqueueSessionWrite(async () => {
+    const [csrfToken, idToken] = await Promise.all([getCsrfToken(), user.getIdToken()]);
     const response = await fetch('/api/auth/session', {
       method: 'POST',
       credentials: 'same-origin',
@@ -35,7 +43,7 @@ export async function establishServerSession(user: FirebaseUser): Promise<User> 
     const result = await response.json();
     if (!response.ok) throw new Error(result.error || '서버 로그인에 실패했습니다.');
     return { ...result.user, createdAt: new Date(result.user.createdAt) } as User;
-  })();
+  });
   pendingSession = { uid: user.uid, request };
   try {
     return await request;
@@ -45,12 +53,18 @@ export async function establishServerSession(user: FirebaseUser): Promise<User> 
 }
 
 export async function clearServerSession(): Promise<void> {
-  if (pendingSession) await pendingSession.request.catch(() => {});
-  const csrfToken = await getCsrfToken();
-  const response = await fetch('/api/auth/session', {
-    method: 'DELETE',
-    credentials: 'same-origin',
-    headers: { 'x-csrf-token': csrfToken },
+  pendingSession = undefined;
+  if (pendingLogout) return pendingLogout;
+  const request = enqueueSessionWrite(async () => {
+    const csrfToken = await getCsrfToken();
+    const response = await fetch('/api/auth/session', {
+      method: 'DELETE',
+      credentials: 'same-origin',
+      headers: { 'x-csrf-token': csrfToken },
+    });
+    if (!response.ok) throw new Error('서버에서 로그아웃할 수 없습니다. 다시 시도해주세요.');
   });
-  if (!response.ok) throw new Error('서버에서 로그아웃할 수 없습니다. 다시 시도해주세요.');
+  pendingLogout = request;
+  try { await request; }
+  finally { if (pendingLogout === request) pendingLogout = undefined; }
 }

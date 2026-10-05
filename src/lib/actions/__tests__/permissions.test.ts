@@ -3,6 +3,7 @@ import { ensureUserPermission } from '../permissions';
 import { getUserById } from '../../data-store';
 import { makeAdmin, makeUser } from './fixtures';
 import { getAuthenticatedUserId } from '../../auth/session';
+import { withRequestUser } from '../../auth/request-user';
 
 vi.mock('../../auth/session', () => ({ getAuthenticatedUserId: vi.fn() }));
 
@@ -14,6 +15,16 @@ const mockGetUserById = vi.mocked(getUserById);
 const mockGetAuthenticatedUserId = vi.mocked(getAuthenticatedUserId);
 
 describe('ensureUserPermission', () => {
+  it('reuses a verified profile inside one request while still enforcing role and caller checks', async () => {
+    mockGetUserById.mockReset(); mockGetAuthenticatedUserId.mockReset();
+    await withRequestUser(makeUser({ id: 'verified' }), async () => {
+      expect((await ensureUserPermission('verified')).success).toBe(true);
+      expect((await ensureUserPermission('different')).success).toBe(false);
+      expect((await ensureUserPermission(undefined, { requiredRole: 'admin' })).success).toBe(false);
+    });
+    expect(mockGetUserById).not.toHaveBeenCalled();
+    expect(mockGetAuthenticatedUserId).not.toHaveBeenCalled();
+  });
   beforeEach(() => {
     mockGetUserById.mockReset();
     mockGetAuthenticatedUserId.mockReset();

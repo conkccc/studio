@@ -1,6 +1,7 @@
 import { getUserById as dbGetUserById } from '../data-store';
 import type { User } from '../types';
 import { getAuthenticatedUserId } from '../auth/session';
+import { currentRequestUser } from '../auth/request-user';
 
 export type UserRole = 'admin' | 'user' | 'viewer' | 'none';
 
@@ -21,7 +22,8 @@ export async function ensureUserPermission(
   currentUserId: string | null | undefined,
   options: PermissionCheckOptions = {}
 ): Promise<PermissionCheckResult> {
-  const authenticatedUserId = await getAuthenticatedUserId();
+  const verifiedUser = currentRequestUser();
+  const authenticatedUserId = verifiedUser?.id || await getAuthenticatedUserId();
   if (!authenticatedUserId) {
     return { success: false, error: "인증되지 않은 사용자입니다. 로그인이 필요합니다." };
   }
@@ -29,7 +31,7 @@ export async function ensureUserPermission(
   if (currentUserId && currentUserId !== authenticatedUserId) {
     return { success: false, error: '로그인한 사용자와 요청한 사용자 정보가 일치하지 않습니다.' };
   }
-  const currentUser = await dbGetUserById(authenticatedUserId);
+  const currentUser = verifiedUser || await dbGetUserById(authenticatedUserId);
   if (!currentUser) {
     return { success: false, error: "사용자 정보를 찾을 수 없습니다." };
   }

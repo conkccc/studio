@@ -1,52 +1,22 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React from 'react';
+import { useAppData } from '@/hooks/use-app-data';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { PlusCircle } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
-import { getMeetingPrepsAction } from '@/lib/actions';
-import type { MeetingPrep } from '@/lib/types';
 import { format } from 'date-fns';
 import { ko } from 'date-fns/locale';
 
 export function MeetingPrepListClient() {
   const { currentUser, loading: authLoading } = useAuth();
-  const [retry, setRetry] = useState(0);
-  const [meetingPreps, setMeetingPreps] = useState<MeetingPrep[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    let active = true;
-    if (!authLoading && currentUser) {
-      const fetchMeetingPreps = async () => {
-        setLoading(true);
-        setError(null);
-        try {
-          const result = await getMeetingPrepsAction(currentUser.uid);
-          if (!active) return;
-          if (result.success && result.meetingPreps) {
-            setMeetingPreps(result.meetingPreps);
-          } else {
-            setError(result.error || '모임 준비 목록을 불러오는데 실패했습니다.');
-          }
-        } catch (err) {
-          console.error('Failed to fetch meeting preps:', err);
-          if (active) setError('모임 준비 목록을 불러오는 중 오류가 발생했습니다.');
-        } finally {
-          if (active) setLoading(false);
-        }
-      };
-      fetchMeetingPreps();
-    } else if (!authLoading && !currentUser) {
-      setLoading(false);
-      setError('로그인이 필요합니다.');
-    }
-    return () => { active = false; };
-  }, [authLoading, currentUser?.uid, retry]);
+  const preps = useAppData('preps');
+  const meetingPreps = preps.data?.meetingPreps || [];
+  const loading = authLoading || preps.isLoading;
+  const error = preps.error?.message || (!authLoading && !currentUser ? '로그인이 필요합니다.' : undefined);
 
   const formatSelectedMonths = (months: string[]) => {
     if (!months || months.length === 0) return '없음';
@@ -88,8 +58,8 @@ export function MeetingPrepListClient() {
     );
   }
 
-  if (error) {
-    return <div role="alert" className="space-y-3 py-8 text-center"><p>{error}</p><Button variant="outline" onClick={() => setRetry(value => value + 1)}>다시 시도</Button></div>;
+  if (error && !preps.data) {
+    return <div role="alert" className="space-y-3 py-8 text-center"><p>{error}</p><Button variant="outline" onClick={() => void preps.refetch()}>다시 시도</Button></div>;
   }
 
   return (

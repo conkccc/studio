@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { getMeetingPrepByIdAction } from '../meeting-prep';
 import { getAllParticipantAvailabilitiesAction, getParticipantAvailabilityAction, submitParticipantAvailabilityAction } from '../participant-availability';
 import { ensureUserPermission } from '../permissions';
-import { dbGetMeetingPrepById, dbGetFriendById, dbGetAllParticipantAvailabilities, dbGetParticipantAvailability, dbUpdateParticipantAvailability, dbAddParticipantAvailability } from '../../data-store';
+import { dbGetMeetingPrepById, dbGetFriendById, dbGetAllParticipantAvailabilities, dbGetParticipantAvailability, dbUpdateParticipantAvailability, dbAddParticipantAvailability, dbGetFriendsByUserFriendGroupIds } from '../../data-store';
 import type { MeetingPrep, ParticipantAvailability } from '../../types';
 
 vi.mock('server-only', () => ({}));
@@ -27,6 +27,12 @@ const availability: ParticipantAvailability = {
 };
 
 describe('meeting preparation share access', () => {
+  it('does not let a former creator retain unassigned private access after becoming a viewer', async () => {
+    vi.mocked(ensureUserPermission).mockResolvedValue({ success: true, user: { id: 'owner', role: 'viewer', friendGroupIds: [], createdAt: new Date() } });
+    vi.mocked(dbGetFriendsByUserFriendGroupIds).mockResolvedValue([]);
+    const result = await getMeetingPrepByIdAction('p1', 'owner');
+    expect(result.success).toBe(false);
+  });
   beforeEach(() => {
     vi.mocked(ensureUserPermission).mockResolvedValue({ success: false, error: '로그인이 필요합니다.' });
     vi.mocked(dbGetMeetingPrepById).mockResolvedValue(prep);

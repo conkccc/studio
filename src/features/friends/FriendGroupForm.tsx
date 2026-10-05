@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { createFriendGroupAction } from '@/lib/actions';
+import { createFriendGroupAction } from '@/lib/client-actions';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Loader2 } from 'lucide-react';

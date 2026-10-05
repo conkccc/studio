@@ -15,6 +15,11 @@ beforeEach(() => {
   vi.mocked(getMeetingsForUserAction).mockResolvedValue({ success: true, ...empty });
 });
 describe('merged meeting API authorization', () => {
+  it('rejects an account mismatch supplied by the client cache', async () => {
+    const response = await GET(new NextRequest('http://localhost/api/meetings', { headers: { 'X-Expected-User': 'previous-account' } }));
+    expect(response.status).toBe(403);
+    expect(getMeetingsForUserAction).not.toHaveBeenCalled();
+  });
   it('rejects anonymous access even if another user ID is supplied', async () => {
     vi.mocked(getAuthenticatedUser).mockResolvedValue(null);
     const response = await GET(request('requestingUserId=admin'));

@@ -30,27 +30,27 @@ describe('settlement summary presentation', () => {
     expect(text(sections[2])).toContain('2,000원');
   });
 
-  it('matches the March meeting with supported members, excluded attendee and absent recipient', () => {
-    const meeting = makeMeeting({ participantIds: ['a', 'b', 'c', 'd', 'e'], useReserveFund: true, partialReserveFundAmount: 439344, nonReserveFundParticipants: ['b'], refundReserveFundToNonParticipants: true, reserveFundRefundRecipientIds: ['absent'] });
-    const expenses = [makeExpense({ totalAmount: 513430, paidById: 'e', splitType: 'custom', customSplits: ['a', 'b', 'c', 'd', 'e'].map(friendId => ({ friendId, amount: friendId === 'b' ? 74086 : 109836 })) })];
+  it('uses synthetic unequal costs with supported attendees, excluded attendee and absent recipient', () => {
+    const meeting = makeMeeting({ participantIds: ['a', 'b', 'c', 'd', 'e'], useReserveFund: true, partialReserveFundAmount: 100000, nonReserveFundParticipants: ['b'], refundReserveFundToNonParticipants: true, reserveFundRefundRecipientIds: ['absent'] });
+    const expenses = [makeExpense({ totalAmount: 123456, paidById: 'e', splitType: 'custom', customSplits: ['a', 'b', 'c', 'd', 'e'].map(friendId => ({ friendId, amount: friendId === 'b' ? 23456 : 25000 })) })];
     const root = render(meeting, expenses);
-    expect(text(root.findByProps({ 'aria-label': '참여자 부담 합계' }))).toContain('74,086원');
+    expect(text(root.findByProps({ 'aria-label': '참여자 부담 합계' }))).toContain('23,456원');
     const fund = text(root.findByProps({ 'aria-labelledby': 'settlement-fund-title' }));
-    expect(fund).toContain('참가자 지출 지원439,344원미참가자 환급109,836원총 회비 사용액549,180원');
+    expect(fund).toContain('참가자 지출 지원100,000원미참가자 환급25,000원총 회비 사용액125,000원');
     expect(fund).toContain('두 번 지급하는 금액이 아닙니다');
     const table = root.findByType('table');
     expect(table.findAllByType('tbody')[0].findAllByType('tr')).toHaveLength(5);
     const excludedRow = table.findAllByType('tr').find(row => text(row).includes('이름-b'))!;
     expect(text(excludedRow)).toContain('회비 지원 제외');
-    expect(text(excludedRow)).toContain('보낼 금액 74,086원');
+    expect(text(excludedRow)).toContain('보낼 금액 23,456원');
     const receiverRow = table.findAllByType('tr').find(row => text(row).includes('이름-e'))!;
-    expect(text(receiverRow)).toContain('받을 금액 513,430원');
+    expect(text(receiverRow)).toContain('받을 금액 123,456원');
     expect(text(root.findByProps({ 'aria-labelledby': 'refund-transfers-title' }))).toContain('이름-absent');
     expect(text(root)).toContain('참가자 5명 중 회비 지원 대상 4명 · 회비 지원 제외 1명');
     const participantTransfer = text(root.findByProps({ 'aria-labelledby': 'participant-transfers-title' }));
     expect(participantTransfer).not.toContain('보내는 사람');
     expect(participantTransfer).not.toContain('합계');
-    expect(participantTransfer).toContain('이름-b이름-e74,086원');
+    expect(participantTransfer).toContain('이름-b이름-e23,456원');
   });
 
   it('keeps the same sender consecutive even in an interleaved saved snapshot, with fund last', () => {

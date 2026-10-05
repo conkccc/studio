@@ -1,95 +1,23 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { getFriendGroupsForUserAction, getFriendsByGroupAction } from '@/lib/actions';
+import { useState } from 'react';
+import { useAppData } from '@/hooks/use-app-data';
 import { CreateMeetingForm } from '@/features/meetings/CreateMeetingForm';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
-import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/AuthContext';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
-import type { Friend, FriendGroup } from '@/lib/types';
 
 export default function NewMeetingPage() {
   const { currentUser, appUser, isAdmin, userRole, loading: authLoading } = useAuth();
-  const { toast } = useToast();
 
-  const [allOwnedGroups, setAllOwnedGroups] = useState<FriendGroup[]>([]);
   const [selectedMeetingGroupId, setSelectedMeetingGroupId] = useState<string | null>(null);
-  const [friendsForParticipantSelect, setFriendsForParticipantSelect] = useState<Friend[]>([]);
-  const [isLoadingInitialData, setIsLoadingInitialData] = useState(true);
-  const [isLoadingParticipants, setIsLoadingParticipants] = useState(false);
-
-  useEffect(() => {
-    if (authLoading) return;
-    let active = true;
-    if (!appUser?.id) {
-      setIsLoadingInitialData(false);
-      setAllOwnedGroups([]);
-      return;
-    }
-    setIsLoadingInitialData(true);
-    const fetchInitialData = async () => {
-      try {
-        const groupResponse = await getFriendGroupsForUserAction(appUser.id);
-        if (!active) return;
-        if (groupResponse.success && groupResponse.groups) {
-          setAllOwnedGroups(groupResponse.groups);
-        } else {
-          setAllOwnedGroups([]);
-          toast({ title: "오류", description: groupResponse.error || "모임 생성을 위한 그룹 목록을 가져오지 못했습니다.", variant: "destructive"});
-        }
-      } catch (error) {
-        if (!active) return;
-        console.error("Error fetching initial data for new meeting:", error);
-        setAllOwnedGroups([]);
-        toast({ title: "오류", description: "데이터 로딩 중 오류 발생.", variant: "destructive"});
-      } finally {
-        if (active) setIsLoadingInitialData(false);
-      }
-    };
-    void fetchInitialData();
-    return () => { active = false; };
-  }, [authLoading, appUser?.id, toast]);
-
-  useEffect(() => {
-    let active = true;
-    setFriendsForParticipantSelect([]);
-    const fetchFriendsForGroup = async () => {
-      if (!selectedMeetingGroupId) {
-        setFriendsForParticipantSelect([]);
-        return;
-      }
-
-      setIsLoadingParticipants(true);
-      try {
-        const response = await getFriendsByGroupAction(selectedMeetingGroupId);
-        if (!active) return;
-        if (response.success && response.friends) {
-          setFriendsForParticipantSelect(response.friends);
-        } else {
-          setFriendsForParticipantSelect([]);
-          toast({ title: "오류", description: response.error || "선택된 그룹의 친구 목록을 가져오지 못했습니다.", variant: "destructive" });
-        }
-      } catch (error) {
-        if (!active) return;
-        setFriendsForParticipantSelect([]);
-        toast({ title: "오류", description: "참여자 목록 조회 중 예외가 발생했습니다.", variant: "destructive" });
-        console.error("Error fetching friends for group:", error);
-      } finally {
-        if (active) setIsLoadingParticipants(false);
-      }
-    };
-
-    if (selectedMeetingGroupId) {
-        fetchFriendsForGroup();
-    } else {
-        setFriendsForParticipantSelect([]);
-        setIsLoadingParticipants(false);
-    }
-    return () => { active = false; };
-  }, [selectedMeetingGroupId, toast]);
-
+  const groups = useAppData('groups');
+  const friends = useAppData('friends', { id: selectedMeetingGroupId || undefined }, !!selectedMeetingGroupId);
+  const allOwnedGroups = groups.data?.groups || [];
+  const friendsForParticipantSelect = friends.data?.friends || [];
+  const isLoadingInitialData = groups.isLoading;
+  const isLoadingParticipants = friends.isLoading;
 
   if (authLoading || isLoadingInitialData) {
     return (
@@ -133,6 +61,7 @@ export default function NewMeetingPage() {
           <CardDescription>모임의 세부 정보를 입력하고 친구들을 초대하세요.</CardDescription>
         </CardHeader>
         <CardContent>
+          {(groups.error || friends.error) && <p role="alert" className="mb-3 text-destructive">{groups.error?.message || friends.error?.message}</p>}
           <CreateMeetingForm
             currentUserId={currentUserId}
             groups={allOwnedGroups}

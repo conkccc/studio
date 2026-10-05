@@ -64,9 +64,10 @@ export async function getFriendGroupsForUserAction(currentUserId?: string) {
     const user = permission.user;
     let groups = user.role === 'admin' ? await dbGetAllFriendGroups() : await getFriendGroupsByUser(user.id);
     if (user.role === 'viewer') groups = groups.filter(group => user.friendGroupIds?.includes(group.id));
-    const ownerIds = Array.from(new Set(groups.map(group => group.ownerUserId)));
+    const ownerIds = Array.from(new Set(groups.map(group => group.ownerUserId))).filter(id => id !== user.id || !user.name?.trim());
     const owners = await Promise.all(ownerIds.map(id => getUserById(id)));
     const names = new Map(owners.filter(Boolean).map(owner => [owner!.id, owner!.name || '사용자']));
+    if (user.name?.trim()) names.set(user.id, user.name);
     return { success: true, groups: groups.map(group => ({ ...group, ownerName: names.get(group.ownerUserId) || '사용자',
       isOwned: user.role !== 'viewer' && group.ownerUserId === user.id, isReferenced: user.friendGroupIds?.includes(group.id) || false })) };
   } catch { return { success: false, error: '친구 그룹 목록을 불러오지 못했습니다.', groups: [] }; }

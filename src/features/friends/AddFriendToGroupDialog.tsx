@@ -18,7 +18,7 @@ import {
   DialogClose,
 } from '@/components/ui/dialog';
 import { useAuth } from '@/contexts/AuthContext';
-import { createFriendAction } from '@/lib/actions';
+import { createFriendAction } from '@/lib/client-actions';
 import type { Friend } from '@/lib/types';
 import { useToast } from '@/hooks/use-toast';
 import { Loader2 } from 'lucide-react';

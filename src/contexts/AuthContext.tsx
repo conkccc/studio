@@ -7,6 +7,7 @@ import { getClientAuth, firebaseConfigurationError } from '@/lib/firebase';
 import { useRouter, usePathname } from 'next/navigation';
 import { clearServerSession, establishServerSession } from '@/lib/auth/client-session';
 import type { User } from '@/lib/types';
+import { clearAppData, setAppDataUser } from '@/lib/app-query-client';
 
 interface AuthContextValue {
   currentUser: FirebaseUser | null;
@@ -47,11 +48,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     let lastVerifiedUid: string | undefined;
     const unsubscribe = onIdTokenChanged(auth, async user => {
       const eventRevision = ++revision;
+      if (!user || user.uid !== lastVerifiedUid) clearAppData();
       if (!user || user.uid !== lastVerifiedUid) setLoading(true);
       try {
         if (user) {
           const profile = await establishServerSession(user);
           if (!active || eventRevision !== revision) return;
+          setAppDataUser(profile);
           setCurrentUser(user);
           setAppUser(profile);
           lastVerifiedUid = user.uid;
@@ -65,6 +68,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       } catch {
         console.warn('서버 로그인 상태를 확인하지 못했습니다.');
         if (active && eventRevision === revision) {
+          clearAppData();
           setCurrentUser(null);
           setAppUser(null);
           lastVerifiedUid = undefined;
@@ -81,6 +85,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       const result = await signInWithPopup(getClientAuth(), new GoogleAuthProvider());
       const profile = await establishServerSession(result.user);
+      setAppDataUser(profile);
       setCurrentUser(result.user);
       setAppUser(profile);
       router.refresh();
@@ -92,6 +97,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const signOut = async () => {
     setLoading(true);
+    clearAppData();
     try {
       await clearServerSession();
       await firebaseSignOut(getClientAuth());

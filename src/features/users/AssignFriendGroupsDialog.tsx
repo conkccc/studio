@@ -14,7 +14,7 @@ import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import type { User, FriendGroup } from '@/lib/types';
-import { assignFriendGroupsToUserAction } from '@/lib/actions';
+import { assignFriendGroupsToUserAction } from '@/lib/client-actions';
 import { useToast } from '@/hooks/use-toast';
 import { Loader2 } from 'lucide-react';
 

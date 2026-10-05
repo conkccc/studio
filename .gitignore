@@ -23,6 +23,9 @@
 # misc
 .DS_Store
 *.pem
+*.key
+*.p12
+*.pfx
 
 # debug
 npm-debug.log*
@@ -43,5 +46,7 @@ next-env.d.ts
 
 # firebase
 serviceAccountKey.json
+*service-account*.json
+*firebase-adminsdk*.json
 firebase-debug.log
 firestore-debug.log

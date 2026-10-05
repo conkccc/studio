@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { getFriendGroupsForAdminUserAction, updateFriendGroupAction } from '@/lib/actions';
+import { getFriendGroupsForAdminUserAction, updateFriendGroupAction } from '@/lib/client-actions';
 import { useAuth } from '@/contexts/AuthContext';
 import type { User, FriendGroup } from '@/lib/types';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';

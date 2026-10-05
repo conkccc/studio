@@ -74,8 +74,8 @@ async function getYearRange(scopes: Query[]): Promise<number[]> {
 }
 
 async function enrichMeetings(meetings: Meeting[]): Promise<Meeting[]> {
-  const creatorIds = Array.from(new Set(meetings.map(meeting => meeting.creatorId)));
-  const friendIds = Array.from(new Set(meetings.flatMap(meeting => meeting.participantIds || [])));
+  const creatorIds = Array.from(new Set(meetings.filter(meeting => !meeting.creatorName).map(meeting => meeting.creatorId)));
+  const friendIds = Array.from(new Set(meetings.flatMap(meeting => (meeting.participantIds || []).filter(id => isUnresolvedParticipantName(recordedParticipantName(meeting, id))))));
   const [creators, friends] = await Promise.all([Promise.all(creatorIds.map(id => getUserById(id))), getFriendsByIds(friendIds)]);
   const creatorNames = new Map(creators.filter(Boolean).map(user => [user!.id, user!.name || '사용자']));
   const names = new Map(friends.map(friend => [friend.id, friend.name]));
@@ -90,7 +90,7 @@ export async function getMeetings(params: GetMeetingsParams = {}): Promise<GetMe
   const limit = Math.min(50, Math.max(1, params.limitParam || 9));
   const scopes = queryScopes(params);
   if (!scopes.length) return { meetings: [], totalCount: 0, availableYears: [], nextCursor: null, hasMore: false };
-  const availableYears = params.includeYears === false ? [] : await getYearRange(queryScopes({ userId: params.userId, userFriendGroupIds: params.userFriendGroupIds, includeCreated: params.includeCreated }));
+  const readPage = async () => {
   const direction = params.ascending ? 'asc' : 'desc';
   let boundary = decodeCursor(params.cursor);
   const found = new Map<string, Meeting>();
@@ -125,8 +125,14 @@ export async function getMeetings(params: GetMeetingsParams = {}): Promise<GetMe
   const moreMatches = values.length > limit;
   const cursorMeeting = moreMatches ? meetings[meetings.length - 1] : lastScanned;
   hasMore = moreMatches || hasMore;
-  return { meetings: await enrichMeetings(meetings), totalCount: meetings.length, availableYears,
+  return { meetings: await enrichMeetings(meetings), totalCount: meetings.length,
     hasMore, nextCursor: hasMore && cursorMeeting ? encodeCursor(cursorMeeting) : null };
+  };
+  const [page, availableYears] = await Promise.all([
+    readPage(),
+    params.includeYears === false ? Promise.resolve([]) : getYearRange(queryScopes({ userId: params.userId, userFriendGroupIds: params.userFriendGroupIds, includeCreated: params.includeCreated })),
+  ]);
+  return { ...page, availableYears };
 }
 
 export async function getMeetingById(id: string): Promise<Meeting | undefined> {

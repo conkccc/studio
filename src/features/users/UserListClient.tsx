@@ -4,7 +4,7 @@ import type { User } from '@/lib/types';
 import React, { useState, useTransition, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/hooks/use-toast';
-import { updateUserRoleAction } from '@/lib/actions';
+import { updateUserRoleAction } from '@/lib/client-actions';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Loader2, Settings2 } from 'lucide-react';

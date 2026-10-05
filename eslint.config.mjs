@@ -13,6 +13,7 @@ export default tseslint.config(
       'coverage/**',
       '.genkit/**',
       '*.tsbuildinfo',
+      'next-env.d.ts',
     ],
   },
   js.configs.recommended,

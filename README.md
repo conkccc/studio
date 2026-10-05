@@ -4,6 +4,8 @@
 
 ## 개발 실행
 
+Node.js 22를 사용합니다. 보안 업데이트에 맞춰 Firebase Admin과 테스트 도구의 런타임 기준을 통일했습니다.
+
 ```sh
 npm ci
 npm run dev
@@ -16,6 +18,7 @@ npm run lint
 npm run typecheck
 npm test
 npm run build
+npm audit --omit=dev
 ```
 
 ## 환경 설정
@@ -53,7 +56,7 @@ Google 로그인 후 검증된 ID 토큰으로 5일 유효한 HttpOnly `__sessio
 - `src/lib/data-store`: Admin SDK 저장소
 - `src/lib/settlement.ts`: 원 단위 정산과 송금 계산
 
-브라우저에서는 서버 액션을 사용하고 Firestore를 직접 읽거나 수정하지 않습니다. 세부 조회·보관·정산 정책은 [데이터 저장소 설명](docs/data-store.md)에 있습니다.
+브라우저 조회는 계정별 메모리 캐시와 GET API를 사용하고, 저장·삭제는 검증된 서버 액션으로 처리합니다. Firestore에 직접 접근하지 않습니다. 세부 조회·보관·정산 정책과 성능·보안 점검 기록은 [데이터 저장소 설명](docs/data-store.md)에 있습니다.
 
 친구·그룹 삭제는 현재 목록에서 제외하는 보관 처리입니다. 과거 모임의 참여자와 지출은 유지합니다. 확정된 정산은 결과를 저장하고, 수정하려면 먼저 정산을 다시 열어야 합니다. 기존 저장된 결과가 없는 확정 자료는 원 단위 정책으로 재구성했음을 화면에 표시하며, 기록된 회비 사용액은 보존합니다.
 

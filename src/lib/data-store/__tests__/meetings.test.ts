@@ -167,6 +167,13 @@ beforeEach(() => {
 });
 
 describe('resolved meeting roster', () => {
+  it('uses recorded list labels without loading creator or friend documents again', async () => {
+    seedMeeting({ creatorName: '기록된 작성자', participantSnapshot: [{ id: 'f1', name: '첫 참여자' }, { id: 'f2', name: '둘째 참여자' }] });
+    const result = await getMeetings({ includeYears: false });
+    expect(result.meetings[0].participantNames).toEqual({ f1: '첫 참여자', f2: '둘째 참여자' });
+    expect(getUserById).not.toHaveBeenCalled();
+    expect(getFriendsByIds).toHaveBeenCalledWith([]);
+  });
   it('replaces a five-person roster with the four selected IDs on save', async () => {
     seedMeeting({ participantIds: ['a', 'b', 'c', 'd', 'e'], revision: 1 });
     const saved = await updateMeeting('m1', { participantIds: ['a', 'b', 'c', 'd'] }, 1);

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Friend, FriendGroup } from '@/lib/types';
-import { getFriendsByGroupAction } from '@/lib/actions';
+import { getFriendsByGroupAction } from '@/lib/client-actions';
 import { FriendListClient } from './FriendListClient';
 import { AddFriendDialog } from './AddFriendDialog';
 import { Button } from '@/components/ui/button';

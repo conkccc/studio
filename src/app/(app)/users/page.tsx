@@ -1,9 +1,8 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React from 'react';
+import { useAppData } from '@/hooks/use-app-data';
 import { useAuth } from '@/contexts/AuthContext';
-import { getAllFriendGroupsAction, getAllUsersAction } from '@/lib/actions';
-import type { User, FriendGroup } from '@/lib/types';
 import { UserListClient } from '@/features/users/UserListClient';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import Link from 'next/link';
@@ -11,49 +10,11 @@ import { Button } from '@/components/ui/button';
 
 export default function UsersPage() {
   const { currentUser, isAdmin, loading: authLoading } = useAuth();
-  const [users, setUsers] = useState<User[]>([]);
-  const [allFriendGroups, setAllFriendGroups] = useState<FriendGroup[]>([]);
-  const [dataLoading, setDataLoading] = useState(true);
+  const adminData = useAppData('users', {}, isAdmin);
+  const users = adminData.data?.users || [];
+  const allFriendGroups = adminData.data?.groups || [];
+  const dataLoading = adminData.isLoading;
 
-  useEffect(() => {
-    if (authLoading) {
-      setDataLoading(true);
-      return;
-    }
-    if (!isAdmin || !currentUser) {
-      setDataLoading(false);
-      setUsers([]);
-      setAllFriendGroups([]);
-      return;
-    }
-
-    const fetchData = async () => {
-      setDataLoading(true);
-      try {
-        const usersResult = await getAllUsersAction();
-        if (usersResult.success && usersResult.users) {
-          setUsers(usersResult.users);
-        } else {
-          setUsers([]);
-        }
-
-        const groupsResult = await getAllFriendGroupsAction();
-        if (groupsResult.success && groupsResult.groups) {
-          setAllFriendGroups(groupsResult.groups);
-        } else {
-          console.error("Failed to fetch all friend groups:", groupsResult.error);
-          setAllFriendGroups([]);
-        }
-      } catch (error) {
-        console.error("Failed to fetch data for users page:", error);
-        setUsers([]);
-        setAllFriendGroups([]);
-      } finally {
-        setDataLoading(false);
-      }
-    };
-    fetchData();
-  }, [authLoading, isAdmin, currentUser]);
 
   if (authLoading || (isAdmin && dataLoading)) {
     return (
@@ -77,6 +38,7 @@ export default function UsersPage() {
 
   return (
     <div className="space-y-6">
+      {adminData.error && <div role="alert">{adminData.error.message}<Button variant="outline" onClick={() => void adminData.refetch()}>다시 시도</Button></div>}
       <Card>
         <CardHeader>
           <CardTitle>사용자 관리</CardTitle>

@@ -5,7 +5,7 @@ import React, { useState, useTransition, Fragment, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useToast } from '@/hooks/use-toast';
-import { updateFriendAction, deleteFriendAction, getFriendsByGroupAction } from '@/lib/actions';
+import { updateFriendAction, deleteFriendAction, getFriendsByGroupAction } from '@/lib/client-actions';
 import { useAuth } from '@/contexts/AuthContext';
 import {
   AlertDialog,

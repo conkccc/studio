@@ -1,13 +1,14 @@
 'use client';
-import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
+import { useState, useMemo } from 'react';
 import {
   createFriendGroupAction,
   deleteFriendGroupAction,
-  getFriendGroupsForUserAction,
-  getFriendsByGroupAction,
   deleteFriendAction
-} from '@/lib/actions';
+} from '@/lib/client-actions';
 import type { FriendGroup, Friend } from '@/lib/types';
+import { useAppData } from '@/hooks/use-app-data';
+import { useQueryClient } from '@tanstack/react-query';
+import { appQueryKey, dataScope } from '@/lib/app-query-client';
 import { useToast } from '@/hooks/use-toast';
 import { Loader2, Trash2, PlusCircle, ChevronDown, ChevronRight, UserPlus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -22,18 +23,24 @@ type DisplayFriendGroup = FriendGroup & {
 
 export default function FriendGroupListClient() {
   const { currentUser, appUser, loading: authLoading } = useAuth();
-  const [groups, setGroups] = useState<DisplayFriendGroup[]>([]);
-  const requestSequence = useRef(0);
-  const [loadError, setLoadError] = useState<string | null>(null);
+  const groupQuery = useAppData('groups');
+  const groups = (groupQuery.data?.groups || []) as DisplayFriendGroup[];
+  const loadError = groupQuery.error?.message;
   const [newGroupName, setNewGroupName] = useState('');
-  const [isLoading, setIsLoading] = useState(true);
+  const isLoading = authLoading || groupQuery.isLoading;
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isDeletingFriend, setIsDeletingFriend] = useState<string | null>(null);
   const { toast } = useToast();
 
   const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
-  const [friendsInSelectedGroup, setFriendsInSelectedGroup] = useState<Friend[]>([]);
-  const [isLoadingFriends, setIsLoadingFriends] = useState(false);
+  const friendQuery = useAppData('friends', { id: selectedGroupId || undefined }, !!selectedGroupId);
+  const friendsInSelectedGroup = friendQuery.data?.friends || [];
+  const isLoadingFriends = friendQuery.isLoading;
+  const queryClient = useQueryClient();
+  const setFriendsInSelectedGroup = (update: Friend[] | ((previous: Friend[]) => Friend[])) => {
+    const friends = typeof update === 'function' ? update(friendsInSelectedGroup) : update;
+    queryClient.setQueryData(appQueryKey(dataScope(appUser), 'friends', { id: selectedGroupId || undefined }), { success: true, friends });
+  };
 
   const [isAddFriendDialogOpen, setIsAddFriendDialogOpen] = useState(false);
   const [groupIdForAddingFriend, setGroupIdForAddingFriend] = useState<string | null>(null);
@@ -45,38 +52,7 @@ export default function FriendGroupListClient() {
   }, [groups, selectedGroupId]);
 
 
-  const fetchData = useCallback(async () => {
-    if (authLoading || !currentUser?.uid || !appUser?.id) {
-      setIsLoading(false);
-      setGroups([]);
-      return;
-    }
-    const sequence = ++requestSequence.current;
-    setIsLoading(true);
-    setLoadError(null);
-    try {
-      const groupsRes = await getFriendGroupsForUserAction(appUser.id);
-      if (sequence !== requestSequence.current) return;
-
-      if (groupsRes.success && groupsRes.groups) {
-        setGroups(groupsRes.groups as DisplayFriendGroup[]);
-      } else {
-        setLoadError(groupsRes.error || '그룹 목록을 불러오지 못했습니다.');
-        setGroups([]);
-      }
-
-    } catch {
-      if (sequence !== requestSequence.current) return;
-      setLoadError('그룹 목록을 불러오지 못했습니다.');
-      setGroups([]);
-    } finally {
-      if (sequence === requestSequence.current) setIsLoading(false);
-    }
-  }, [currentUser?.uid, appUser, authLoading, toast]);
-
-  useEffect(() => {
-    fetchData();
-  }, [fetchData]);
+  const fetchData = () => groupQuery.refetch();
 
   const handleCreateGroup = async () => {
     if (!newGroupName.trim() || !appUser?.id) return;
@@ -86,7 +62,6 @@ export default function FriendGroupListClient() {
       if (res.success) {
         setNewGroupName('');
         toast({ title: '성공', description: '새 그룹이 추가되었습니다.' });
-        await fetchData();
       } else {
         toast({ title: '오류', description: res.error || '그룹 추가에 실패했습니다.', variant: 'destructive' });
       }
@@ -106,7 +81,6 @@ export default function FriendGroupListClient() {
       const res = await deleteFriendGroupAction(groupId, appUser.id);
       if (res.success) {
         toast({ title: '성공', description: '그룹이 삭제되었습니다.' });
-        await fetchData();
       } else {
         toast({ title: '오류', description: res.error || '그룹 삭제에 실패했습니다.', variant: 'destructive' });
       }
@@ -122,46 +96,12 @@ export default function FriendGroupListClient() {
   // };
 
   const handleSelectGroup = (groupId: string) => {
-    setFriendsInSelectedGroup([]);
     if (selectedGroupId === groupId) {
       setSelectedGroupId(null);
-      setFriendsInSelectedGroup([]);
     } else {
       setSelectedGroupId(groupId);
     }
   };
-
-  useEffect(() => {
-    let active = true;
-    const fetchFriendsForGroup = async () => {
-      if (!selectedGroupId) {
-        setFriendsInSelectedGroup([]);
-        setIsLoadingFriends(false);
-        return;
-      }
-      setIsLoadingFriends(true);
-      try {
-        const response = await getFriendsByGroupAction(selectedGroupId);
-        if (!active) return;
-        if (response.success && response.friends) {
-          setFriendsInSelectedGroup(response.friends);
-        } else {
-          setFriendsInSelectedGroup([]);
-          toast({ title: "오류", description: response.error || "선택된 그룹의 친구 목록을 가져오지 못했습니다.", variant: "destructive" });
-        }
-      } catch (error) {
-        if (!active) return;
-        setFriendsInSelectedGroup([]);
-        toast({ title: "오류", description: "친구 목록 조회 중 예외가 발생했습니다.", variant: "destructive" });
-        console.error("Error fetching friends by group:", error);
-      } finally {
-        if (active) setIsLoadingFriends(false);
-      }
-    };
-
-    void fetchFriendsForGroup();
-    return () => { active = false; };
-  }, [selectedGroupId, toast]);
 
   const handleDeleteFriend = async (friendId: string, friendName: string) => {
     if (!selectedGroupId || !appUser?.id) {
@@ -401,6 +341,7 @@ export default function FriendGroupListClient() {
         </div>
       )}
 
+      {friendQuery.error && <p role="alert" className="text-destructive">{friendQuery.error.message}</p>}
       {loadError && <div role="alert" className="space-y-3 py-6 text-center"><p>{loadError}</p><Button variant="outline" onClick={() => void fetchData()}>다시 시도</Button></div>}
       {groups.length === 0 && !isLoading && !loadError && (
         <p className="text-center text-muted-foreground">표시할 그룹이 없습니다. 새 그룹을 만들어 보세요!</p>

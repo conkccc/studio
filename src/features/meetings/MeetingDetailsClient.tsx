@@ -8,7 +8,7 @@ import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter }
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { format, differenceInCalendarDays, isValid } from 'date-fns';
 import { ko } from 'date-fns/locale';
-import { deleteMeetingAction, finalizeMeetingSettlementAction, reopenMeetingSettlementAction, toggleMeetingShareAction } from '@/lib/actions';
+import { deleteMeetingAction, finalizeMeetingSettlementAction, reopenMeetingSettlementAction, toggleMeetingShareAction } from '@/lib/client-actions';
 import { useToast } from '@/hooks/use-toast';
 import {
   CalendarDays, MapPin, Users as UsersIcon, Edit3, Trash2, PlusCircle, Loader2, ExternalLink, Eye,

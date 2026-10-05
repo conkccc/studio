@@ -113,6 +113,7 @@ export async function getAllParticipantAvailabilitiesAction(meetingPrepId: strin
     const dates = getUpcomingPrepDates(prep);
     return {
       success: true,
+      meetingPrep: prep,
       availabilities: availabilities.filter(availability => prep.participantFriendIds.includes(availability.selectedFriendId))
         .map(availability => reconstructAvailability(availability, dates)),
     };

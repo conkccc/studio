@@ -1,6 +1,10 @@
 'use client';
 
 import React, { useEffect, useState, useMemo, useCallback } from 'react';
+import { useAppData } from '@/hooks/use-app-data';
+import { useQueryClient } from '@tanstack/react-query';
+import { appQueryKey, dataScope } from '@/lib/app-query-client';
+import type { AppReadResults } from '@/lib/app-data';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -8,13 +12,11 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/AuthContext';
 import {
-  getMeetingPrepByIdAction,
   submitParticipantAvailabilityAction,
-  getAllParticipantAvailabilitiesAction,
   toggleMeetingPrepShareAction,
   deleteMeetingPrepAction,
-} from '@/lib/actions';
-import type { MeetingPrep, Friend, ParticipantAvailability } from '@/lib/types';
+} from '@/lib/client-actions';
+import type { MeetingPrep, ParticipantAvailability } from '@/lib/types';
 import { format, getDaysInMonth, startOfMonth, isSameDay, isBefore } from 'date-fns';
 import { ko } from 'date-fns/locale';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -30,17 +32,25 @@ interface MeetingPrepDetailsClientProps {
   meetingPrepId: string;
   shareToken?: string; // Optional: for public share page
 }
+const emptyAvailabilities: ParticipantAvailability[] = [];
 
 export function MeetingPrepDetailsClient({ meetingPrepId, shareToken }: MeetingPrepDetailsClientProps) {
   const { currentUser, appUser, loading: authLoading } = useAuth();
   const router = useRouter();
   const { toast } = useToast();
 
-  const [meetingPrep, setMeetingPrep] = useState<MeetingPrep | null>(null);
-  const [friendsInGroups, setFriendsInGroups] = useState<Friend[]>([]);
-  const [allAvailabilities, setAllAvailabilities] = useState<ParticipantAvailability[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const detail = useAppData('prep-detail', { id: meetingPrepId, shareToken });
+  const meetingPrep = detail.data?.meetingPrep || null;
+  const friendsInGroups = meetingPrep?.participantFriends || [];
+  const allAvailabilities = detail.data?.availabilities || emptyAvailabilities;
+  const loading = (!shareToken && authLoading) || detail.isLoading;
+  const error = detail.error?.message;
+  const queryClient = useQueryClient();
+  const detailKey = appQueryKey(shareToken ? 'public' : dataScope(appUser), 'prep-detail', { id: meetingPrepId, shareToken });
+  const setMeetingPrep = (value: MeetingPrep | null) => queryClient.setQueryData<AppReadResults['prep-detail']>(detailKey, previous => previous ? { ...previous,
+    meetingPrep: value ? { ...previous.meetingPrep, ...value, participantFriends: value.participantFriends ?? previous.meetingPrep?.participantFriends } : null,
+  } : previous);
+  const setAllAvailabilities = (value: ParticipantAvailability[]) => queryClient.setQueryData<AppReadResults['prep-detail']>(detailKey, previous => previous ? { ...previous, availabilities: value } : previous);
 
   const [selectedFriendId, setSelectedFriendId] = useState<string>('');
   const [password, setPassword] = useState<string>('');
@@ -51,49 +61,9 @@ export function MeetingPrepDetailsClient({ meetingPrepId, shareToken }: MeetingP
   const [dragStart, setDragStart] = useState<Date | null>(null);
   const initialDragSelectionState = React.useRef<boolean | null>(null);
 
-  const isCreator = useMemo(() => meetingPrep?.creatorId === currentUser?.uid, [meetingPrep, currentUser]);
+  const isCreator = useMemo(() => appUser?.role === 'user' && meetingPrep?.creatorId === currentUser?.uid, [meetingPrep, currentUser, appUser?.role]);
   const isAdmin = useMemo(() => appUser?.role === 'admin', [appUser]);
   const isOwnerOrAdmin = useMemo(() => isCreator || isAdmin, [isCreator, isAdmin]);
-  const isPublicShare = useMemo(() => !!shareToken, [shareToken]);
-
-  const fetchMeetingPrepData = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const prepResult = await getMeetingPrepByIdAction(meetingPrepId, shareToken ? undefined : currentUser?.uid, shareToken);
-      if (!prepResult.success || !prepResult.meetingPrep) {
-        setError(prepResult.error || '모임 준비 정보를 불러오는데 실패했습니다.');
-        setLoading(false);
-        return;
-      }
-      setMeetingPrep(prepResult.meetingPrep || null);
-
-      // participantFriends are now populated by getMeetingPrepByIdAction
-      if (prepResult.meetingPrep?.participantFriends) {
-        setFriendsInGroups(prepResult.meetingPrep.participantFriends);
-      } else {
-        setFriendsInGroups([]);
-      }
-
-      // Fetch all participant availabilities
-      const availResult = await getAllParticipantAvailabilitiesAction(meetingPrepId, shareToken ? undefined : currentUser?.uid, shareToken);
-      if (availResult.success && availResult.availabilities) {
-        setAllAvailabilities(availResult.availabilities);
-      }
-
-    } catch (err) {
-      console.error('Failed to fetch meeting prep data:', err);
-      setError('데이터를 불러오는 중 오류가 발생했습니다.');
-    } finally {
-      setLoading(false);
-    }
-  }, [meetingPrepId, currentUser, shareToken]);
-
-  useEffect(() => {
-    if (!authLoading && (currentUser || isPublicShare)) {
-      fetchMeetingPrepData();
-    }
-  }, [authLoading, currentUser, isPublicShare, fetchMeetingPrepData]);
 
   // Update currentAvailability when selectedFriendId or allAvailabilities changes
   useEffect(() => {
@@ -232,9 +202,8 @@ export function MeetingPrepDetailsClient({ meetingPrepId, shareToken }: MeetingP
       if (result.success) {
         toast({ title: "제출 완료", description: "참석 가능 날짜가 성공적으로 저장되었습니다." });
         setPassword('');
-        const availResult = await getAllParticipantAvailabilitiesAction(meetingPrepId, shareToken ? undefined : currentUser?.uid, shareToken);
-        if (availResult.success && availResult.availabilities) {
-          setAllAvailabilities(availResult.availabilities);
+        if (result.availability) {
+          setAllAvailabilities([...allAvailabilities.filter(item => item.selectedFriendId !== selectedFriendId), result.availability]);
         }
       } else {
         toast({ title: "제출 실패", description: result.error || "날짜 제출 중 오류가 발생했습니다.", variant: "destructive" });

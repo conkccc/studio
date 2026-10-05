@@ -11,7 +11,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Check, ChevronsUpDown, Loader2, MapPinIcon, Eye, ExternalLink } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { Expense, Friend, Meeting, FriendGroup } from '@/lib/types';
-import { createMeetingAction, updateMeetingAction } from '@/lib/actions';
+import { createMeetingAction, updateMeetingAction } from '@/lib/client-actions';
 import { useToast } from '@/hooks/use-toast';
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { Switch } from '@/components/ui/switch';

@@ -1,10 +1,12 @@
 'use client';
 
-import { useEffect, useRef, useState, type FormEvent } from 'react';
-import type { Friend, FriendGroup, Meeting } from '@/lib/types';
-import { usePathname, useRouter, useSearchParams } from 'next/navigation';
+import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
+import type { Friend, FriendGroup } from '@/lib/types';
+import { usePathname, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { useAuth } from '@/contexts/AuthContext';
+import { useQuery } from '@tanstack/react-query';
+import { appQueryKey, dataScope } from '@/lib/app-query-client';
 import { fetchMeetingList } from './meeting-list-api';
 import { MeetingCard } from './MeetingCard';
 import { Button } from '@/components/ui/button';
@@ -30,20 +32,12 @@ function readHistory(value: string | null): string[] {
 
 export function MeetingListClient({ allFriends, friendGroups, filtersReady }: MeetingListClientProps) {
   const { currentUser, loading: authLoading, appUser } = useAuth();
-  const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const [meetings, setMeetings] = useState<Meeting[]>([]);
-  const [availableYears, setAvailableYears] = useState<number[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [retry, setRetry] = useState(0);
-  const [nextCursor, setNextCursor] = useState<string | null>(null);
-  const [hasMore, setHasMore] = useState(false);
   const [search, setSearch] = useState(searchParams.get('search') || '');
-  const requestSequence = useRef(0);
   const query = searchParams.toString();
-  const preferences = useMeetingListPreferences(authLoading ? undefined : currentUser?.uid, query, pathname, router.replace);
+  const replaceQuery = useCallback((url: string) => window.history.replaceState(null, '', url), []);
+  const preferences = useMeetingListPreferences(authLoading ? undefined : currentUser?.uid, query, pathname, replaceQuery);
   const year = searchParams.get('year') || 'all';
   const type = searchParams.get('type') || 'all';
   const groupId = searchParams.get('groupId') || 'all';
@@ -53,50 +47,31 @@ export function MeetingListClient({ allFriends, friendGroups, filtersReady }: Me
 
   useEffect(() => { setSearch(searchParams.get('search') || ''); }, [searchParams]);
 
-  useEffect(() => {
-    if (authLoading) return;
-    const sequence = ++requestSequence.current;
-    if (!currentUser) {
-      setMeetings([]);
-      setIsLoading(false);
-      return;
-    }
-    if (!preferences.ready) return;
-    let active = true;
-    const controller = new AbortController();
-    setIsLoading(true);
-    setError(null);
+  const filters = useMemo(() => {
     const params = new URLSearchParams(query);
     const numericYear = Number(params.get('year'));
-    const fetchData = async () => {
-      try {
-        const result = await fetchMeetingList({
-            year: Number.isInteger(numericYear) && numericYear > 1900 ? numericYear : undefined,
-            limitParam: 9,
-            groupId: params.get('groupId') || undefined,
-            type: params.get('type') === 'regular' ? 'regular' : params.get('type') === 'temporary' ? 'temporary' : undefined,
-            status: params.get('status') === 'pending' ? 'pending' : params.get('status') === 'finalized' ? 'finalized' : undefined,
-            search: params.get('search') || undefined,
-            cursor: params.get('cursor') || undefined,
-          }, controller.signal);
-        if (!active || requestSequence.current !== sequence) return;
-        if (!result.success) throw new Error(('error' in result && result.error) || '모임 목록을 불러오지 못했습니다.');
-        setMeetings(result.meetings || []);
-        setAvailableYears(result.availableYears || []);
-        setNextCursor(result.nextCursor || null);
-        setHasMore(Boolean(result.hasMore));
-      } catch (cause) {
-        if (!active || requestSequence.current !== sequence) return;
-        setError(cause instanceof Error ? cause.message : '모임 목록을 불러오지 못했습니다.');
-      } finally {
-        if (active && requestSequence.current === sequence) setIsLoading(false);
-      }
+    return {
+      year: Number.isInteger(numericYear) && numericYear > 1900 ? numericYear : undefined,
+      limitParam: 9, groupId: params.get('groupId') || undefined,
+      type: params.get('type') === 'regular' ? 'regular' as const : params.get('type') === 'temporary' ? 'temporary' as const : undefined,
+      status: params.get('status') === 'pending' ? 'pending' as const : params.get('status') === 'finalized' ? 'finalized' as const : undefined,
+      search: params.get('search') || undefined, cursor: params.get('cursor') || undefined,
     };
-    void fetchData();
-    return () => { active = false; controller.abort(); };
-  }, [authLoading, currentUser?.uid, query, retry, preferences.ready]);
+  }, [query]);
+  const list = useQuery({
+    queryKey: appQueryKey(dataScope(appUser), 'meetings', filters),
+    queryFn: ({ signal }) => fetchMeetingList(filters, signal, appUser?.id),
+    enabled: !authLoading && !!currentUser && !!appUser && preferences.ready,
+  });
+  const meetings = list.data?.meetings || [];
+  const availableYears = list.data?.availableYears || [];
+  const nextCursor = list.data?.nextCursor;
+  const hasMore = Boolean(list.data?.hasMore);
+  const isLoading = authLoading || !preferences.ready || list.isLoading;
+  const error = list.error?.message;
 
-  const navigate = (params: URLSearchParams) => router.push(`${pathname}${params.size ? `?${params}` : ''}`, { scroll: false });
+  // These filters are fetched by the client API; a server route navigation would repeat layout/auth work.
+  const navigate = (params: URLSearchParams) => window.history.pushState(null, '', `${pathname}${params.size ? `?${params}` : ''}`);
   const changeFilter = (key: string, value: string) => {
     const params = new URLSearchParams(query);
     if (!value || value === 'all') params.delete(key); else params.set(key, value);
@@ -125,6 +100,7 @@ export function MeetingListClient({ allFriends, friendGroups, filtersReady }: Me
       <CardHeader className="space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <CardTitle>모임 목록</CardTitle>
+          <Button variant="ghost" size="sm" onClick={() => void list.refetch()} disabled={list.isFetching}><RotateCcw className="mr-2 h-4 w-4" />새로고침</Button>
           {appUser && ['admin', 'user'].includes(appUser.role) && <Button asChild><Link href="/meetings/new"><PlusCircle className="mr-2 h-4 w-4" />새 모임</Link></Button>}
         </div>
         <form className="flex gap-2" onSubmit={submitSearch} role="search">
@@ -151,9 +127,10 @@ export function MeetingListClient({ allFriends, friendGroups, filtersReady }: Me
         </div>
         {hasFilters && <Button variant="ghost" size="sm" className="self-start" onClick={() => { preferences.resetRememberedSelection(); navigate(new URLSearchParams()); }}><RotateCcw className="mr-2 h-4 w-4" />필터 초기화</Button>}
       </CardHeader>
-      <CardContent aria-busy={isLoading}>
+      <CardContent aria-busy={list.isFetching}>
+        {list.data && error && <p role="alert" className="mb-3 text-sm text-destructive">업데이트하지 못해 이전 목록을 표시합니다. {error} <Button size="sm" variant="ghost" onClick={() => void list.refetch()}>다시 시도</Button></p>}
         {isLoading ? <div role="status" className="flex h-48 items-center justify-center gap-2 text-muted-foreground"><Loader2 className="h-6 w-6 animate-spin" />모임을 불러오고 있습니다.</div>
-          : error ? <div role="alert" className="space-y-3 py-10 text-center"><p>{error}</p><Button variant="outline" onClick={() => setRetry(value => value + 1)}>다시 시도</Button></div>
+          : error && !list.data ? <div role="alert" className="space-y-3 py-10 text-center"><p>{error}</p><Button variant="outline" onClick={() => void list.refetch()}>다시 시도</Button></div>
           : meetings.length ? <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">{meetings.map(meeting => <MeetingCard key={meeting.id} meeting={meeting} allFriends={allFriends} />)}</div>
           : <div className="space-y-2 py-10 text-center text-muted-foreground"><p>{hasFilters ? '조건에 맞는 모임이 없습니다.' : '등록된 모임이 없습니다.'}</p>{hasMore && <p className="text-sm">다음 목록에서도 같은 조건으로 찾아볼 수 있습니다.</p>}</div>}
         {!isLoading && !error && (history.length > 0 || hasMore) && <div className="flex items-center justify-center gap-4 pt-6">

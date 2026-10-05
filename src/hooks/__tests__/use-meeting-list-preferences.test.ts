@@ -23,6 +23,17 @@ beforeEach(() => { values.clear(); replace.mockClear(); vi.stubGlobal('window', 
 afterEach(() => { act(() => renderer?.unmount()); renderer = undefined; vi.unstubAllGlobals(); });
 
 describe('meeting list restoration lifecycle', () => {
+  it('is ready on the first render when returning to an explicit filter URL', () => {
+    const initial: boolean[] = [];
+    function ReturningPage() {
+      const preferences = useMeetingListPreferences('user', 'year=2026', '/meetings', replace);
+      initial.push(preferences.ready);
+      return null;
+    }
+    act(() => { renderer = create(React.createElement(ReturningPage)); });
+    expect(initial[0]).toBe(true);
+    expect(replace).not.toHaveBeenCalled();
+  });
   it('waits for the restored URL and does not overwrite saved filters with defaults', () => {
     saveMeetingListSelection(memory, 'user', meetingListSelectionFromQuery('year=2025&status=pending'));
     render('user', '');

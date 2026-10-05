@@ -3,6 +3,7 @@ import { FieldPath } from 'firebase-admin/firestore';
 import type { Friend, FriendGroup } from '../types';
 import { database, documentData, collectionData, cleanWrite, chunks, FieldValue } from './shared';
 import { getUserById } from './users';
+import { currentRequestUser } from '../auth/request-user';
 
 export const FRIENDS_COLLECTION = 'friends';
 export const FRIEND_GROUPS_COLLECTION = 'friendGroups';
@@ -74,7 +75,8 @@ export async function getFriendGroupById(id: string): Promise<FriendGroup | unde
 
 export async function getFriendGroupsByUser(userId: string, includeArchived = false): Promise<FriendGroup[]> {
   if (!userId) return [];
-  const user = await getUserById(userId);
+  const verifiedUser = currentRequestUser();
+  const user = verifiedUser?.id === userId ? verifiedUser : await getUserById(userId);
   const ids = Array.from(new Set(user?.friendGroupIds || []));
   const snapshots = await Promise.all([
     database().collection(FRIEND_GROUPS_COLLECTION).where('ownerUserId', '==', userId).get(),
