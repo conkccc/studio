@@ -21,6 +21,8 @@ npm run build
 npm audit --omit=dev
 ```
 
+Vercel의 CommonJS 로더에서는 `jwks-rsa`가 ESM 전용 `jose` 6을 `require()`하면 인증 API가 시작되지 않습니다. `package.json`의 `overrides`는 `jwks-rsa`에서 사용하는 `jose`만 CommonJS 호환 버전인 `5.10.0`으로 고정합니다. `sdk-runtime.test.ts`는 ESM require 지원을 끈 별도 Node 프로세스에서 실제 Firebase Auth 모듈 로딩과 JWKS 서명 검증을 확인합니다. 이 override를 제거하거나 변경할 때도 해당 테스트를 통과해야 합니다.
+
 ## 환경 설정
 
 `.env.example`을 `.env.local`로 복사하고 기존 Firebase 프로젝트의 공개 설정을 입력합니다. Google Maps API 키는 선택 사항이며, 키 없이도 장소를 직접 입력할 수 있습니다.
