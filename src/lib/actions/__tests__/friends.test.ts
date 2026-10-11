@@ -55,6 +55,26 @@ describe('authorized friend reads', () => {
 });
 
 describe('friend management', () => {
+  it('validates account details on the server before creating or updating friends', async () => {
+    const paymentInfo = { bankName: '국민은행', accountNumber: '123&amount=1', accountHolder: '친구' };
+    expect((await createFriendAction({ name: '친구', groupId: 'g1', currentUserId: 'u1', paymentInfo })).success).toBe(false);
+    expect((await updateFriendAction('f1', { name: '친구', paymentInfo })).success).toBe(false);
+    expect(addFriend).not.toHaveBeenCalled();
+    expect(updateFriend).not.toHaveBeenCalled();
+  });
+
+  it('saves and clears payment info through the existing owner authorization', async () => {
+    const paymentInfo = { bankName: '국민은행', accountNumber: '0123-456', accountHolder: '친구' };
+    expect((await createFriendAction({ name: '친구', groupId: 'g1', currentUserId: 'u1', paymentInfo })).success).toBe(true);
+    expect(addFriend).toHaveBeenLastCalledWith(expect.objectContaining({ paymentInfo }));
+    expect((await updateFriendAction('f1', { name: '친구', paymentInfo: { bankName: '', accountNumber: '', accountHolder: '' } })).success).toBe(true);
+    expect(updateFriend).toHaveBeenLastCalledWith('f1', expect.objectContaining({ paymentInfo: { bankName: '', accountNumber: '', accountHolder: '' } }));
+    vi.mocked(ensureUserPermission).mockResolvedValue({ success: true, user: makeUser({ id: 'outsider' }) });
+    vi.mocked(updateFriend).mockClear();
+    expect((await updateFriendAction('f1', { name: '친구', paymentInfo })).success).toBe(false);
+    expect(updateFriend).not.toHaveBeenCalled();
+  });
+
   it('denies adding a friend to an unrelated or read-only referenced group', async () => {
     vi.mocked(ensureUserPermission).mockResolvedValue({ success: true, user: makeUser({ id: 'reader', friendGroupIds: ['g1'] }) });
     expect((await createFriendAction({ name: '친구', groupId: 'g1', currentUserId: 'reader' })).success).toBe(false);

@@ -20,6 +20,8 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Edit3, Trash2, User, Check, X, Loader2 } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import type { PaymentInfo } from '@/lib/payment-info';
+import { PaymentInfoFields } from './PaymentInfoFields';
 
 interface FriendListClientProps {
   initialFriends: Friend[];
@@ -30,7 +32,7 @@ interface FriendListClientProps {
 export function FriendListClient({ initialFriends, isReadOnly = false, onFriendDeleted }: FriendListClientProps & { isReadOnly?: boolean }) {
   const [friends, setFriends] = useState<Friend[]>(initialFriends);
   const [editingFriendId, setEditingFriendId] = useState<string | null>(null);
-  const [editForm, setEditForm] = useState<{ name: string; description?: string }>({ name: '', description: '' });
+  const [editForm, setEditForm] = useState<{ name: string; description?: string; paymentInfo: PaymentInfo }>({ name: '', description: '', paymentInfo: {} });
   const { toast } = useToast();
   const [isPending, startTransition] = useTransition();
   const { appUser } = useAuth();
@@ -41,7 +43,7 @@ export function FriendListClient({ initialFriends, isReadOnly = false, onFriendD
 
   const handleEdit = (friend: Friend) => {
     setEditingFriendId(friend.id);
-    setEditForm({ name: friend.name, description: friend.description || '' });
+    setEditForm({ name: friend.name, description: friend.description || '', paymentInfo: friend.paymentInfo || {} });
   };
 
   const handleCancelEdit = () => {
@@ -54,7 +56,7 @@ export function FriendListClient({ initialFriends, isReadOnly = false, onFriendD
       return;
     }
     startTransition(async () => {
-      const result = await updateFriendAction(id, { name: editForm.name, description: editForm.description });
+      const result = await updateFriendAction(id, editForm);
       if (result.success && result.friend) {
         setFriends(prev => prev.map(f => (f.id === id ? result.friend! : f)));
         setEditingFriendId(null);
@@ -103,7 +105,7 @@ export function FriendListClient({ initialFriends, isReadOnly = false, onFriendD
           <li key={friend.id} className="flex items-center justify-between p-3 bg-secondary/50 rounded-lg shadow-sm hover:bg-secondary transition-colors">
             {editingFriendId === friend.id ? (
               <Fragment>
-                <div className="flex-grow grid grid-cols-2 gap-2 items-center mr-2">
+                <div className="min-w-0 flex-grow grid grid-cols-1 sm:grid-cols-2 gap-2 items-center mr-2">
                   <Input
                     type="text"
                     value={editForm.name}
@@ -120,6 +122,7 @@ export function FriendListClient({ initialFriends, isReadOnly = false, onFriendD
                     placeholder="설명 (선택)"
                     disabled={isPending || isReadOnly}
                   />
+                  <div className="sm:col-span-2"><PaymentInfoFields value={editForm.paymentInfo} onChange={paymentInfo => setEditForm({ ...editForm, paymentInfo })} disabled={isPending || isReadOnly} /></div>
                 </div>
                 <div className="flex space-x-1">
                   <Tooltip>

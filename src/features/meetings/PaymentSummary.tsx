@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import type { Expense, Friend, Meeting } from '@/lib/types';
 import { calculateSettlement, isSettlementSnapshot, restoreSettlementNames, type SettlementParticipant, type SettlementTransfer } from '@/lib/settlement';
 import { isUnresolvedParticipantName } from '@/lib/participant-names';
@@ -8,6 +8,8 @@ import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter }
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { ArrowRight, CheckCircle2, PiggyBank } from 'lucide-react';
+import type { PaymentInfo } from '@/lib/payment-info';
+import { TransferAction } from './TransferAction';
 
 interface PaymentSummaryProps {
   meeting: Meeting;
@@ -20,8 +22,9 @@ const won = (amount: number) => `${amount.toLocaleString('ko-KR')}원`;
 const balanceLabel = (person: SettlementParticipant) => person.finalAmount > 0 ? '받을 금액' : person.finalAmount < 0 ? '보낼 금액' : '추가 정산 없음';
 const balanceClass = (person: SettlementParticipant) => person.finalAmount > 0 ? 'text-emerald-600 dark:text-emerald-400' : person.finalAmount < 0 ? 'text-orange-600 dark:text-orange-400' : 'text-muted-foreground';
 
-function TransferGroup({ title, id, transfers, nameFor }: {
+function TransferGroup({ title, id, transfers, nameFor, paymentFor }: {
   title: string; id: string; transfers: SettlementTransfer[]; nameFor: (id: string | null) => string;
+  paymentFor: (id: string | null) => PaymentInfo | undefined;
 }) {
   if (!transfers.length) return null;
   const total = transfers.reduce((sum, transfer) => sum + transfer.amount, 0);
@@ -40,13 +43,16 @@ function TransferGroup({ title, id, transfers, nameFor }: {
     <ul className="divide-y">
       {Array.from(bySender, ([sender, rows]) => <li key={sender ?? 'reserve-fund'}>
         {sender !== null && rows.length > 1 && <div className="flex flex-wrap justify-between gap-x-3 gap-y-1 bg-muted/20 px-4 py-2 text-xs"><span className="font-medium">보내는 사람: {nameFor(sender)}</span><span className="text-muted-foreground tabular-nums">보낼 합계 {won(rows.reduce((sum, row) => sum + row.amount, 0))}</span></div>}
-        <ul className="divide-y divide-border/50">{rows.map((transfer, index) => <li key={`${transfer.to}-${index}`} className="flex items-start justify-between gap-3 px-4 py-2">
+        <ul className="divide-y divide-border/50">{rows.map((transfer, index) => <li key={`${transfer.to}-${index}`} className="space-y-2 px-4 py-3">
+        <div className="flex items-start justify-between gap-3">
         <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0 text-sm leading-6">
           <span className="break-words font-medium">{nameFor(transfer.from)}</span>
           <ArrowRight aria-label="송금 대상" className="h-4 w-4 shrink-0 text-muted-foreground" />
           <span className="break-words font-medium">{nameFor(transfer.to)}</span>
         </div>
         <span className="shrink-0 whitespace-nowrap text-sm font-semibold leading-6 tabular-nums">{won(transfer.amount)}</span>
+        </div>
+        <TransferAction recipient={nameFor(transfer.to)} amount={transfer.amount} paymentInfo={paymentFor(transfer.to)} />
         </li>)}</ul>
       </li>)}
     </ul>
@@ -54,6 +60,7 @@ function TransferGroup({ title, id, transfers, nameFor }: {
 }
 
 export function PaymentSummary({ meeting, expenses, participants, allFriends }: PaymentSummaryProps) {
+  const [selectedPerson, setSelectedPerson] = useState('');
   const settlement = useMemo(() => {
     const saved = meeting.settlementSnapshot;
     return meeting.isSettled && isSettlementSnapshot(saved)
@@ -69,6 +76,11 @@ export function PaymentSummary({ meeting, expenses, participants, allFriends }: 
   const participantTransfers = settlement.transfers.filter(transfer => transfer.kind === 'participant');
   const fundTransfers = settlement.transfers.filter(transfer => transfer.kind === 'fund');
   const refundTransfers = settlement.transfers.filter(transfer => transfer.kind === 'refund');
+  const paymentDirectory = new Map([...participants, ...allFriends].map(friend => [friend.id, friend.paymentInfo]));
+  const paymentFor = (id: string | null) => id === null ? undefined : paymentDirectory.get(id);
+  const selectedId = settlement.participants.some(person => person.friendId === selectedPerson) ? selectedPerson : '';
+  const myTransfers = settlement.transfers.filter(transfer => transfer.from === selectedId);
+  const myIncoming = settlement.transfers.filter(transfer => transfer.to === selectedId).reduce((total, transfer) => total + transfer.amount, 0);
 
   return <Card>
     <CardHeader className="space-y-4">
@@ -113,10 +125,21 @@ export function PaymentSummary({ meeting, expenses, participants, allFriends }: 
 
       <section aria-labelledby="settlement-transfers-title" className="space-y-3">
         <div><h3 id="settlement-transfers-title" className="font-semibold">송금 안내</h3><p className="mt-1 text-sm text-muted-foreground">{hasExpenses ? '먼저 결제한 금액을 반영한 송금 안내입니다. 실제 송금 완료 여부는 직접 확인해주세요.' : '지출 내역을 등록하면 송금 대상과 금액을 확인할 수 있습니다.'}</p></div>
+        {hasExpenses && settlement.participants.length > 0 && <div className="space-y-3 rounded-lg border border-primary/20 bg-primary/5 p-4">
+          <label htmlFor="settlement-my-name" className="block text-sm font-medium">내 이름 선택</label>
+          <select id="settlement-my-name" value={selectedId} onChange={event => setSelectedPerson(event.target.value)} className="h-11 w-full rounded-md border bg-background px-3 text-sm">
+            <option value="">이름을 선택해 내 송금 내역을 확인하세요</option>
+            {settlement.participants.map(person => <option key={person.friendId} value={person.friendId}>{person.name}{settlement.participants.filter(other => other.name === person.name).length > 1 ? ` (${person.friendId.slice(-6)})` : ''}</option>)}
+          </select>
+          {selectedId && <div aria-live="polite" className="space-y-3">
+            {myTransfers.length ? <TransferGroup title="내가 보낼 내역" id="my-transfers-title" transfers={myTransfers} nameFor={nameFor} paymentFor={paymentFor} /> : <p className="text-sm">추가로 보낼 금액이 없습니다.</p>}
+            {myIncoming > 0 && <p className="text-sm">받을 금액: <strong>{won(myIncoming)}</strong></p>}
+          </div>}
+        </div>}
         {settlement.transfers.length ? <div className="space-y-3">
-          <TransferGroup title="참여자 간 송금" id="participant-transfers-title" transfers={participantTransfers} nameFor={nameFor} />
-          <TransferGroup title="회비에서 결제자에게 지급" id="fund-transfers-title" transfers={fundTransfers} nameFor={nameFor} />
-          <TransferGroup title="회비에서 미참가자에게 환급" id="refund-transfers-title" transfers={refundTransfers} nameFor={nameFor} />
+          <TransferGroup title="참여자 간 송금" id="participant-transfers-title" transfers={participantTransfers} nameFor={nameFor} paymentFor={paymentFor} />
+          <TransferGroup title="회비에서 결제자에게 지급" id="fund-transfers-title" transfers={fundTransfers} nameFor={nameFor} paymentFor={paymentFor} />
+          <TransferGroup title="회비에서 미참가자에게 환급" id="refund-transfers-title" transfers={refundTransfers} nameFor={nameFor} paymentFor={paymentFor} />
         </div> : <p className="rounded-lg bg-muted/40 p-4 text-sm text-muted-foreground">{hasExpenses ? '현재 계산 결과에서 추가로 송금할 금액이 없습니다.' : '아직 계산할 지출 내역이 없습니다.'}</p>}
       </section>
 

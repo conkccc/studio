@@ -119,6 +119,29 @@ describe('settlement summary presentation', () => {
   it('discloses reconstruction and old recorded fund amounts for a legacy finalized meeting', () => {
     const root = render(makeMeeting({ participantIds: ['a', 'b'], isSettled: true, settledReserveFundAmount: 5000 }), [makeExpense({ paidById: 'a', splitAmongIds: ['a', 'b'] })]);
     expect(text(root)).toContain('과거 송금 내역과 다를 수 있습니다');
-    expect(text(root.findByType('details'))).toContain('기존에 기록된 회비 사용액: 5,000원');
+    expect(text(root.findAllByType('details').find(node => text(node).includes('계산 기준과 정산 상태'))!)).toContain('기존에 기록된 회비 사용액: 5,000원');
+  });
+
+  it('selects outgoing transfers by ID and builds a handoff from the recipient account and saved amount', () => {
+    const directory = friends.map((friend, index) => ({ ...friend, paymentInfo: { bankName: '국민은행', accountNumber: `000-${index}123`, accountHolder: friend.name } }));
+    const meeting = makeMeeting({ participantIds: ['a', 'b', 'c'] });
+    const expenses = [makeExpense({ paidById: 'a', totalAmount: 30000, splitAmongIds: meeting.participantIds })];
+    const snapshot = calculateSettlement({ meeting, expenses, participants: directory });
+    act(() => { renderer = create(React.createElement(PaymentSummary, {
+      meeting: { ...meeting, isSettled: true, settlementSnapshot: snapshot },
+      expenses: [{ ...expenses[0], totalAmount: 99000 }], participants: directory, allFriends: directory,
+    })); });
+    const root = renderer!.root;
+    act(() => root.findByType('select').props.onChange({ target: { value: 'b' } }));
+    const mine = root.findByProps({ 'aria-labelledby': 'my-transfers-title' });
+    expect(text(mine)).toContain('10,000원');
+    expect(text(mine)).not.toContain('이름-c');
+    const destination = new URL(mine.findByType('a').props.href);
+    expect(destination.protocol).toBe('supertoss:');
+    expect(destination.searchParams.get('accountNo')).toBe('0000123');
+    expect(destination.searchParams.get('amount')).toBe('10000');
+    act(() => root.findByType('select').props.onChange({ target: { value: 'a' } }));
+    expect(root.findAllByProps({ 'aria-labelledby': 'my-transfers-title' })).toHaveLength(0);
+    expect(text(root)).toContain('추가로 보낼 금액이 없습니다.받을 금액: 20,000원');
   });
 });

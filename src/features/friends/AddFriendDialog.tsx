@@ -22,10 +22,13 @@ import { useAuth } from '@/contexts/AuthContext';
 import { Loader2 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import type { Friend } from '@/lib/types';
+import { paymentInfoSchema } from '@/lib/payment-info';
+import { PaymentInfoFields } from './PaymentInfoFields';
 
 const friendSchema = z.object({
   name: z.string().min(1, '이름을 입력해주세요.').max(50, '이름은 50자 이내여야 합니다.'),
   description: z.string().max(100, '설명은 100자 이내여야 합니다.').optional(),
+  paymentInfo: paymentInfoSchema,
 });
 
 type FriendFormData = z.infer<typeof friendSchema>;
@@ -48,6 +51,7 @@ export function AddFriendDialog({ triggerButton, onFriendAdded, groupId }: AddFr
     defaultValues: {
       name: '',
       description: '',
+      paymentInfo: {},
     },
   });
 
@@ -64,6 +68,7 @@ export function AddFriendDialog({ triggerButton, onFriendAdded, groupId }: AddFr
       const result = await createFriendAction({
         name: data.name,
         description: data.description,
+        paymentInfo: data.paymentInfo,
         groupId: groupId,
         currentUserId: appUser.id
       });
@@ -90,7 +95,7 @@ export function AddFriendDialog({ triggerButton, onFriendAdded, groupId }: AddFr
       <DialogTrigger asChild>
         {triggerButton ? triggerButton : <Button>새 친구 추가</Button>}
       </DialogTrigger>
-      <DialogContent className="sm:max-w-[425px]">
+      <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-[425px]">
         <DialogHeader>
           <DialogTitle>새 친구 추가</DialogTitle>
           <DialogDescription>새로운 친구의 정보를 입력해주세요.</DialogDescription>
@@ -128,6 +133,8 @@ export function AddFriendDialog({ triggerButton, onFriendAdded, groupId }: AddFr
               {form.formState.errors.description.message}
             </p>
           )}
+          <PaymentInfoFields value={form.watch('paymentInfo')} onChange={value => form.setValue('paymentInfo', value, { shouldValidate: true })} disabled={isPending} />
+          {(['bankName', 'accountNumber', 'accountHolder'] as const).map(key => form.formState.errors.paymentInfo?.[key]?.message && <p key={key} role="alert" className="text-sm text-destructive">{form.formState.errors.paymentInfo[key]?.message}</p>)}
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => setOpen(false)} disabled={isPending}>
               취소

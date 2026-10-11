@@ -18,6 +18,7 @@ export type FriendGroup = {
 };
 
 export type Friend = {
+  paymentInfo?: import('./payment-info').PaymentInfo;
   isArchived?: boolean;
   id: string;
   name: string; // ?대쫫(?꾩닔)

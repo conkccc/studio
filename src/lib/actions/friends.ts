@@ -5,14 +5,18 @@ import { addFriend, updateFriend, deleteFriend, getFriends, getFriendsByGroup, d
 import type { Friend } from '../types';
 import { ensureUserPermission } from './permissions';
 import { ensureGroupAccess, accessibleGroupIds } from '../services/access';
+import { paymentInfoSchema, type PaymentInfo } from '../payment-info';
 
-export async function createFriendAction(payload: { name: string; description?: string; groupId: string; currentUserId: string }) {
+export async function createFriendAction(payload: { name: string; description?: string; paymentInfo?: PaymentInfo; groupId: string; currentUserId: string }) {
   if (!payload.name?.trim() || payload.name.length > 100) return { success: false, error: '친구 이름은 1~100자로 입력해주세요.' };
   if (!payload.groupId) return { success: false, error: '그룹 ID가 지정되지 않았습니다.' };
   try {
     const access = await ensureGroupAccess(payload.groupId, payload.currentUserId, true);
     if (!access.success) return access;
-    const friend = await addFriend({ name: payload.name.trim(), description: payload.description?.slice(0, 500) || '', groupId: payload.groupId });
+    const payment = paymentInfoSchema.optional().safeParse(payload.paymentInfo);
+    if (!payment.success) return { success: false, error: payment.error.issues[0].message };
+    const friend = await addFriend({ name: payload.name.trim(), description: payload.description?.slice(0, 500) || '', groupId: payload.groupId,
+      ...(payment.data !== undefined ? { paymentInfo: payment.data } : {}) });
     revalidatePath('/friends');
     return { success: true, friend };
   } catch (error) { return { success: false, error: error instanceof Error ? error.message : '친구 추가에 실패했습니다.' }; }
@@ -42,7 +46,10 @@ export async function updateFriendAction(id: string, updates: Partial<Omit<Frien
     const access = await ensureGroupAccess(friend.groupId, undefined, true);
     if (!access.success) return access;
     if (!updates.name?.trim() || updates.name.length > 100) return { success: false, error: '친구 이름을 확인해주세요.' };
-    const updated = await updateFriend(id, { name: updates.name.trim(), description: updates.description?.slice(0, 500) || '' });
+    const payment = paymentInfoSchema.optional().safeParse(updates.paymentInfo);
+    if (!payment.success) return { success: false, error: payment.error.issues[0].message };
+    const updated = await updateFriend(id, { name: updates.name.trim(), description: updates.description?.slice(0, 500) || '',
+      ...(payment.data !== undefined ? { paymentInfo: payment.data } : {}) });
     if (!updated) return { success: false, error: '친구를 찾을 수 없습니다.' };
     revalidatePath('/friends');
     return { success: true, friend: updated };
