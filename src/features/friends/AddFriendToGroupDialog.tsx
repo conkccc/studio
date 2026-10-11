@@ -22,10 +22,13 @@ import { createFriendAction } from '@/lib/client-actions';
 import type { Friend } from '@/lib/types';
 import { useToast } from '@/hooks/use-toast';
 import { Loader2 } from 'lucide-react';
+import { paymentInfoSchema } from '@/lib/payment-info';
+import { PaymentInfoFields } from './PaymentInfoFields';
 
 const addFriendSchema = z.object({
   name: z.string().min(1, '친구 이름은 필수입니다.').max(50, '친구 이름은 50자 이내여야 합니다.'),
   description: z.string().max(100, '설명은 100자 이내여야 합니다.').optional(),
+  paymentInfo: paymentInfoSchema,
 });
 
 type AddFriendFormData = z.infer<typeof addFriendSchema>;
@@ -54,12 +57,13 @@ export function AddFriendToGroupDialog({
     defaultValues: {
       name: '',
       description: '',
+      paymentInfo: {},
     },
   });
 
   useEffect(() => {
     if (isOpen) {
-      form.reset({ name: '', description: '' });
+      form.reset({ name: '', description: '', paymentInfo: {} });
     }
   }, [isOpen, groupId, form]);
 
@@ -94,7 +98,7 @@ export function AddFriendToGroupDialog({
 
   return (
     <Dialog open={isOpen} onOpenChange={setIsOpen}>
-      <DialogContent className="sm:max-w-[425px]">
+      <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-[425px]">
         <DialogHeader>
           <DialogTitle>'{groupName || groupId}' 그룹에 새 친구 추가</DialogTitle>
           <DialogDescription>
@@ -126,6 +130,8 @@ export function AddFriendToGroupDialog({
               <p className="text-sm text-destructive mt-1">{form.formState.errors.description.message}</p>
             )}
           </div>
+          <PaymentInfoFields value={form.watch('paymentInfo')} onChange={value => form.setValue('paymentInfo', value, { shouldValidate: true })} disabled={isSubmitting} />
+          {(['bankName', 'accountNumber', 'accountHolder'] as const).map(key => form.formState.errors.paymentInfo?.[key]?.message && <p key={key} role="alert" className="text-sm text-destructive">{form.formState.errors.paymentInfo[key]?.message}</p>)}
           <DialogFooter>
             <DialogClose asChild>
               <Button type="button" variant="outline" disabled={isSubmitting}>

@@ -122,6 +122,21 @@ describe('settlement summary presentation', () => {
     expect(text(root.findAllByType('details').find(node => text(node).includes('계산 기준과 정산 상태'))!)).toContain('기존에 기록된 회비 사용액: 5,000원');
   });
 
+  it('keeps fund payouts actionable only when the fund manager is selected', () => {
+    const meeting = makeMeeting({ participantIds: ['a', 'b'], useReserveFund: true, partialReserveFundAmount: 4000, refundReserveFundToNonParticipants: true, reserveFundRefundRecipientIds: ['absent'] });
+    const root = render(meeting, [makeExpense({ paidById: 'a', splitAmongIds: ['a', 'b'] })]);
+    expect(text(root)).not.toContain('송금하기');
+    act(() => root.findByType('select').props.onChange({ target: { value: 'fund' } }));
+    const mine = root.findByProps({ 'aria-labelledby': 'my-transfers-title' });
+    expect(text(mine)).toContain('회비에서 보낼 내역');
+    expect(text(mine)).toContain('이름-absent');
+    expect(mine.findAllByType('summary')).toHaveLength(2);
+    expect(text(root.findByProps({ 'aria-labelledby': 'refund-transfers-title' }))).not.toContain('송금하기');
+    act(() => root.findByType('select').props.onChange({ target: { value: 'person:absent' } }));
+    expect(text(root)).toContain('받을 금액: 2,000원');
+    expect(root.findAllByProps({ 'aria-labelledby': 'my-transfers-title' })).toHaveLength(0);
+  });
+
   it('selects outgoing transfers by ID and builds a handoff from the recipient account and saved amount', () => {
     const directory = friends.map((friend, index) => ({ ...friend, paymentInfo: { bankName: '국민은행', accountNumber: `000-${index}123`, accountHolder: friend.name } }));
     const meeting = makeMeeting({ participantIds: ['a', 'b', 'c'] });
@@ -132,7 +147,10 @@ describe('settlement summary presentation', () => {
       expenses: [{ ...expenses[0], totalAmount: 99000 }], participants: directory, allFriends: directory,
     })); });
     const root = renderer!.root;
-    act(() => root.findByType('select').props.onChange({ target: { value: 'b' } }));
+    expect(root.findAllByType('a')).toHaveLength(0);
+    act(() => root.findByType('select').props.onChange({ target: { value: 'person:b' } }));
+    expect(root.findAllByType('a')).toHaveLength(1);
+    expect(text(root.findByProps({ 'aria-labelledby': 'participant-transfers-title' }))).not.toContain('송금하기');
     const mine = root.findByProps({ 'aria-labelledby': 'my-transfers-title' });
     expect(text(mine)).toContain('10,000원');
     expect(text(mine)).not.toContain('이름-c');
@@ -140,7 +158,7 @@ describe('settlement summary presentation', () => {
     expect(destination.protocol).toBe('supertoss:');
     expect(destination.searchParams.get('accountNo')).toBe('0000123');
     expect(destination.searchParams.get('amount')).toBe('10000');
-    act(() => root.findByType('select').props.onChange({ target: { value: 'a' } }));
+    act(() => root.findByType('select').props.onChange({ target: { value: 'person:a' } }));
     expect(root.findAllByProps({ 'aria-labelledby': 'my-transfers-title' })).toHaveLength(0);
     expect(text(root)).toContain('추가로 보낼 금액이 없습니다.받을 금액: 20,000원');
   });

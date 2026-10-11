@@ -27,9 +27,10 @@ export async function getMeetingByIdAction(meetingId: string, currentUserId?: st
   try {
     const access = await ensureMeetingAccess(meetingId, currentUserId);
     if (!access.success) return { success: false, error: access.error, meeting: null };
-    const creator = await getUserById(access.meeting.creatorId);
-    const friends = await getMeetingFriends(access.meeting);
-    return { success: true, meeting: { ...meetingForDisplay(access.meeting, friends), creatorName: access.meeting.creatorName || creator?.name || '사용자' } };
+    const [creatorName, friends] = await Promise.all([
+      meetingCreatorName(access.meeting, access.user), getMeetingFriends(access.meeting),
+    ]);
+    return { success: true, meeting: { ...meetingForDisplay(access.meeting, friends), creatorName } };
   } catch (error) { return { success: false, error: errorText(error), meeting: null }; }
 }
 
@@ -37,12 +38,18 @@ export async function getMeetingDetailsAction(meetingId: string) {
   try {
     const access = await ensureMeetingAccess(meetingId);
     if (!access.success) return { success: false, error: access.error };
-    const [expenses, creator] = await Promise.all([
-      getExpensesByMeetingId(meetingId), getUserById(access.meeting.creatorId),
+    const [{ expenses, friends }, creatorName] = await Promise.all([
+      getExpensesByMeetingId(meetingId).then(async expenses => ({ expenses, friends: await getMeetingFriends(access.meeting, expenses) })),
+      meetingCreatorName(access.meeting, access.user),
     ]);
-    const friends = await getMeetingFriends(access.meeting, expenses);
-    return { success: true, meeting: { ...meetingForDisplay(access.meeting, friends), creatorName: access.meeting.creatorName || creator?.name || '사용자' }, expenses, friends };
+    return { success: true, meeting: { ...meetingForDisplay(access.meeting, friends), creatorName }, expenses, friends };
   } catch (error) { return { success: false, error: errorText(error) }; }
+}
+
+async function meetingCreatorName(meeting: Meeting, user: { id: string; name?: string | null }) {
+  if (meeting.creatorName) return meeting.creatorName;
+  if (meeting.creatorId === user.id) return user.name || '사용자';
+  return (await getUserById(meeting.creatorId))?.name || '사용자';
 }
 
 export async function createMeetingAction(payload: Omit<Meeting, 'id' | 'createdAt' | 'creatorId' | 'isSettled' | 'isShareEnabled' | 'shareToken' | 'shareExpiryDate'>, currentUserId?: string | null) {

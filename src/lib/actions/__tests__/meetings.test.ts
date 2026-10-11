@@ -61,6 +61,24 @@ describe('meeting access and input boundary', () => {
     expect(result.friends).toEqual(friends);
     expect(result).not.toHaveProperty('users');
   });
+  it('reuses the verified creator or saved creator name without a duplicate profile read', async () => {
+    expect((await getMeetingDetailsAction(meeting.id)).success).toBe(true);
+    expect(getUserById).not.toHaveBeenCalled();
+    vi.mocked(ensureMeetingAccess).mockResolvedValue({ success: true, user, meeting: { ...meeting, creatorId: 'other', creatorName: '기록된 이름' } });
+    const result = await getMeetingDetailsAction(meeting.id);
+    expect('meeting' in result && result.meeting?.creatorName).toBe('기록된 이름');
+    expect(getUserById).not.toHaveBeenCalled();
+  });
+  it('loads participants after expenses without waiting for an unrelated creator profile', async () => {
+    vi.mocked(ensureMeetingAccess).mockResolvedValue({ success: true, user, meeting: { ...meeting, creatorId: 'other' } });
+    let finishCreator!: () => void;
+    vi.mocked(getUserById).mockImplementation(() => new Promise(resolve => { finishCreator = () => resolve({ ...user, id: 'other', name: '다른 작성자' }); }));
+    vi.mocked(getMeetingFriends).mockImplementation(async () => { finishCreator(); return friends; });
+    const result = await getMeetingDetailsAction(meeting.id);
+    expect(result.success).toBe(true);
+    expect('meeting' in result && result.meeting?.creatorName).toBe('다른 작성자');
+    expect(getMeetingFriends).toHaveBeenCalledWith(expect.objectContaining({ creatorId: 'other' }), []);
+  });
   it('uses the verified creator rather than a supplied creator/settlement fields', async () => {
     await createMeetingAction({ ...payload, creatorId:'impostor', isSettled:true } as typeof payload, user.id);
     expect(addMeeting).toHaveBeenCalledWith(expect.objectContaining({creatorId:user.id, participantSnapshot:expect.any(Array)}));

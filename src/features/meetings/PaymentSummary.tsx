@@ -24,7 +24,7 @@ const balanceClass = (person: SettlementParticipant) => person.finalAmount > 0 ?
 
 function TransferGroup({ title, id, transfers, nameFor, paymentFor }: {
   title: string; id: string; transfers: SettlementTransfer[]; nameFor: (id: string | null) => string;
-  paymentFor: (id: string | null) => PaymentInfo | undefined;
+  paymentFor?: (id: string | null) => PaymentInfo | undefined;
 }) {
   if (!transfers.length) return null;
   const total = transfers.reduce((sum, transfer) => sum + transfer.amount, 0);
@@ -52,7 +52,7 @@ function TransferGroup({ title, id, transfers, nameFor, paymentFor }: {
         </div>
         <span className="shrink-0 whitespace-nowrap text-sm font-semibold leading-6 tabular-nums">{won(transfer.amount)}</span>
         </div>
-        <TransferAction recipient={nameFor(transfer.to)} amount={transfer.amount} paymentInfo={paymentFor(transfer.to)} />
+        {paymentFor && <TransferAction recipient={nameFor(transfer.to)} amount={transfer.amount} paymentInfo={paymentFor(transfer.to)} />}
         </li>)}</ul>
       </li>)}
     </ul>
@@ -78,7 +78,10 @@ export function PaymentSummary({ meeting, expenses, participants, allFriends }: 
   const refundTransfers = settlement.transfers.filter(transfer => transfer.kind === 'refund');
   const paymentDirectory = new Map([...participants, ...allFriends].map(friend => [friend.id, friend.paymentInfo]));
   const paymentFor = (id: string | null) => id === null ? undefined : paymentDirectory.get(id);
-  const selectedId = settlement.participants.some(person => person.friendId === selectedPerson) ? selectedPerson : '';
+  const people = Array.from(new Set([...settlement.participants.map(person => person.friendId), ...settlement.transfers.flatMap(transfer => [transfer.from, transfer.to].filter((id): id is string => id !== null))]));
+  const hasFundTransfers = settlement.transfers.some(transfer => transfer.from === null);
+  const selectedId = selectedPerson === 'fund' && hasFundTransfers ? null : people.find(id => `person:${id}` === selectedPerson);
+  const hasSelection = selectedId !== undefined;
   const myTransfers = settlement.transfers.filter(transfer => transfer.from === selectedId);
   const myIncoming = settlement.transfers.filter(transfer => transfer.to === selectedId).reduce((total, transfer) => total + transfer.amount, 0);
 
@@ -127,19 +130,21 @@ export function PaymentSummary({ meeting, expenses, participants, allFriends }: 
         <div><h3 id="settlement-transfers-title" className="font-semibold">송금 안내</h3><p className="mt-1 text-sm text-muted-foreground">{hasExpenses ? '먼저 결제한 금액을 반영한 송금 안내입니다. 실제 송금 완료 여부는 직접 확인해주세요.' : '지출 내역을 등록하면 송금 대상과 금액을 확인할 수 있습니다.'}</p></div>
         {hasExpenses && settlement.participants.length > 0 && <div className="space-y-3 rounded-lg border border-primary/20 bg-primary/5 p-4">
           <label htmlFor="settlement-my-name" className="block text-sm font-medium">내 이름 선택</label>
-          <select id="settlement-my-name" value={selectedId} onChange={event => setSelectedPerson(event.target.value)} className="h-11 w-full rounded-md border bg-background px-3 text-sm">
+          <select id="settlement-my-name" value={hasSelection ? selectedPerson : ''} onChange={event => setSelectedPerson(event.target.value)} className="h-11 w-full rounded-md border bg-background px-3 text-sm">
             <option value="">이름을 선택해 내 송금 내역을 확인하세요</option>
-            {settlement.participants.map(person => <option key={person.friendId} value={person.friendId}>{person.name}{settlement.participants.filter(other => other.name === person.name).length > 1 ? ` (${person.friendId.slice(-6)})` : ''}</option>)}
+            {people.map(id => <option key={id} value={`person:${id}`}>{nameFor(id)}{people.filter(other => nameFor(other) === nameFor(id)).length > 1 ? ` (${id.slice(-6)})` : ''}</option>)}
+            {hasFundTransfers && <option value="fund">모임 회비 담당자</option>}
           </select>
-          {selectedId && <div aria-live="polite" className="space-y-3">
-            {myTransfers.length ? <TransferGroup title="내가 보낼 내역" id="my-transfers-title" transfers={myTransfers} nameFor={nameFor} paymentFor={paymentFor} /> : <p className="text-sm">추가로 보낼 금액이 없습니다.</p>}
+          {hasSelection && <div aria-live="polite" className="space-y-3">
+            {myTransfers.length ? <TransferGroup title={selectedId === null ? "회비에서 보낼 내역" : "내가 보낼 내역"} id="my-transfers-title" transfers={myTransfers} nameFor={nameFor} paymentFor={paymentFor} /> : <p className="text-sm">추가로 보낼 금액이 없습니다.</p>}
             {myIncoming > 0 && <p className="text-sm">받을 금액: <strong>{won(myIncoming)}</strong></p>}
           </div>}
         </div>}
         {settlement.transfers.length ? <div className="space-y-3">
-          <TransferGroup title="참여자 간 송금" id="participant-transfers-title" transfers={participantTransfers} nameFor={nameFor} paymentFor={paymentFor} />
-          <TransferGroup title="회비에서 결제자에게 지급" id="fund-transfers-title" transfers={fundTransfers} nameFor={nameFor} paymentFor={paymentFor} />
-          <TransferGroup title="회비에서 미참가자에게 환급" id="refund-transfers-title" transfers={refundTransfers} nameFor={nameFor} paymentFor={paymentFor} />
+          <p className="text-sm text-muted-foreground">전체 송금 내역입니다. 송금하려면 위에서 내 이름을 선택해주세요.</p>
+          <TransferGroup title="참여자 간 송금" id="participant-transfers-title" transfers={participantTransfers} nameFor={nameFor} />
+          <TransferGroup title="회비에서 결제자에게 지급" id="fund-transfers-title" transfers={fundTransfers} nameFor={nameFor} />
+          <TransferGroup title="회비에서 미참가자에게 환급" id="refund-transfers-title" transfers={refundTransfers} nameFor={nameFor} />
         </div> : <p className="rounded-lg bg-muted/40 p-4 text-sm text-muted-foreground">{hasExpenses ? '현재 계산 결과에서 추가로 송금할 금액이 없습니다.' : '아직 계산할 지출 내역이 없습니다.'}</p>}
       </section>
 

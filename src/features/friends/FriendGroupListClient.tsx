@@ -1,9 +1,8 @@
 'use client';
-import { useState, useMemo } from 'react';
+import { useState } from 'react';
 import {
   createFriendGroupAction,
-  deleteFriendGroupAction,
-  deleteFriendAction
+  deleteFriendGroupAction
 } from '@/lib/client-actions';
 import type { FriendGroup, Friend } from '@/lib/types';
 import { useAppData } from '@/hooks/use-app-data';
@@ -15,6 +14,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useAuth } from '@/contexts/AuthContext';
 import { AddFriendToGroupDialog } from './AddFriendToGroupDialog';
+import { FriendListClient } from './FriendListClient';
 
 type DisplayFriendGroup = FriendGroup & {
   isOwned: boolean;
@@ -29,7 +29,6 @@ export default function FriendGroupListClient() {
   const [newGroupName, setNewGroupName] = useState('');
   const isLoading = authLoading || groupQuery.isLoading;
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [isDeletingFriend, setIsDeletingFriend] = useState<string | null>(null);
   const { toast } = useToast();
 
   const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
@@ -45,12 +44,6 @@ export default function FriendGroupListClient() {
   const [isAddFriendDialogOpen, setIsAddFriendDialogOpen] = useState(false);
   const [groupIdForAddingFriend, setGroupIdForAddingFriend] = useState<string | null>(null);
   const [groupNameForAddingFriend, setGroupNameForAddingFriend] = useState<string | undefined>(undefined);
-
-  const currentSelectedGroupObject = useMemo(() => {
-    if (!selectedGroupId) return null;
-    return groups.find(g => g.id === selectedGroupId) || null;
-  }, [groups, selectedGroupId]);
-
 
   const fetchData = () => groupQuery.refetch();
 
@@ -102,34 +95,6 @@ export default function FriendGroupListClient() {
       setSelectedGroupId(groupId);
     }
   };
-
-  const handleDeleteFriend = async (friendId: string, friendName: string) => {
-    if (!selectedGroupId || !appUser?.id) {
-      toast({ title: "오류", description: "필수 정보가 누락되었습니다.", variant: "destructive" });
-      return;
-    }
-    const confirmed = window.confirm(`'${friendName}' 친구를 현재 그룹 목록에서 제외하시겠습니까? 과거 모임과 정산 기록은 유지됩니다.`);
-    if (!confirmed) return;
-    setIsDeletingFriend(friendId);
-    try {
-      const result = await deleteFriendAction({
-        friendId,
-        groupId: selectedGroupId,
-        currentUserId: appUser.id,
-      });
-      if (result.success) {
-        toast({ title: "성공", description: `'${friendName}' 친구를 그룹에서 삭제했습니다.` });
-        setFriendsInSelectedGroup(prev => prev.filter(f => f.id !== friendId));
-      } else {
-        toast({ title: "오류", description: result.error || "친구 삭제에 실패했습니다.", variant: "destructive" });
-      }
-    } catch {
-      toast({ title: "오류", description: "친구 삭제 중 예기치 않은 오류가 발생했습니다.", variant: "destructive" });
-    } finally {
-      setIsDeletingFriend(null);
-    }
-  };
-
 
   if (isLoading) {
     return <div className="flex justify-center items-center h-32"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>;
@@ -237,25 +202,13 @@ export default function FriendGroupListClient() {
                     {isLoadingFriends && <div className="flex items-center text-sm text-muted-foreground py-2"><Loader2 className="h-4 w-4 animate-spin mr-2"/>친구 목록 로딩 중...</div>}
                     {!isLoadingFriends && friendsInSelectedGroup.length === 0 && <p className="text-sm text-muted-foreground py-2">이 그룹에는 친구가 없습니다.</p>}
                     {!isLoadingFriends && friendsInSelectedGroup.length > 0 && (
-                      <ul className="space-y-1 pt-2">
-                        {friendsInSelectedGroup.map(friend => (
-                          <li key={friend.id} className="flex justify-between items-center text-sm p-1 hover:bg-muted rounded group">
-                            <span>{friend.name} {friend.description && `(${friend.description})`}</span>
-                            {(currentSelectedGroupObject?.isOwned && appUser && (appUser.role === 'user' || appUser.role === 'admin')) || (appUser?.role === 'admin') ? (
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className="h-8 w-8 md:opacity-0 md:group-hover:opacity-100 focus-visible:opacity-100 transition-opacity"
-                                onClick={() => handleDeleteFriend(friend.id, friend.name)}
-                                disabled={isDeletingFriend === friend.id}
-                                aria-label={`${friend.name} 친구 제외`}
-                              >
-                                {isDeletingFriend === friend.id ? <Loader2 className="h-4 w-4 animate-spin"/> : <Trash2 className="h-4 w-4 text-destructive" />}
-                              </Button>
-                            ) : null}
-                          </li>
-                        ))}
-                      </ul>
+                      <FriendListClient
+                        key={group.id}
+                        initialFriends={friendsInSelectedGroup}
+                        isReadOnly={!(appUser?.role === 'admin' || (group.isOwned && appUser?.role === 'user'))}
+                        onFriendDeleted={id => setFriendsInSelectedGroup(previous => previous.filter(friend => friend.id !== id))}
+                        onFriendUpdated={updated => setFriendsInSelectedGroup(previous => previous.map(friend => friend.id === updated.id ? updated : friend))}
+                      />
                     )}
                   </div>
                 )}
@@ -313,25 +266,13 @@ export default function FriendGroupListClient() {
                     {isLoadingFriends && <div className="flex items-center text-sm text-muted-foreground py-2"><Loader2 className="h-4 w-4 animate-spin mr-2"/>친구 목록 로딩 중...</div>}
                     {!isLoadingFriends && friendsInSelectedGroup.length === 0 && <p className="text-sm text-muted-foreground py-2">이 그룹에는 친구가 없습니다.</p>}
                     {!isLoadingFriends && friendsInSelectedGroup.length > 0 && (
-                       <ul className="space-y-1 pt-2">
-                        {friendsInSelectedGroup.map(friend => (
-                           <li key={friend.id} className="flex justify-between items-center text-sm p-1 hover:bg-muted rounded group">
-                            <span>{friend.name} {friend.description && `(${friend.description})`}</span>
-                            {appUser?.role === 'admin' && (
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className="h-8 w-8 md:opacity-0 md:group-hover:opacity-100 focus-visible:opacity-100 transition-opacity"
-                                onClick={() => handleDeleteFriend(friend.id, friend.name)}
-                                disabled={isDeletingFriend === friend.id}
-                                aria-label={`${friend.name} 친구 제외`}
-                              >
-                                {isDeletingFriend === friend.id ? <Loader2 className="h-4 w-4 animate-spin"/> : <Trash2 className="h-4 w-4 text-destructive" />}
-                              </Button>
-                            )}
-                          </li>
-                        ))}
-                      </ul>
+                       <FriendListClient
+                        key={group.id}
+                        initialFriends={friendsInSelectedGroup}
+                        isReadOnly={!(appUser?.role === 'admin' || (group.isOwned && appUser?.role === 'user'))}
+                        onFriendDeleted={id => setFriendsInSelectedGroup(previous => previous.filter(friend => friend.id !== id))}
+                        onFriendUpdated={updated => setFriendsInSelectedGroup(previous => previous.map(friend => friend.id === updated.id ? updated : friend))}
+                      />
                     )}
                   </div>
                 )}

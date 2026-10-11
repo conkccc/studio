@@ -23,6 +23,7 @@ export async function GET(request: NextRequest) {
     const { resource, id, shareToken } = parsed.data;
     const publicShare = resource === 'prep-detail' && !!shareToken;
     const user = publicShare ? null : await getAuthenticatedUser();
+    const authenticatedAt = performance.now();
     if (!user && !publicShare) return json({ success: false, error: '로그인이 필요합니다.' }, 401);
     const expectedUser = request.headers.get('X-Expected-User');
     if (!publicShare && expectedUser && expectedUser !== user?.id) return json({ success: false, error: '로그인 계정이 변경되었습니다. 새로고침 후 다시 확인해주세요.' }, 403);
@@ -43,8 +44,9 @@ export async function GET(request: NextRequest) {
       }
     };
     const result = user ? await withRequestUser(user, read) : await read();
+    const completedAt = performance.now();
     const response = json(result, result.success ? 200 : 403);
-    response.headers.set('Server-Timing', `total;dur=${(performance.now() - start).toFixed(1)}`);
+    response.headers.set('Server-Timing', `auth;dur=${(authenticatedAt - start).toFixed(1)}, data;dur=${(completedAt - authenticatedAt).toFixed(1)}, total;dur=${(completedAt - start).toFixed(1)}`);
     return response;
   } catch { return json({ success: false, error: '정보를 불러오지 못했습니다. 잠시 후 다시 시도해주세요.' }, 500); }
 }

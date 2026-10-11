@@ -22,14 +22,16 @@ import { Edit3, Trash2, User, Check, X, Loader2 } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import type { PaymentInfo } from '@/lib/payment-info';
 import { PaymentInfoFields } from './PaymentInfoFields';
+import { registeredPaymentAccount } from '@/lib/payment-info';
 
 interface FriendListClientProps {
   initialFriends: Friend[];
   onFriendAdded?: () => void;
   onFriendDeleted?: (friendId: string) => void;
+  onFriendUpdated?: (friend: Friend) => void;
 }
 
-export function FriendListClient({ initialFriends, isReadOnly = false, onFriendDeleted }: FriendListClientProps & { isReadOnly?: boolean }) {
+export function FriendListClient({ initialFriends, isReadOnly = false, onFriendDeleted, onFriendUpdated }: FriendListClientProps & { isReadOnly?: boolean }) {
   const [friends, setFriends] = useState<Friend[]>(initialFriends);
   const [editingFriendId, setEditingFriendId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState<{ name: string; description?: string; paymentInfo: PaymentInfo }>({ name: '', description: '', paymentInfo: {} });
@@ -59,6 +61,7 @@ export function FriendListClient({ initialFriends, isReadOnly = false, onFriendD
       const result = await updateFriendAction(id, editForm);
       if (result.success && result.friend) {
         setFriends(prev => prev.map(f => (f.id === id ? result.friend! : f)));
+        onFriendUpdated?.(result.friend);
         setEditingFriendId(null);
         toast({ title: '성공', description: '친구 정보가 수정되었습니다.' });
       } else {
@@ -102,11 +105,12 @@ export function FriendListClient({ initialFriends, isReadOnly = false, onFriendD
     <TooltipProvider>
       <ul className="space-y-3">
         {friends.map((friend) => (
-          <li key={friend.id} className="flex items-center justify-between p-3 bg-secondary/50 rounded-lg shadow-sm hover:bg-secondary transition-colors">
+          <li key={friend.id} className="flex flex-wrap items-center justify-between gap-3 p-3 bg-secondary/50 rounded-lg shadow-sm hover:bg-secondary transition-colors">
             {editingFriendId === friend.id ? (
               <Fragment>
                 <div className="min-w-0 flex-grow grid grid-cols-1 sm:grid-cols-2 gap-2 items-center mr-2">
                   <Input
+                    aria-label="친구 이름"
                     type="text"
                     value={editForm.name}
                     onChange={(e) => setEditForm({ ...editForm, name: e.target.value })}
@@ -115,6 +119,7 @@ export function FriendListClient({ initialFriends, isReadOnly = false, onFriendD
                     disabled={isPending || isReadOnly}
                   />
                   <Input
+                    aria-label="친구 설명"
                     type="text"
                     value={editForm.description || ''}
                     onChange={(e) => setEditForm({ ...editForm, description: e.target.value })}
@@ -127,16 +132,18 @@ export function FriendListClient({ initialFriends, isReadOnly = false, onFriendD
                 <div className="flex space-x-1">
                   <Tooltip>
                     <TooltipTrigger asChild>
-                      <Button variant="ghost" size="icon" onClick={() => handleSaveEdit(friend.id)} className="h-8 w-8" disabled={isPending || isReadOnly}>
+                      <Button aria-label={`${friend.name} 정보 저장`} size="sm" onClick={() => handleSaveEdit(friend.id)} disabled={isPending || isReadOnly}>
                         {isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4 text-green-600" />}
+                        <span className="ml-1">저장</span>
                       </Button>
                     </TooltipTrigger>
                     <TooltipContent><p>저장</p></TooltipContent>
                   </Tooltip>
                   <Tooltip>
                     <TooltipTrigger asChild>
-                      <Button variant="ghost" size="icon" onClick={handleCancelEdit} className="h-8 w-8" disabled={isPending || isReadOnly}>
+                      <Button variant="outline" size="sm" onClick={handleCancelEdit} disabled={isPending || isReadOnly}>
                         <X className="h-4 w-4 text-red-600" />
+                        <span className="ml-1">취소</span>
                       </Button>
                     </TooltipTrigger>
                     <TooltipContent><p>취소</p></TooltipContent>
@@ -145,21 +152,22 @@ export function FriendListClient({ initialFriends, isReadOnly = false, onFriendD
               </Fragment>
             ) : (
               <Fragment>
-                <div className="flex items-center">
-                  <User className="h-5 w-5 mr-3 text-primary" />
+                <div className="flex min-w-0 items-center">
+                  <User className="h-5 w-5 shrink-0 mr-3 text-primary" />
                   <div>
                     <span className="font-medium">{friend.name}</span>
                     {friend.description && <span className="text-xs text-muted-foreground ml-2">({friend.description})</span>}
+                    <p className="mt-1 text-xs text-muted-foreground">{registeredPaymentAccount(friend.paymentInfo) ? `${friend.paymentInfo!.bankName} · 계좌 등록됨` : '계좌 미등록'}</p>
                   </div>
                 </div>
                 <div className="flex space-x-1">
                   <Tooltip>
                     <TooltipTrigger asChild>
-                      <Button variant="ghost" size="icon" onClick={() => handleEdit(friend)} className="h-8 w-8" disabled={isPending || isReadOnly}>
-                        <Edit3 className="h-4 w-4" />
+                      <Button aria-label={`${friend.name} 정보 및 계좌 수정`} variant="outline" size="sm" onClick={() => handleEdit(friend)} className="h-9 whitespace-nowrap" disabled={isPending || isReadOnly}>
+                        <Edit3 className="mr-1 h-4 w-4" />{registeredPaymentAccount(friend.paymentInfo) ? '정보 수정' : '계좌 등록'}
                       </Button>
                     </TooltipTrigger>
-                    <TooltipContent><p>수정</p></TooltipContent>
+                    <TooltipContent><p>친구 정보와 송금받을 계좌 수정</p></TooltipContent>
                   </Tooltip>
                   <AlertDialog>
                     <Tooltip>
@@ -176,7 +184,7 @@ export function FriendListClient({ initialFriends, isReadOnly = false, onFriendD
                       <AlertDialogHeader>
                         <AlertDialogTitle>정말로 삭제하시겠습니까?</AlertDialogTitle>
                         <AlertDialogDescription>
-                          이 작업은 되돌릴 수 없습니다. '{friend.name}' 친구 정보가 영구적으로 삭제됩니다.
+                          '{friend.name}' 친구를 현재 목록에서 제외합니다. 과거 모임과 정산 기록은 유지됩니다.
                         </AlertDialogDescription>
                       </AlertDialogHeader>
                       <AlertDialogFooter>
